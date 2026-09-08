@@ -1,0 +1,35 @@
+# `eko::` - janky stuff to help you reduce the deps you need on std.
+#
+# **The package is `ekostd` and the crate is `eko`.** Those differ deliberately: `eko` was taken
+# on crates.io in 2019 by an unrelated project, and the `ps-` prefix this house uses marks *forks*,
+# which this is not. `[lib] name` is what a consumer writes, so `use eko::file::File` works.
+[package]
+name = "ekostd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pathscale/ekostd"
+description = "Janky stuff to help you reduce the deps you need on std: the operating system, over libc"
+keywords = ["no_std", "libc", "bootstrap"]
+categories = ["no-std", "os"]
+
+[lib]
+name = "eko"
+path = "src/lib.rs"
+
+[dependencies]
+# The only dependency, and the point of the crate. A `no_std` crate wrapping `libc` is still
+# `no_std`: the ban is about not linking Rust's standard library, which a self-hosting stage would
+# have to carry. It does not have to carry `libc` - the platform already has it. On macOS this is
+# not even a compromise, because `std` itself goes through libSystem: Apple does not provide a
+# stable syscall ABI.
+libc = { version = "^0.2.189", default-features = false }
+serde = { version = "^1.0.229", default-features = false, optional = true }
+
+[features]
+# Off by default: a crate that has no serialiser should not gain serde through the wrapper.
+serde = ["dep:serde"]
+# The `dropck_eyepatch` on `thread::Mutex`'s destructor. Nightly-only, and needed by exactly one
+# consumer: rustc's `'tcx` origin-point pattern. Off by default so a stable consumer can use this
+# crate at all.
+nightly = []
