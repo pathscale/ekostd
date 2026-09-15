@@ -313,6 +313,14 @@ impl File {
         }
         Ok(st.st_size as u64)
     }
+
+    /// Whether the file has no bytes in it.
+    ///
+    /// A `Result`, like `len`, because the question costs an `fstat` and a caller that cannot
+    /// stat the file does not get a `false` that looks like an answer.
+    pub fn is_empty(&self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
 }
 
 // `write!` on a `File`, so a caller that was formatting into `std::io::Write` keeps doing so.
@@ -378,6 +386,11 @@ impl Metadata {
         self.st.st_size as u64
     }
 
+    /// Whether the file has no bytes in it.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Whether it is a directory.
     pub fn is_dir(&self) -> bool {
         self.st.st_mode & libc::S_IFMT == libc::S_IFDIR
@@ -407,7 +420,9 @@ impl Metadata {
     /// Seconds, not a `SystemTime`: every caller here compares two of these for staleness, and
     /// carrying a calendar type to answer "is this newer" is the generality this crate avoids.
     pub fn modified_secs(&self) -> i64 {
-        self.st.st_mtime as i64
+        // `time_t` is already `i64` on every target this crate supports. A 32-bit port gets a
+        // type error here rather than a silent narrowing, which is the right way to find out.
+        self.st.st_mtime
     }
 }
 

@@ -263,6 +263,12 @@ pub struct ThreadLocal<T> {
 unsafe impl<T> Send for ThreadLocal<T> {}
 unsafe impl<T> Sync for ThreadLocal<T> {}
 
+impl<T: 'static> Default for ThreadLocal<T> {
+    fn default() -> ThreadLocal<T> {
+        ThreadLocal::new()
+    }
+}
+
 impl<T: 'static> ThreadLocal<T> {
     pub const fn new() -> ThreadLocal<T> {
         ThreadLocal {
@@ -991,6 +997,12 @@ pub struct ScopedKey<T: 'static> {
 // Same reasoning as `LocalKey`: the key is per-thread, so it is shareable regardless of `T`.
 unsafe impl<T: 'static> Sync for ScopedKey<T> {}
 unsafe impl<T: 'static> Send for ScopedKey<T> {}
+
+impl<T: 'static> Default for ScopedKey<T> {
+    fn default() -> ScopedKey<T> {
+        ScopedKey::new()
+    }
+}
 
 impl<T: 'static> ScopedKey<T> {
     /// Not called directly; [`scoped_thread_local!`] builds these.
