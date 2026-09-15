@@ -13,8 +13,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::Errno;
 use crate::path::Path;
+use crate::Errno;
 
 /// A file operation that failed.
 ///
@@ -506,8 +506,7 @@ pub fn absolute(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
     if p.is_absolute() {
         return Ok(p.to_path_buf());
     }
-    let cwd = crate::env::current_dir()
-        .ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
+    let cwd = crate::env::current_dir().ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
     let mut out = crate::path::PathBuf::from_bytes(cwd);
     out.push(p);
     Ok(out)

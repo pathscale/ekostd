@@ -9,7 +9,7 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 
-use crate::{Errno, checked};
+use crate::{checked, Errno};
 
 /// Remove a name, and do not care whether it was there.
 ///
@@ -28,7 +28,11 @@ pub fn mkdir(path: &[u8], mode: libc::mode_t) -> Result<(), Errno> {
         return Ok(());
     }
     let e = Errno::current();
-    if e.0 == libc::EEXIST { Ok(()) } else { Err(e) }
+    if e.0 == libc::EEXIST {
+        Ok(())
+    } else {
+        Err(e)
+    }
 }
 
 /// Whether a name exists at all.

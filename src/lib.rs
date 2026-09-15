@@ -122,7 +122,11 @@ impl core::fmt::Display for Errno {
 /// Every wrapper here goes through this, so "checked the return value" is a property of the
 /// module rather than something to verify one call at a time.
 pub(crate) fn checked(returned: i32) -> Result<i32, Errno> {
-    if returned == -1 { Err(Errno::current()) } else { Ok(returned) }
+    if returned == -1 {
+        Err(Errno::current())
+    } else {
+        Ok(returned)
+    }
 }
 
 /// End this process now, without unwinding and without running destructors.

@@ -21,7 +21,6 @@
 // to find them at all.
 use alloc::boxed::Box;
 
-
 use crate::Errno;
 
 /// Run `f` on a new thread with `stack_bytes` of stack, detached.
@@ -117,7 +116,6 @@ impl<T> Mutex<T> {
 }
 
 impl<T: ?Sized> Mutex<T> {
-
     /// Take it if it is free, or say it is not.
     ///
     /// **Not a weakening of anything.** `serve_on` uses it to ask the handler for idle work,
@@ -848,9 +846,8 @@ impl Builder {
             unsafe { libc::pthread_attr_setstacksize(&mut attr, self.stack_bytes) };
         }
         let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-        let rc = unsafe {
-            libc::pthread_create(&mut tid, &attr, spawn_trampoline::<T>, payload.cast())
-        };
+        let rc =
+            unsafe { libc::pthread_create(&mut tid, &attr, spawn_trampoline::<T>, payload.cast()) };
         unsafe { libc::pthread_attr_destroy(&mut attr) };
         if rc != 0 {
             // Nothing started, so both allocations are still ours to reclaim.
@@ -920,8 +917,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         // The closure borrows for `'scope`, but `pthread_create` needs a `'static` payload. The
         // lifetime is erased here and restored by the join in `scope`, which cannot be skipped.
         let boxed: Box<dyn FnOnce() + Send + 'scope> = Box::new(f);
-        let erased: Box<dyn FnOnce() + Send + 'static> =
-            unsafe { core::mem::transmute(boxed) };
+        let erased: Box<dyn FnOnce() + Send + 'static> = unsafe { core::mem::transmute(boxed) };
         let payload = Box::into_raw(Box::new(erased));
 
         extern "C" fn run(arg: *mut libc::c_void) -> *mut libc::c_void {
@@ -931,9 +927,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         }
 
         let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-        let rc = unsafe {
-            libc::pthread_create(&mut tid, core::ptr::null(), run, payload.cast())
-        };
+        let rc = unsafe { libc::pthread_create(&mut tid, core::ptr::null(), run, payload.cast()) };
         if rc != 0 {
             // The thread never started, so the closure is still ours - and dropping it is the
             // only honest thing to do, because there is no way to report from here without
@@ -954,7 +948,8 @@ pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
 {
-    let sc = Scope { handles: core::cell::RefCell::new(Vec::new()), _marker: core::marker::PhantomData };
+    let sc =
+        Scope { handles: core::cell::RefCell::new(Vec::new()), _marker: core::marker::PhantomData };
     let out = f(&sc);
     for tid in sc.handles.borrow().iter() {
         unsafe { libc::pthread_join(*tid, core::ptr::null_mut()) };

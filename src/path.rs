@@ -87,7 +87,11 @@ impl Path {
     pub fn extension(&self) -> Option<&Path> {
         let name = self.file_name()?.as_bytes();
         let i = name.iter().rposition(|&b| b == b'.')?;
-        if i == 0 { None } else { Some(Path::new(&name[i + 1..])) }
+        if i == 0 {
+            None
+        } else {
+            Some(Path::new(&name[i + 1..]))
+        }
     }
 
     /// Join a component onto this path.

@@ -30,8 +30,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-
-use crate::{Errno, checked};
+use crate::{checked, Errno};
 
 /// An open file descriptor, closed when dropped.
 ///
@@ -144,7 +143,8 @@ impl Listener {
     /// is in one place instead of three.
     pub fn accept(&self) -> Result<Stream, Errno> {
         loop {
-            let fd = unsafe { libc::accept(self.0.raw(), core::ptr::null_mut(), core::ptr::null_mut()) };
+            let fd =
+                unsafe { libc::accept(self.0.raw(), core::ptr::null_mut(), core::ptr::null_mut()) };
             if fd == -1 {
                 let e = Errno::current();
                 if e.0 == libc::EINTR {

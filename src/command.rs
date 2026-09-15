@@ -7,8 +7,8 @@
 //! environment manipulation, because nothing here wants them and each would be a way to get the
 //! fork/exec wrong.
 
-use alloc::vec::Vec;
 use alloc::vec;
+use alloc::vec::Vec;
 
 use crate::path::Path;
 

@@ -34,11 +34,8 @@ use core::ptr;
 ///
 /// 16 on 64-bit, which covers every type the compiler allocates except the deliberately
 /// over-aligned ones, so the `posix_memalign` path is rare.
-const MIN_ALIGN: usize = if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) {
-    16
-} else {
-    8
-};
+const MIN_ALIGN: usize =
+    if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) { 16 } else { 8 };
 
 /// `malloc`/`free`, as the global allocator.
 pub struct Malloc;
@@ -107,5 +104,9 @@ unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
     // Both are powers of two, so raising to the larger satisfies it.
     let align = layout.align().max(size_of::<usize>());
     let ret = unsafe { libc::posix_memalign(&mut out, align, layout.size()) };
-    if ret != 0 { ptr::null_mut() } else { out as *mut u8 }
+    if ret != 0 {
+        ptr::null_mut()
+    } else {
+        out as *mut u8
+    }
 }

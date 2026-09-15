@@ -3,3 +3,4 @@ target/
 # Cargo.lock is not tracked. A lock pins a resolve, and this crate is a library: its consumers
 # own the resolve, not it.
 Cargo.lock
+.DS_Store
