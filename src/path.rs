@@ -536,6 +536,14 @@ impl From<String> for PathBuf {
     }
 }
 
+/// The borrowed form, which `std` also has. Without it `args.iter().map(PathBuf::from)`
+/// does not compile and the caller writes a closure that says nothing.
+impl From<&String> for PathBuf {
+    fn from(s: &String) -> PathBuf {
+        PathBuf { inner: s.as_bytes().to_vec() }
+    }
+}
+
 impl From<&Path> for PathBuf {
     fn from(p: &Path) -> PathBuf {
         p.to_path_buf()
