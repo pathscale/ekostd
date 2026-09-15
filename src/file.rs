@@ -421,6 +421,20 @@ pub fn metadata(path: impl AsRef<Path>) -> Result<Metadata> {
     Ok(Metadata { st })
 }
 
+/// `lstat(2)`: what the **name** is, rather than what it points at.
+///
+/// The difference is the whole of the hazard in a recursive delete. A symlink to a directory
+/// answers `is_dir` under `stat` and is not one, so a walker that descended into it would leave
+/// the tree it was given and delete somewhere else.
+pub fn symlink_metadata(path: impl AsRef<Path>) -> Result<Metadata> {
+    let c = path.as_ref().as_c();
+    let mut st: libc::stat = unsafe { core::mem::zeroed() };
+    if unsafe { libc::lstat(c.as_ptr().cast(), &mut st) } != 0 {
+        return Err(err("lstat"));
+    }
+    Ok(Metadata { st })
+}
+
 /// Resolve a path to an absolute one with symlinks followed.
 pub fn canonicalize(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
     let c = path.as_ref().as_c();

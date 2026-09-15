@@ -99,6 +99,19 @@ impl Errno {
         Errno(unsafe { *p })
     }
 
+    /// Set `errno` back to zero.
+    ///
+    /// For the one shape of libc call that reports success and failure identically:
+    /// `readdir` returns null both at the end of a directory and on an error, and the only way
+    /// to tell them apart is to clear `errno` first and read it after.
+    pub fn clear() {
+        #[cfg(target_vendor = "apple")]
+        let p = unsafe { libc::__error() };
+        #[cfg(all(unix, not(target_vendor = "apple")))]
+        let p = unsafe { libc::__errno_location() };
+        unsafe { *p = 0 };
+    }
+
     /// The system's own sentence for this error.
     ///
     /// `strerror_r` rather than `strerror`, which is not thread-safe. The buffer belongs to the
