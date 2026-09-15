@@ -69,6 +69,7 @@ pub mod file;
 pub mod fs;
 // `heap`, not `alloc`: this crate says `extern crate alloc;` and the two names collide.
 pub mod heap;
+pub mod math;
 pub mod mmap;
 pub mod path;
 pub mod print;
@@ -98,6 +99,19 @@ impl Errno {
         Errno(unsafe { *p })
     }
 
+    /// Set `errno` back to zero.
+    ///
+    /// For the one shape of libc call that reports success and failure identically:
+    /// `readdir` returns null both at the end of a directory and on an error, and the only way
+    /// to tell them apart is to clear `errno` first and read it after.
+    pub fn clear() {
+        #[cfg(target_vendor = "apple")]
+        let p = unsafe { libc::__error() };
+        #[cfg(all(unix, not(target_vendor = "apple")))]
+        let p = unsafe { libc::__errno_location() };
+        unsafe { *p = 0 };
+    }
+
     /// The system's own sentence for this error.
     ///
     /// `strerror_r` rather than `strerror`, which is not thread-safe. The buffer belongs to the
@@ -122,7 +136,11 @@ impl core::fmt::Display for Errno {
 /// Every wrapper here goes through this, so "checked the return value" is a property of the
 /// module rather than something to verify one call at a time.
 pub(crate) fn checked(returned: i32) -> Result<i32, Errno> {
-    if returned == -1 { Err(Errno::current()) } else { Ok(returned) }
+    if returned == -1 {
+        Err(Errno::current())
+    } else {
+        Ok(returned)
+    }
 }
 
 /// End this process now, without unwinding and without running destructors.

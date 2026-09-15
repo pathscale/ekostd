@@ -13,8 +13,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
-use crate::Errno;
 use crate::path::Path;
+use crate::Errno;
 
 /// A file operation that failed.
 ///
@@ -313,6 +313,14 @@ impl File {
         }
         Ok(st.st_size as u64)
     }
+
+    /// Whether the file has no bytes in it.
+    ///
+    /// A `Result`, like `len`, because the question costs an `fstat` and a caller that cannot
+    /// stat the file does not get a `false` that looks like an answer.
+    pub fn is_empty(&self) -> Result<bool> {
+        Ok(self.len()? == 0)
+    }
 }
 
 // `write!` on a `File`, so a caller that was formatting into `std::io::Write` keeps doing so.
@@ -378,6 +386,11 @@ impl Metadata {
         self.st.st_size as u64
     }
 
+    /// Whether the file has no bytes in it.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Whether it is a directory.
     pub fn is_dir(&self) -> bool {
         self.st.st_mode & libc::S_IFMT == libc::S_IFDIR
@@ -407,7 +420,9 @@ impl Metadata {
     /// Seconds, not a `SystemTime`: every caller here compares two of these for staleness, and
     /// carrying a calendar type to answer "is this newer" is the generality this crate avoids.
     pub fn modified_secs(&self) -> i64 {
-        self.st.st_mtime as i64
+        // `time_t` is already `i64` on every target this crate supports. A 32-bit port gets a
+        // type error here rather than a silent narrowing, which is the right way to find out.
+        self.st.st_mtime
     }
 }
 
@@ -417,6 +432,20 @@ pub fn metadata(path: impl AsRef<Path>) -> Result<Metadata> {
     let mut st: libc::stat = unsafe { core::mem::zeroed() };
     if unsafe { libc::stat(c.as_ptr().cast(), &mut st) } != 0 {
         return Err(err("stat"));
+    }
+    Ok(Metadata { st })
+}
+
+/// `lstat(2)`: what the **name** is, rather than what it points at.
+///
+/// The difference is the whole of the hazard in a recursive delete. A symlink to a directory
+/// answers `is_dir` under `stat` and is not one, so a walker that descended into it would leave
+/// the tree it was given and delete somewhere else.
+pub fn symlink_metadata(path: impl AsRef<Path>) -> Result<Metadata> {
+    let c = path.as_ref().as_c();
+    let mut st: libc::stat = unsafe { core::mem::zeroed() };
+    if unsafe { libc::lstat(c.as_ptr().cast(), &mut st) } != 0 {
+        return Err(err("lstat"));
     }
     Ok(Metadata { st })
 }
@@ -506,8 +535,7 @@ pub fn absolute(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
     if p.is_absolute() {
         return Ok(p.to_path_buf());
     }
-    let cwd = crate::env::current_dir()
-        .ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
+    let cwd = crate::env::current_dir().ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
     let mut out = crate::path::PathBuf::from_bytes(cwd);
     out.push(p);
     Ok(out)

@@ -87,7 +87,11 @@ impl Path {
     pub fn extension(&self) -> Option<&Path> {
         let name = self.file_name()?.as_bytes();
         let i = name.iter().rposition(|&b| b == b'.')?;
-        if i == 0 { None } else { Some(Path::new(&name[i + 1..])) }
+        if i == 0 {
+            None
+        } else {
+            Some(Path::new(&name[i + 1..]))
+        }
     }
 
     /// Join a component onto this path.
@@ -529,6 +533,14 @@ impl From<&str> for PathBuf {
 impl From<String> for PathBuf {
     fn from(s: String) -> PathBuf {
         PathBuf { inner: s.into_bytes() }
+    }
+}
+
+/// The borrowed form, which `std` also has. Without it `args.iter().map(PathBuf::from)`
+/// does not compile and the caller writes a closure that says nothing.
+impl From<&String> for PathBuf {
+    fn from(s: &String) -> PathBuf {
+        PathBuf { inner: s.as_bytes().to_vec() }
     }
 }
 

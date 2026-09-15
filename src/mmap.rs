@@ -12,8 +12,8 @@
 
 use core::ops::{Deref, DerefMut};
 
-use crate::Errno;
 use crate::file::{Error, File, Result};
+use crate::Errno;
 
 /// A read-only private mapping.
 pub struct Mmap {
@@ -129,9 +129,7 @@ impl MmapMut {
 
     /// Drop write permission, turning this into a [`Mmap`].
     pub fn make_read_only(self) -> Result<Mmap> {
-        if self.len != 0
-            && unsafe { libc::mprotect(self.ptr, self.len, libc::PROT_READ) } != 0
-        {
+        if self.len != 0 && unsafe { libc::mprotect(self.ptr, self.len, libc::PROT_READ) } != 0 {
             return Err(Error::from_errno(Errno::current(), "mprotect"));
         }
         let out = Mmap { ptr: self.ptr, len: self.len };

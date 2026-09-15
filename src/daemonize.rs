@@ -39,7 +39,7 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 
-use crate::{Errno, checked};
+use crate::{checked, Errno};
 
 /// The daemon's end of the readiness pipe.
 ///
@@ -161,8 +161,7 @@ pub fn daemonize(pid_file: Option<&[u8]>) -> Result<Started, DaemonizeError> {
             // a failed start hangs instead of reporting. This asymmetry is the whole mechanism.
             unsafe { libc::close(write_fd) };
             let mut byte = 0u8;
-            let read =
-                unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
+            let read = unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
             unsafe { libc::close(read_fd) };
             crate::exit(if read == 1 { 0 } else { 1 });
         }

@@ -122,11 +122,7 @@ fn detect_aarch64() -> Aarch64Features {
 /// the processor lacks produces `SIGILL` in emitted code, whereas claiming none produces
 /// baseline Armv8.0 code that runs everywhere. A port that wants the features adds its own
 /// branch above.
-#[cfg(all(
-    target_arch = "aarch64",
-    not(target_vendor = "apple"),
-    not(target_os = "linux")
-))]
+#[cfg(all(target_arch = "aarch64", not(target_vendor = "apple"), not(target_os = "linux")))]
 fn detect_aarch64() -> Aarch64Features {
     Aarch64Features::default()
 }
@@ -197,7 +193,7 @@ impl X86Features {
 /// above it is gated on `OSXSAVE` plus the `XCR0` bits, exactly as the SDM requires.
 #[cfg(target_arch = "x86_64")]
 fn detect_x86() -> X86Features {
-    use core::arch::x86_64::{CpuidResult, __cpuid, __cpuid_count, _xgetbv};
+    use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv, CpuidResult};
 
     let mut f = X86Features::default();
 

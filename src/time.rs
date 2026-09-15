@@ -54,5 +54,7 @@ impl core::ops::Sub for Instant {
 pub fn epoch_secs() -> i64 {
     let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     unsafe { libc::clock_gettime(libc::CLOCK_REALTIME, &mut ts) };
-    ts.tv_sec as i64
+    // As in `file::Metadata::modified_secs`: `time_t` is `i64` here, and a target where it is
+    // not gets a type error rather than a cast that quietly loses the top half.
+    ts.tv_sec
 }

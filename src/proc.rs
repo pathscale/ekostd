@@ -12,7 +12,11 @@ pub fn id() -> u32 {
 /// and 1 is the answer that cannot be wrong.
 pub fn available_parallelism() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
-    if n < 1 { 1 } else { n as usize }
+    if n < 1 {
+        1
+    } else {
+        n as usize
+    }
 }
 
 /// End the process with `code`.
