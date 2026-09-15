@@ -196,3 +196,45 @@ pub unsafe fn set_var_bytes(name: &[u8], value: &[u8]) {
     v.push(0);
     unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
 }
+
+/// Every environment variable as a raw `KEY=VALUE` entry.
+///
+/// For building a child's environment: [`crate::command::Command::env`] starts from this and
+/// overrides entries in it, because a child that inherits nothing loses `PATH`, `HOME` and
+/// everything a toolchain reads, and a child that inherits blindly cannot be given anything.
+///
+/// Read from `environ` rather than assembled, so it is what the process actually has.
+pub fn environ() -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    #[cfg(target_os = "macos")]
+    let envp = unsafe {
+        unsafe extern "C" {
+            fn _NSGetEnviron() -> *mut *const *const libc::c_char;
+        }
+        *_NSGetEnviron()
+    };
+    #[cfg(not(target_os = "macos"))]
+    let envp = unsafe { libc::environ as *const *const libc::c_char };
+    if envp.is_null() {
+        return out;
+    }
+    let mut i = 0isize;
+    loop {
+        let p = unsafe { *envp.offset(i) };
+        if p.is_null() {
+            return out;
+        }
+        let mut entry = Vec::new();
+        let mut j = 0isize;
+        loop {
+            let b = unsafe { *p.offset(j) } as u8;
+            if b == 0 {
+                break;
+            }
+            entry.push(b);
+            j += 1;
+        }
+        out.push(entry);
+        i += 1;
+    }
+}
