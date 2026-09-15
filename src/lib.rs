@@ -69,6 +69,7 @@ pub mod file;
 pub mod fs;
 // `heap`, not `alloc`: this crate says `extern crate alloc;` and the two names collide.
 pub mod heap;
+pub mod math;
 pub mod mmap;
 pub mod path;
 pub mod print;
