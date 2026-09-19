@@ -13,7 +13,7 @@ use eko::thread::Mutex;
 ## What it is
 
 The operating system, wrapped once, over `libc`: paths, files, directories, environment, the
-clock, the process, sockets, threads, locks, channels, memory maps, and the print macros.
+clock, the process, signals, sockets, threads, locks, channels, memory maps, and the print macros.
 
 **A `no_std` crate wrapping `libc` is still `no_std`.** The point is not to avoid the platform, it
 is to avoid linking Rust's standard library, which a bootstrapping or self-hosting stage would
