@@ -74,6 +74,7 @@ pub mod mmap;
 pub mod path;
 pub mod print;
 pub mod proc;
+pub mod signal;
 pub mod socket;
 pub mod thread;
 pub mod time;
@@ -130,6 +131,24 @@ impl core::fmt::Display for Errno {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut buf = [0u8; 128];
         write!(f, "{} (errno {})", self.message(&mut buf), self.0)
+    }
+}
+
+impl Errno {
+    /// Was this call cut short by a signal rather than failing?
+    ///
+    /// The one error a caller should retry without deciding anything. A signal
+    /// is not about the read, the write or the `accept` that returned it, and
+    /// the operation is still outstanding; treating `EINTR` as a failure is how
+    /// a program that catches signals acquires spurious errors in every syscall
+    /// it makes.
+    ///
+    /// Retrying is not always needed, and that is why handlers here ask for
+    /// `SA_RESTART`. It is needed whenever a handler was installed without it,
+    /// which this crate cannot tell from the error alone.
+    #[must_use]
+    pub fn interrupted(self) -> bool {
+        self.0 == libc::EINTR
     }
 }
 
