@@ -191,7 +191,12 @@ impl X86Features {
 /// report AVX while the operating system has not enabled saving the wide registers across a
 /// context switch, and using AVX then corrupts state rather than trapping. So AVX and everything
 /// above it is gated on `OSXSAVE` plus the `XCR0` bits, exactly as the SDM requires.
+///
+/// `__cpuid` became a safe function in recent Rust and was `unsafe` before, so the blocks below
+/// are needed on an older toolchain and redundant on a newer one. Allowed rather than removed,
+/// so the crate builds on both without a warning.
 #[cfg(target_arch = "x86_64")]
+#[allow(unused_unsafe)]
 fn detect_x86() -> X86Features {
     use core::arch::x86_64::{__cpuid, __cpuid_count, _xgetbv, CpuidResult};
 
