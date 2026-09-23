@@ -405,6 +405,9 @@ impl Metadata {
     ///
     /// The raw mode, not a `Permissions` type. The one caller checks whether the output file is
     /// writable, which is a bit test.
+    // `mode_t` is `u16` on Apple and `u32` on Linux, so the cast is needed on one and redundant
+    // on the other.
+    #[allow(clippy::unnecessary_cast)]
     pub fn mode(&self) -> u32 {
         self.st.st_mode as u32
     }
