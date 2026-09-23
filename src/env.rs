@@ -213,8 +213,15 @@ pub fn environ() -> Vec<Vec<u8>> {
         }
         *_NSGetEnviron()
     };
+    // Declared here rather than taken from `libc`, which does not export `environ` on Linux:
+    // 0.2.189 fails to build there. The symbol is POSIX and the same on every other Unix.
     #[cfg(not(target_os = "macos"))]
-    let envp = unsafe { libc::environ as *const *const libc::c_char };
+    let envp = unsafe {
+        unsafe extern "C" {
+            static environ: *const *const libc::c_char;
+        }
+        environ
+    };
     if envp.is_null() {
         return out;
     }
