@@ -59,25 +59,89 @@ impl Path {
         self.inner.first() == Some(&b'/')
     }
 
-    /// The final component, if there is one.
+    /// The final component, if it is a name.
+    ///
+    /// `std`'s answer, byte for byte: trailing separators and `.` components are skipped, so
+    /// `a/b/` and `a/b/.` both name `b`, and a path that ends in `..`, or is only the root or `.`,
+    /// has no file name.
     pub fn file_name(&self) -> Option<&Path> {
-        if self.inner.is_empty() {
-            return None;
-        }
-        match self.inner.iter().rposition(|&b| b == b'/') {
-            Some(i) if i + 1 == self.inner.len() => None,
-            Some(i) => Some(Path::new(&self.inner[i + 1..])),
-            None => Some(self),
+        let (start, end) = self.last_body_component()?;
+        let name = &self.inner[start..end];
+        if name == b".." {
+            None
+        } else {
+            Some(Path::new(name))
         }
     }
 
-    /// Everything before the final component.
+    /// Everything before the final component, or `None` when there is no final component to drop.
+    ///
+    /// **The root has no parent.** `/` answers `None`, as `std` does, so a walk written as
+    /// `while let Some(p) = here.parent()` ends there. It answered `/` once, and every such walk
+    /// that reached the root without finding what it wanted spun on it forever.
+    ///
+    /// The rest is `std`'s answer too. `a` has the empty path as its parent and `/a` has `/`.
+    /// Trailing and repeated separators and `.` components are skipped, so `/a/b/` has `/a` and
+    /// `a//./b` has `a`. A lone `.` has the empty path, and the empty path has `None`.
     pub fn parent(&self) -> Option<&Path> {
-        let i = self.inner.iter().rposition(|&b| b == b'/')?;
-        if i == 0 {
-            return Some(Path::new(b"/"));
+        match self.last_body_component() {
+            Some((start, _)) => Some(Path::new(&self.inner[..self.trim_back(start)])),
+            None if self.leading_cur_dir() => Some(Path::new(b"")),
+            None => None,
         }
-        Some(Path::new(&self.inner[..i]))
+    }
+
+    /// Whether the path begins with a `.` that `std` keeps as a component of its own: a relative
+    /// path that is `.` or starts `./`. A `.` anywhere else is skipped.
+    fn leading_cur_dir(&self) -> bool {
+        self.inner.first() == Some(&b'.') && matches!(self.inner.get(1), None | Some(&b'/'))
+    }
+
+    /// Where the removable components begin: after the root `/`, or after a leading `.`.
+    fn body_start(&self) -> usize {
+        if self.is_absolute() || self.leading_cur_dir() {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// `end` moved back past any trailing separators and `.` components, never into the root or
+    /// a leading `.`.
+    fn trim_back(&self, mut end: usize) -> usize {
+        let floor = self.body_start();
+        while end > floor {
+            let body = &self.inner[floor..end];
+            match body.iter().rposition(|&b| b == b'/') {
+                Some(i) => {
+                    let last = &body[i + 1..];
+                    if !last.is_empty() && last != b"." {
+                        break;
+                    }
+                    end = floor + i;
+                }
+                None => {
+                    if body != b"." {
+                        break;
+                    }
+                    end = floor;
+                }
+            }
+        }
+        end
+    }
+
+    /// The byte range of the final component that is a name or `..`, or `None` when the path is
+    /// only its root, a leading `.`, or nothing.
+    fn last_body_component(&self) -> Option<(usize, usize)> {
+        let floor = self.body_start();
+        let end = self.trim_back(self.inner.len());
+        if end == floor {
+            return None;
+        }
+        let body = &self.inner[floor..end];
+        let start = body.iter().rposition(|&b| b == b'/').map_or(floor, |i| floor + i + 1);
+        Some((start, end))
     }
 
     /// The extension of the final component, without the dot.
@@ -204,7 +268,8 @@ impl Path {
         Components { rest: &self.inner, root: self.is_absolute() }
     }
 
-    /// This path and each of its parents, longest first.
+    /// This path and each of its parents, longest first. Ends after the root, because the root
+    /// has no parent.
     pub fn ancestors(&self) -> Ancestors<'_> {
         Ancestors { next: Some(self) }
     }
@@ -467,7 +532,8 @@ impl PathBuf {
         self.inner.extend_from_slice(o);
     }
 
-    /// Drop the final component. `false` if there was nothing to drop.
+    /// Drop the final component. `false` if there was nothing to drop, which includes the root:
+    /// `/` stays `/`.
     pub fn pop(&mut self) -> bool {
         match self.as_path().parent() {
             Some(p) => {
@@ -479,9 +545,14 @@ impl PathBuf {
         }
     }
 
-    /// Replace the final component.
+    /// Replace the final component, or append one when there is no file name to replace.
+    ///
+    /// Pops only a real file name, as `std` does: `a/..` becomes `a/../x`, not `a/x`, because
+    /// `..` is a step, not a name, and `.` becomes `./x`.
     pub fn set_file_name(&mut self, name: impl AsRef<Path>) {
-        self.pop();
+        if self.file_name().is_some() {
+            self.pop();
+        }
         self.push(name);
     }
 
@@ -703,5 +774,157 @@ impl Default for &Path {
 impl fmt::Debug for PathBuf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_path(), f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Each table is a path and `std::path`'s answer for it. A table rather than a test per case,
+    // and the wrong rows collected rather than asserted one by one, so a failure lists every row
+    // that disagrees with `std` and not only the first.
+
+    /// **The root has no parent.** `/` answering `/` is the defect every walk up the tree spun on.
+    #[test]
+    fn parent_matches_std() {
+        let rows: &[(&str, Option<&str>)] = &[
+            ("/", None),
+            ("//", None),
+            ("/.", None),
+            ("", None),
+            ("a", Some("")),
+            ("a/", Some("")),
+            ("a/.", Some("")),
+            (".", Some("")),
+            ("./", Some("")),
+            ("./a", Some(".")),
+            ("..", Some("")),
+            ("a/..", Some("a")),
+            ("/a", Some("/")),
+            ("//a", Some("/")),
+            ("a/b", Some("a")),
+            ("a//b", Some("a")),
+            ("a/./b", Some("a")),
+            ("/a/b/", Some("/a")),
+            ("/a//b//", Some("/a")),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .map(|&(path, want)| (path, Path::new(path).parent(), want))
+            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
+            .collect();
+        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
+    }
+
+    #[test]
+    fn file_name_matches_std() {
+        let rows: &[(&str, Option<&str>)] = &[
+            ("/", None),
+            ("//", None),
+            ("", None),
+            (".", None),
+            ("..", None),
+            ("a/..", None),
+            ("a", Some("a")),
+            ("a/", Some("a")),
+            ("a/.", Some("a")),
+            ("/a/b/", Some("b")),
+            ("/a/b", Some("b")),
+            (".bashrc", Some(".bashrc")),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .map(|&(path, want)| (path, Path::new(path).file_name(), want))
+            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
+            .collect();
+        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
+    }
+
+    /// `extension` reads `file_name`, so it inherits the trailing-separator and `..` answers.
+    #[test]
+    fn extension_matches_std() {
+        let rows: &[(&str, Option<&str>)] = &[
+            ("a.rs", Some("rs")),
+            ("a.rs/", Some("rs")),
+            ("..", None),
+            (".bashrc", None),
+            ("/", None),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .map(|&(path, want)| (path, Path::new(path).extension(), want))
+            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
+            .collect();
+        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
+    }
+
+    /// **`ancestors` ends.** Taken with a bound, so the old answer fails as a wrong list rather
+    /// than hanging the test binary, which is what it did to every caller.
+    #[test]
+    fn ancestors_match_std_and_end() {
+        let rows: &[(&str, &[&str])] = &[
+            ("/", &["/"]),
+            ("/a/b", &["/a/b", "/a", "/"]),
+            ("/a/b/", &["/a/b/", "/a", "/"]),
+            ("a/b", &["a/b", "a", ""]),
+            ("", &[""]),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .map(|&(path, want)| {
+                let got: Vec<&Path> = Path::new(path).ancestors().take(want.len() + 2).collect();
+                (path, got, want)
+            })
+            .filter(|(_, got, want)| {
+                got.len() != want.len()
+                    || got.iter().zip(want.iter()).any(|(g, w)| g.as_bytes() != w.as_bytes())
+            })
+            .collect();
+        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
+    }
+
+    /// `pop` at the root drops nothing and says so, which is what ends `while buf.pop()`.
+    #[test]
+    fn pop_matches_std() {
+        let rows: &[(&str, bool, &str)] = &[
+            ("/", false, "/"),
+            ("", false, ""),
+            ("a", true, ""),
+            ("/a", true, "/"),
+            ("a/b", true, "a"),
+            ("/a/b/", true, "/a"),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .filter_map(|&(path, want_popped, want_left)| {
+                let mut buf = PathBuf::from(path);
+                let popped = buf.pop();
+                let right = popped == want_popped && buf.as_bytes() == want_left.as_bytes();
+                (!right).then_some((path, popped, buf))
+            })
+            .collect();
+        assert!(wrong.is_empty(), "(path, popped, left): {wrong:?}");
+    }
+
+    #[test]
+    fn set_file_name_matches_std() {
+        let rows: &[(&str, &str, &str)] = &[
+            ("/", "x", "/x"),
+            ("a", "x", "x"),
+            (".", "x", "./x"),
+            ("a/..", "x", "a/../x"),
+            ("/a/b", "x", "/a/x"),
+            ("/a/b/", "x", "/a/x"),
+        ];
+        let wrong: Vec<_> = rows
+            .iter()
+            .filter_map(|&(path, name, want)| {
+                let mut buf = PathBuf::from(path);
+                buf.set_file_name(name);
+                (buf.as_bytes() != want.as_bytes()).then_some((path, name, buf))
+            })
+            .collect();
+        assert!(wrong.is_empty(), "(path, name, got): {wrong:?}");
     }
 }
