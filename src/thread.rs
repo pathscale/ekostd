@@ -233,9 +233,20 @@ impl Once {
     pub fn call_once(&self, f: fn()) {
         unsafe {
             PENDING = Some(f);
-            libc::pthread_once(self.inner.get(), Some(run_pending));
+            pthread_once(self.inner.get(), run_pending);
         }
     }
+}
+
+// Declared here rather than taken from `libc`, whose signature for the routine differs by
+// target: `Option<unsafe extern "C" fn()>` on Apple and a bare `extern "C" fn()` on Linux as of
+// 0.2.189, so one call site cannot satisfy both. The C declaration is the same everywhere, and a
+// non-null function pointer is what both of those spell.
+unsafe extern "C" {
+    fn pthread_once(
+        control: *mut libc::pthread_once_t,
+        routine: unsafe extern "C" fn(),
+    ) -> libc::c_int;
 }
 
 impl Default for Once {
