@@ -23,9 +23,6 @@ use alloc::boxed::Box;
 
 use crate::Errno;
 
-#[path = "parallel.rs"]
-pub mod parallel;
-
 /// Run `f` on a new thread with `stack_bytes` of stack, detached.
 ///
 /// **Detached, because nothing here joins.** Every caller spawns a connection handler and forgets
