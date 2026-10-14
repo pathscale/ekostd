@@ -145,12 +145,8 @@ impl Errno {
     /// it makes.
     ///
     /// Retrying is not always needed, and that is why handlers here ask for
-    /// `SA_RESTART`. Run a poisoned seed and assert the comparison
-    /// disagrees.
-    ///
-    /// Retrying is not always needed, and that is why handlers here ask for
-    /// `SA_RESTART`. A caller still needs this for a signal whose handler was
-    /// installed without it.
+    /// `SA_RESTART`. It is needed whenever a handler was installed without it,
+    /// which this crate cannot tell from the error alone.
     #[must_use]
     pub fn interrupted(self) -> bool {
         self.0 == libc::EINTR
