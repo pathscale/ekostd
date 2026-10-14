@@ -5,7 +5,7 @@
 # which this is not. `[lib] name` is what a consumer writes, so `use eko::file::File` works.
 [package]
 name = "ekostd"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pathscale/ekostd"
@@ -18,13 +18,16 @@ name = "eko"
 path = "src/lib.rs"
 
 [dependencies]
-# The only dependency, and the point of the crate. A `no_std` crate wrapping `libc` is still
+# The operating-system dependency, and the point of the crate. A `no_std` crate wrapping
+# `libc` is still
 # `no_std`: the ban is about not linking Rust's standard library, which a self-hosting stage would
 # have to carry. It does not have to carry `libc` - the platform already has it. On macOS this is
 # not even a compromise, because `std` itself goes through libSystem: Apple does not provide a
 # stable syscall ABI.
 libc = { version = "^0.2.189", default-features = false }
 serde = { version = "^1.0.229", default-features = false, optional = true }
+nagoya = { version = "=0.1.15", default-features = false }
+ps-st3 = { version = "^0.6", default-features = false, features = ["fanout", "atomic-host"] }
 
 [features]
 # Off by default: a crate that has no serialiser should not gain serde through the wrapper.
