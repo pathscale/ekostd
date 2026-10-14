@@ -54,7 +54,7 @@
 // needed `std` either has a `core`/`alloc` equivalent, belongs in `crates/libc-wrapper`, or is a
 // dependency that has to be replaced.
 //
-// The prelude is the part a grep cannot see: `Vec`, `String` and `Box`, `format!`, `vec!`,
+// The prelude is the part a grep cannot see: `Vec`, `String`, `Box`, `format!`, `vec!`,
 // `thread_local!` and `println!` name no path. Under `#![no_std]` they resolve through `alloc`
 // and `libc_wrapper` instead, which is why those imports appear at the top of every file here.
 // ---------------------------------------------------------------------------------------------
@@ -78,7 +78,6 @@ pub mod signal;
 pub mod socket;
 pub mod thread;
 pub mod time;
-pub mod worker_runtime;
 
 /// A libc call that failed, as the `errno` it set.
 ///
