@@ -286,7 +286,12 @@ impl File {
             if n == 0 {
                 return Ok(out.len() - start);
             }
-            out.extend_from_slice(&chunk[..n as usize]);
+            let count = n as usize;
+            let mut index = 0;
+            while index < count {
+                out.push(chunk[index]);
+                index += 1;
+            }
         }
     }
 
@@ -792,7 +797,13 @@ impl Stdin {
             // Compact what has been consumed before growing, so a long session does not hold
             // every line it has already handed out.
             if self.at > 0 {
-                self.buf.drain(..self.at);
+                let remaining = self.buf.len() - self.at;
+                let mut index = 0;
+                while index < remaining {
+                    self.buf[index] = self.buf[self.at + index];
+                    index += 1;
+                }
+                self.buf.truncate(remaining);
                 self.at = 0;
             }
             let mut chunk = [0u8; 8192];

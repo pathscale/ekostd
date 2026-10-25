@@ -454,10 +454,12 @@ impl<'a> Iterator for Components<'a> {
         let end = self.rest.iter().position(|&b| b == b'/').unwrap_or(self.rest.len());
         let (part, rest) = self.rest.split_at(end);
         self.rest = rest;
-        Some(match part {
-            b"." => Component::CurDir,
-            b".." => Component::ParentDir,
-            _ => Component::Normal(part),
+        Some(if bytes_equal(part, b".") {
+            Component::CurDir
+        } else if bytes_equal(part, b"..") {
+            Component::ParentDir
+        } else {
+            Component::Normal(part)
         })
     }
 }

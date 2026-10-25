@@ -33,25 +33,40 @@ where
     let raw = Box::into_raw(Box::new(f));
 
     let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
-    unsafe {
-        if libc::pthread_attr_init(&mut attr) != 0 {
+    let init_rc = unsafe { libc::pthread_attr_init(&mut attr) };
+    if init_rc != 0 {
+        unsafe { drop(Box::from_raw(raw)) };
+        return Err(Errno(init_rc));
+    }
+    let stack_rc = unsafe { libc::pthread_attr_setstacksize(&mut attr, stack_bytes) };
+    if stack_rc != 0 {
+        unsafe {
+            libc::pthread_attr_destroy(&mut attr);
             drop(Box::from_raw(raw));
-            return Err(Errno::current());
         }
-        libc::pthread_attr_setstacksize(&mut attr, stack_bytes);
-        libc::pthread_attr_setdetachstate(&mut attr, libc::PTHREAD_CREATE_DETACHED);
+        return Err(Errno(stack_rc));
+    }
+    let detach_rc = unsafe {
+        libc::pthread_attr_setdetachstate(&mut attr, libc::PTHREAD_CREATE_DETACHED)
+    };
+    if detach_rc != 0 {
+        unsafe {
+            libc::pthread_attr_destroy(&mut attr);
+            drop(Box::from_raw(raw));
+        }
+        return Err(Errno(detach_rc));
     }
 
     let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-    let created =
+    let create_rc =
         unsafe { libc::pthread_create(&mut tid, &attr, detached_trampoline::<F>, raw.cast()) };
     unsafe { libc::pthread_attr_destroy(&mut attr) };
 
-    if created != 0 {
+    if create_rc != 0 {
         // The thread never started, so nothing will ever take the closure back. Dropping it here
         // is the difference between a failed spawn and a failed spawn that leaks.
         unsafe { drop(Box::from_raw(raw)) };
-        return Err(Errno(created));
+        return Err(Errno(create_rc));
     }
     Ok(())
 }
@@ -857,9 +872,20 @@ impl Builder {
         let payload = Box::into_raw(Box::new(SpawnPayload { f, slot }));
 
         let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
-        unsafe { libc::pthread_attr_init(&mut attr) };
+        let init_rc = unsafe { libc::pthread_attr_init(&mut attr) };
+        if init_rc != 0 {
+            drop(unsafe { Box::from_raw(payload) });
+            drop(unsafe { Box::from_raw(slot) });
+            return Err(Errno(init_rc));
+        }
         if self.stack_bytes != 0 {
-            unsafe { libc::pthread_attr_setstacksize(&mut attr, self.stack_bytes) };
+            let stack_rc = unsafe { libc::pthread_attr_setstacksize(&mut attr, self.stack_bytes) };
+            if stack_rc != 0 {
+                unsafe { libc::pthread_attr_destroy(&mut attr) };
+                drop(unsafe { Box::from_raw(payload) });
+                drop(unsafe { Box::from_raw(slot) });
+                return Err(Errno(stack_rc));
+            }
         }
         let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
         let rc = unsafe {
