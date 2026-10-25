@@ -145,7 +145,7 @@ fn candidates(program: &[u8]) -> Vec<Vec<u8>> {
         }
         let mut candidate = Vec::with_capacity(dir.len() + program.len() + 2);
         candidate.extend_from_slice(dir);
-        if !dir.ends_with(b"/") {
+        if dir.is_empty() || dir[dir.len() - 1] != b'/' {
             candidate.push(b'/');
         }
         candidate.extend_from_slice(program);
@@ -360,14 +360,17 @@ impl Child {
 
         // Rounded up, never down: `as_millis` of anything under a millisecond is zero, and a
         // zero timeout is a busy wait rather than a short one.
-        let ms = timeout.map_or(-1, |t| {
-            let whole = t.as_millis().min(i32::MAX as u128) as libc::c_int;
-            if whole == 0 && !t.is_zero() {
-                1
-            } else {
-                whole
+        let ms = match timeout {
+            None => -1,
+            Some(t) => {
+                let whole = t.as_millis().min(i32::MAX as u128) as libc::c_int;
+                if whole == 0 && !t.is_zero() {
+                    1
+                } else {
+                    whole
+                }
             }
-        });
+        };
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), n as libc::nfds_t, ms) };
         if ready == 0 {
             return;
@@ -494,7 +497,7 @@ fn exit_code(status: libc::c_int) -> i32 {
 /// Returns negative if the duplication failed, which the caller treats as fatal.
 unsafe fn above_stdio(fd: libc::c_int) -> libc::c_int {
     if fd > 2 {
-        return fd;
+        return fd.wrapping_add(0);
     }
     unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) }
 }

@@ -198,7 +198,9 @@ impl Path {
         let p = prefix.as_ref().as_bytes();
         self.inner.len() >= p.len()
             && bytes_equal(&self.inner[..p.len()], p)
-            && (self.inner.len() == p.len() || self.inner[p.len()] == b'/' || p.ends_with(b"/"))
+            && (self.inner.len() == p.len()
+                || self.inner[p.len()] == b'/'
+                || (!p.is_empty() && p[p.len() - 1] == b'/'))
     }
 
     /// The remainder after a matching prefix.
@@ -212,7 +214,8 @@ impl Path {
             return Err(StripPrefixError);
         }
         let rest = &self.inner[p.len()..];
-        Ok(Path::new(rest.strip_prefix(b"/").unwrap_or(rest)))
+        let rest = if !rest.is_empty() && rest[0] == b'/' { &rest[1..] } else { rest };
+        Ok(Path::new(rest))
     }
 
     /// The `/`-separated parts, with empties dropped.
@@ -442,7 +445,11 @@ impl<'a> Iterator for Components<'a> {
     fn next(&mut self) -> Option<Component<'a>> {
         if self.root {
             self.root = false;
-            self.rest = self.rest.strip_prefix(b"/").unwrap_or(self.rest);
+            self.rest = if !self.rest.is_empty() && self.rest[0] == b'/' {
+                &self.rest[1..]
+            } else {
+                self.rest
+            };
             return Some(Component::RootDir);
         }
         while self.rest.first() == Some(&b'/') {
@@ -543,7 +550,7 @@ impl PathBuf {
             self.inner.extend_from_slice(o);
             return;
         }
-        if !self.inner.is_empty() && !self.inner.ends_with(b"/") {
+        if !self.inner.is_empty() && self.inner[self.inner.len() - 1] != b'/' {
             self.inner.push(b'/');
         }
         self.inner.extend_from_slice(o);

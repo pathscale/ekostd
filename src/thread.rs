@@ -206,41 +206,17 @@ impl<T: ?Sized> Drop for Guard<'_, T> {
 /// `std::sync::Once` over `pthread_once`. `panics::install` needs it: the accept loop and the
 /// first request thread can both be first, and installing twice would chain the hook to itself.
 pub struct Once {
-    inner: core::cell::UnsafeCell<libc::pthread_once_t>,
-}
-
-unsafe impl Send for Once {}
-unsafe impl Sync for Once {}
-
-/// The closure `pthread_once` will run, parked where the C callback can reach it.
-///
-/// **`pthread_once` takes a bare `extern "C" fn` with no argument**, so there is nowhere to pass
-/// a closure through. This is the standard workaround and its safety rests on `pthread_once`'s
-/// own guarantee: exactly one thread runs the callback, and every other blocks until it returns,
-/// so the write and the read cannot overlap.
-static mut PENDING: Option<fn()> = None;
-
-unsafe extern "C" fn run_pending() {
-    // Safety: inside `pthread_once`'s callback, which runs on one thread with all others blocked.
-    if let Some(f) = unsafe { PENDING } {
-        f();
-    }
+    inner: OnceLock<()>,
 }
 
 impl Once {
     pub const fn new() -> Once {
-        Once { inner: core::cell::UnsafeCell::new(libc::PTHREAD_ONCE_INIT) }
+        Once { inner: OnceLock::new() }
     }
 
     /// Run `f` the first time this is called, and never again.
-    ///
-    /// A plain `fn` rather than a closure, for the reason [`PENDING`] gives. Both callers are
-    /// installing a process-global hook and capture nothing.
-    pub fn call_once(&self, f: fn()) {
-        unsafe {
-            PENDING = Some(f);
-            pthread_once(self.inner.get(), run_pending);
-        }
+    pub fn call_once(&self, f: impl FnOnce()) {
+        self.inner.get_or_init(f);
     }
 }
 
@@ -298,7 +274,18 @@ impl<T: 'static> ThreadLocal<T> {
         use core::sync::atomic::Ordering;
         // The destructor is monomorphised per `T`, so it knows what to drop without a registry.
         unsafe extern "C" fn drop_box<T>(raw: *mut libc::c_void) {
-            drop(unsafe { alloc::boxed::Box::from_raw(raw.cast::<T>()) });
+            if !raw.is_null() {
+                unsafe {
+                    let ptr = raw.cast::<T>();
+                    if core::mem::needs_drop::<T>() {
+                        core::ptr::drop_in_place(ptr);
+                    }
+                    let layout = core::alloc::Layout::new::<T>();
+                    if layout.size() != 0 {
+                        alloc::alloc::dealloc(ptr.cast::<u8>(), layout);
+                    }
+                }
+            }
         }
         let existing = self.key.load(Ordering::Acquire);
         if existing != 0 {
