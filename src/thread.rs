@@ -25,30 +25,12 @@ use crate::Errno;
 
 /// Run `f` on a new thread with `stack_bytes` of stack, detached.
 ///
-/// **Detached, because nothing here joins.** Every caller spawns a connection handler and forgets
-/// it; the thread ends when the connection does. A joinable thread nobody joins is a leak of the
-/// thread's own bookkeeping, which is the failure `pthread_detach` exists to prevent.
-///
-/// The closure is boxed twice on purpose: once to make it a sized value, and once more so the
-/// pointer handed to C is a thin one. A fat pointer does not fit in `*mut c_void`, and casting a
-/// `Box<dyn FnOnce>` straight through would truncate the vtable half and jump into nothing.
+/// Detached execution owns and drops the concrete closure payload on the new pthread.
 pub fn spawn_detached<F>(stack_bytes: usize, f: F) -> Result<(), Errno>
 where
     F: FnOnce() + Send + 'static,
 {
-    // The outer box is what crosses to C; the inner one carries the closure's vtable.
-    let payload: Box<Box<dyn FnOnce() + Send>> = Box::new(Box::new(f));
-    let raw = Box::into_raw(payload);
-
-    // `extern "C"` and *not* `unsafe fn`: `pthread_create` takes a safe C function pointer, and
-    // an `unsafe extern "C" fn` is a different type that will not coerce to it. The unsafety is
-    // inside, where reconstructing the box from the pointer is the thing that is actually unsafe.
-    extern "C" fn run(arg: *mut libc::c_void) -> *mut libc::c_void {
-        // Taking ownership back is what drops the closure once it has run.
-        let f: Box<Box<dyn FnOnce() + Send>> = unsafe { Box::from_raw(arg.cast()) };
-        f();
-        core::ptr::null_mut()
-    }
+    let raw = Box::into_raw(Box::new(f));
 
     let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
     unsafe {
@@ -61,7 +43,8 @@ where
     }
 
     let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-    let created = unsafe { libc::pthread_create(&mut tid, &attr, run, raw.cast()) };
+    let created =
+        unsafe { libc::pthread_create(&mut tid, &attr, detached_trampoline::<F>, raw.cast()) };
     unsafe { libc::pthread_attr_destroy(&mut attr) };
 
     if created != 0 {
@@ -71,6 +54,14 @@ where
         return Err(Errno(created));
     }
     Ok(())
+}
+
+extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
+    arg: *mut libc::c_void,
+) -> *mut libc::c_void {
+    let f: Box<F> = unsafe { Box::from_raw(arg.cast()) };
+    (*f)();
+    core::ptr::null_mut()
 }
 
 /// A mutex that blocks in the kernel.
@@ -806,14 +797,15 @@ pub struct JoinHandle<T> {
 // The handle is just an id and a pointer the joining thread owns exclusively after the join.
 unsafe impl<T: Send> Send for JoinHandle<T> {}
 
-struct SpawnPayload<T> {
-    f: Box<dyn FnOnce() -> T + Send>,
+struct SpawnPayload<F, T> {
+    f: F,
     slot: *mut Option<T>,
 }
 
-extern "C" fn spawn_trampoline<T>(arg: *mut libc::c_void) -> *mut libc::c_void {
-    // Safe: `spawn` leaked exactly one `SpawnPayload<T>` for this thread and no one else holds it.
-    let payload: Box<SpawnPayload<T>> = unsafe { Box::from_raw(arg.cast()) };
+extern "C" fn spawn_trampoline<F: FnOnce() -> T + Send + 'static, T>(
+    arg: *mut libc::c_void,
+) -> *mut libc::c_void {
+    let payload: Box<SpawnPayload<F, T>> = unsafe { Box::from_raw(arg.cast()) };
     let SpawnPayload { f, slot } = *payload;
     let value = f();
     // Safe: the slot was leaked by `spawn` and is written by this thread alone, before the
@@ -854,8 +846,15 @@ impl Builder {
         self,
         f: impl FnOnce() -> T + Send + 'static,
     ) -> Result<JoinHandle<T>, Errno> {
+        self.spawn_inner(f)
+    }
+
+    fn spawn_inner<T: Send + 'static, F: FnOnce() -> T + Send + 'static>(
+        self,
+        f: F,
+    ) -> Result<JoinHandle<T>, Errno> {
         let slot: *mut Option<T> = Box::into_raw(Box::new(None));
-        let payload = Box::into_raw(Box::new(SpawnPayload { f: Box::new(f), slot }));
+        let payload = Box::into_raw(Box::new(SpawnPayload { f, slot }));
 
         let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
         unsafe { libc::pthread_attr_init(&mut attr) };
@@ -863,8 +862,9 @@ impl Builder {
             unsafe { libc::pthread_attr_setstacksize(&mut attr, self.stack_bytes) };
         }
         let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-        let rc =
-            unsafe { libc::pthread_create(&mut tid, &attr, spawn_trampoline::<T>, payload.cast()) };
+        let rc = unsafe {
+            libc::pthread_create(&mut tid, &attr, spawn_trampoline::<F, T>, payload.cast())
+        };
         unsafe { libc::pthread_attr_destroy(&mut attr) };
         if rc != 0 {
             // Nothing started, so both allocations are still ours to reclaim.
@@ -922,6 +922,17 @@ pub struct Scope<'scope, 'env: 'scope> {
     _marker: core::marker::PhantomData<(&'scope (), &'env ())>,
 }
 
+struct ScopedPayload<F> {
+    f: F,
+}
+
+extern "C" fn scoped_trampoline<F: FnOnce() + Send>(arg: *mut libc::c_void) -> *mut libc::c_void {
+    let payload: Box<ScopedPayload<F>> = unsafe { Box::from_raw(arg.cast()) };
+    let ScopedPayload { f } = *payload;
+    f();
+    core::ptr::null_mut()
+}
+
 impl<'scope, 'env> Scope<'scope, 'env> {
     /// Start a thread that may borrow from outside the scope.
     ///
@@ -931,20 +942,18 @@ impl<'scope, 'env> Scope<'scope, 'env> {
     where
         F: FnOnce() + Send + 'scope,
     {
-        // The closure borrows for `'scope`, but `pthread_create` needs a `'static` payload. The
-        // lifetime is erased here and restored by the join in `scope`, which cannot be skipped.
-        let boxed: Box<dyn FnOnce() + Send + 'scope> = Box::new(f);
-        let erased: Box<dyn FnOnce() + Send + 'static> = unsafe { core::mem::transmute(boxed) };
-        let payload = Box::into_raw(Box::new(erased));
-
-        extern "C" fn run(arg: *mut libc::c_void) -> *mut libc::c_void {
-            let f: Box<Box<dyn FnOnce() + Send + 'static>> = unsafe { Box::from_raw(arg.cast()) };
-            (*f)();
-            core::ptr::null_mut()
-        }
+        // The concrete payload retains 'scope in its type. scope joins it before borrowed data expires.
+        let payload = Box::into_raw(Box::new(ScopedPayload { f }));
 
         let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
-        let rc = unsafe { libc::pthread_create(&mut tid, core::ptr::null(), run, payload.cast()) };
+        let rc = unsafe {
+            libc::pthread_create(
+                &mut tid,
+                core::ptr::null(),
+                scoped_trampoline::<F>,
+                payload.cast(),
+            )
+        };
         if rc != 0 {
             // The thread never started, so the closure is still ours - and dropping it is the
             // only honest thing to do, because there is no way to report from here without

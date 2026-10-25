@@ -624,7 +624,9 @@ pub fn remove_dir_all(path: &Path) {
             name.push(b);
             i += 1;
         }
-        if name == b"." || name == b".." {
+        if (name.len() == 1 && name[0] == b'.')
+            || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
+        {
             continue;
         }
         let child = path.join(&name[..]);
@@ -676,7 +678,9 @@ pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<crate::path::PathBuf>> {
             name.push(b);
             i += 1;
         }
-        if name == b"." || name == b".." {
+        if (name.len() == 1 && name[0] == b'.')
+            || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
+        {
             continue;
         }
         out.push(dir_path.join(&name[..]));

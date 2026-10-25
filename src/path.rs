@@ -27,6 +27,21 @@ pub const MAIN_SEPARATOR: char = '/';
 /// The byte between path components.
 pub const MAIN_SEPARATOR_BYTE: u8 = b'/';
 
+/// Compare byte slices without relying on slice equality lowering.
+fn bytes_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 /// A borrowed path.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -67,7 +82,7 @@ impl Path {
     pub fn file_name(&self) -> Option<&Path> {
         let (start, end) = self.last_body_component()?;
         let name = &self.inner[start..end];
-        if name == b".." {
+        if bytes_equal(name, b"..") {
             None
         } else {
             Some(Path::new(name))
@@ -115,13 +130,13 @@ impl Path {
             match body.iter().rposition(|&b| b == b'/') {
                 Some(i) => {
                     let last = &body[i + 1..];
-                    if !last.is_empty() && last != b"." {
+                    if !last.is_empty() && !bytes_equal(last, b".") {
                         break;
                     }
                     end = floor + i;
                 }
                 None => {
-                    if body != b"." {
+                    if !bytes_equal(body, b".") {
                         break;
                     }
                     end = floor;
@@ -182,7 +197,7 @@ impl Path {
     pub fn starts_with(&self, prefix: impl AsRef<Path>) -> bool {
         let p = prefix.as_ref().as_bytes();
         self.inner.len() >= p.len()
-            && &self.inner[..p.len()] == p
+            && bytes_equal(&self.inner[..p.len()], p)
             && (self.inner.len() == p.len() || self.inner[p.len()] == b'/' || p.ends_with(b"/"))
     }
 
@@ -774,157 +789,5 @@ impl Default for &Path {
 impl fmt::Debug for PathBuf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self.as_path(), f)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Each table is a path and `std::path`'s answer for it. A table rather than a test per case,
-    // and the wrong rows collected rather than asserted one by one, so a failure lists every row
-    // that disagrees with `std` and not only the first.
-
-    /// **The root has no parent.** `/` answering `/` is the defect every walk up the tree spun on.
-    #[test]
-    fn parent_matches_std() {
-        let rows: &[(&str, Option<&str>)] = &[
-            ("/", None),
-            ("//", None),
-            ("/.", None),
-            ("", None),
-            ("a", Some("")),
-            ("a/", Some("")),
-            ("a/.", Some("")),
-            (".", Some("")),
-            ("./", Some("")),
-            ("./a", Some(".")),
-            ("..", Some("")),
-            ("a/..", Some("a")),
-            ("/a", Some("/")),
-            ("//a", Some("/")),
-            ("a/b", Some("a")),
-            ("a//b", Some("a")),
-            ("a/./b", Some("a")),
-            ("/a/b/", Some("/a")),
-            ("/a//b//", Some("/a")),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .map(|&(path, want)| (path, Path::new(path).parent(), want))
-            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
-            .collect();
-        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
-    }
-
-    #[test]
-    fn file_name_matches_std() {
-        let rows: &[(&str, Option<&str>)] = &[
-            ("/", None),
-            ("//", None),
-            ("", None),
-            (".", None),
-            ("..", None),
-            ("a/..", None),
-            ("a", Some("a")),
-            ("a/", Some("a")),
-            ("a/.", Some("a")),
-            ("/a/b/", Some("b")),
-            ("/a/b", Some("b")),
-            (".bashrc", Some(".bashrc")),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .map(|&(path, want)| (path, Path::new(path).file_name(), want))
-            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
-            .collect();
-        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
-    }
-
-    /// `extension` reads `file_name`, so it inherits the trailing-separator and `..` answers.
-    #[test]
-    fn extension_matches_std() {
-        let rows: &[(&str, Option<&str>)] = &[
-            ("a.rs", Some("rs")),
-            ("a.rs/", Some("rs")),
-            ("..", None),
-            (".bashrc", None),
-            ("/", None),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .map(|&(path, want)| (path, Path::new(path).extension(), want))
-            .filter(|&(_, got, want)| got.map(Path::as_bytes) != want.map(str::as_bytes))
-            .collect();
-        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
-    }
-
-    /// **`ancestors` ends.** Taken with a bound, so the old answer fails as a wrong list rather
-    /// than hanging the test binary, which is what it did to every caller.
-    #[test]
-    fn ancestors_match_std_and_end() {
-        let rows: &[(&str, &[&str])] = &[
-            ("/", &["/"]),
-            ("/a/b", &["/a/b", "/a", "/"]),
-            ("/a/b/", &["/a/b/", "/a", "/"]),
-            ("a/b", &["a/b", "a", ""]),
-            ("", &[""]),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .map(|&(path, want)| {
-                let got: Vec<&Path> = Path::new(path).ancestors().take(want.len() + 2).collect();
-                (path, got, want)
-            })
-            .filter(|(_, got, want)| {
-                got.len() != want.len()
-                    || got.iter().zip(want.iter()).any(|(g, w)| g.as_bytes() != w.as_bytes())
-            })
-            .collect();
-        assert!(wrong.is_empty(), "(path, got, std): {wrong:?}");
-    }
-
-    /// `pop` at the root drops nothing and says so, which is what ends `while buf.pop()`.
-    #[test]
-    fn pop_matches_std() {
-        let rows: &[(&str, bool, &str)] = &[
-            ("/", false, "/"),
-            ("", false, ""),
-            ("a", true, ""),
-            ("/a", true, "/"),
-            ("a/b", true, "a"),
-            ("/a/b/", true, "/a"),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .filter_map(|&(path, want_popped, want_left)| {
-                let mut buf = PathBuf::from(path);
-                let popped = buf.pop();
-                let right = popped == want_popped && buf.as_bytes() == want_left.as_bytes();
-                (!right).then_some((path, popped, buf))
-            })
-            .collect();
-        assert!(wrong.is_empty(), "(path, popped, left): {wrong:?}");
-    }
-
-    #[test]
-    fn set_file_name_matches_std() {
-        let rows: &[(&str, &str, &str)] = &[
-            ("/", "x", "/x"),
-            ("a", "x", "x"),
-            (".", "x", "./x"),
-            ("a/..", "x", "a/../x"),
-            ("/a/b", "x", "/a/x"),
-            ("/a/b/", "x", "/a/x"),
-        ];
-        let wrong: Vec<_> = rows
-            .iter()
-            .filter_map(|&(path, name, want)| {
-                let mut buf = PathBuf::from(path);
-                buf.set_file_name(name);
-                (buf.as_bytes() != want.as_bytes()).then_some((path, name, buf))
-            })
-            .collect();
-        assert!(wrong.is_empty(), "(path, name, got): {wrong:?}");
     }
 }

@@ -93,13 +93,14 @@ impl<T> SyncSender<T> {
             }
             if state.queue.len() < self.shared.capacity {
                 state.queue.push_back(value);
-                drop(state);
-                self.shared.on_send.notify_one();
-                return Ok(());
+                break;
             }
             // Spurious wakes are permitted, which is why this is a loop and not an `if`.
             state = self.shared.on_recv.wait(state);
         }
+        drop(state);
+        self.shared.on_send.notify_one();
+        Ok(())
     }
 }
 
@@ -131,17 +132,18 @@ impl<T> Receiver<T> {
     /// its last message.
     pub fn recv(&self) -> Result<T, RecvError> {
         let mut state = self.shared.state.lock();
-        loop {
+        let value = loop {
             if let Some(value) = state.queue.pop_front() {
-                drop(state);
-                self.shared.on_recv.notify_one();
-                return Ok(value);
+                break value;
             }
             if state.senders == 0 {
                 return Err(RecvError);
             }
             state = self.shared.on_send.wait(state);
-        }
+        };
+        drop(state);
+        self.shared.on_recv.notify_one();
+        Ok(value)
     }
 
     /// Take a value if one is already queued, without blocking.

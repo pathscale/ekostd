@@ -75,8 +75,10 @@ fn address(path: &[u8]) -> Result<libc::sockaddr_un, Errno> {
     if path.len() >= addr.sun_path.len() {
         return Err(Errno(libc::ENAMETOOLONG));
     }
-    for (slot, byte) in addr.sun_path.iter_mut().zip(path.iter()) {
-        *slot = *byte as _;
+    let mut index = 0;
+    while index < path.len() {
+        addr.sun_path[index] = path[index] as _;
+        index += 1;
     }
     Ok(addr)
 }
@@ -254,9 +256,13 @@ impl Lines {
         let mut line: Vec<u8> = Vec::new();
         loop {
             // Anything already buffered, up to a newline.
-            if let Some(n) = self.buf[self.at..self.filled].iter().position(|b| *b == b'\n') {
-                line.extend_from_slice(&self.buf[self.at..self.at + n]);
-                self.at += n + 1;
+            let mut newline = self.at;
+            while newline < self.filled && self.buf[newline] != b'\n' {
+                newline += 1;
+            }
+            if newline < self.filled {
+                line.extend_from_slice(&self.buf[self.at..newline]);
+                self.at = newline + 1;
                 return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
             }
             line.extend_from_slice(&self.buf[self.at..self.filled]);
