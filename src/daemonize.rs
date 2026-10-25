@@ -60,10 +60,13 @@ impl Ready {
     /// into a start-up error would stop a good server because whoever launched it walked away.
     pub fn signal(self) {
         let byte = 1u8;
-        unsafe {
-            libc::write(self.write_fd, core::ptr::from_ref(&byte).cast(), 1);
-            libc::close(self.write_fd);
+        loop {
+            let wrote = unsafe { libc::write(self.write_fd, core::ptr::from_ref(&byte).cast(), 1) };
+            if wrote == 1 || wrote == 0 || Errno::current().0 != libc::EINTR {
+                break;
+            }
         }
+        unsafe { libc::close(self.write_fd) };
         core::mem::forget(self);
     }
 }
@@ -154,14 +157,27 @@ pub fn daemonize(pid_file: Option<&[u8]>) -> Result<Started, DaemonizeError> {
     // point is for it to cross two forks intact.
     checked(unsafe { libc::pipe(fds.as_mut_ptr()) }).map_err(DaemonizeError::Pipe)?;
     let (read_fd, write_fd) = (fds[0], fds[1]);
+    let ready = Ready { write_fd };
 
-    match fork()? {
+    let first_fork = match fork() {
+        Ok(result) => result,
+        Err(error) => {
+            unsafe { libc::close(read_fd) };
+            return Err(error);
+        }
+    };
+    match first_fork {
         Forked::Parent => {
             // The parent must not hold a write end open, or the read below can never see EOF and
             // a failed start hangs instead of reporting. This asymmetry is the whole mechanism.
-            unsafe { libc::close(write_fd) };
+            drop(ready);
             let mut byte = 0u8;
-            let read = unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
+            let read = loop {
+                let read = unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
+                if read >= 0 || Errno::current().0 != libc::EINTR {
+                    break read;
+                }
+            };
             unsafe { libc::close(read_fd) };
             crate::exit(if read == 1 { 0 } else { 1 });
         }
@@ -191,7 +207,7 @@ pub fn daemonize(pid_file: Option<&[u8]>) -> Result<Started, DaemonizeError> {
 
     redirect_standard_streams()?;
 
-    Ok(Started::Daemon(Ready { write_fd }))
+    Ok(Started::Daemon(ready))
 }
 
 /// Claim the pid file, or refuse because someone else holds it.
@@ -208,14 +224,30 @@ fn write_pid_file(path: &[u8]) -> Result<(), DaemonizeError> {
         unsafe { libc::close(fd) };
         return Err(DaemonizeError::PidFileLocked);
     }
-    checked(unsafe { libc::ftruncate(fd, 0) }).map_err(DaemonizeError::PidFile)?;
+    if unsafe { libc::ftruncate(fd, 0) } == -1 {
+        let error = Errno::current();
+        unsafe { libc::close(fd) };
+        return Err(DaemonizeError::PidFile(error));
+    }
 
     let pid = unsafe { libc::getpid() };
     let mut buf = [0u8; 24];
     let text = format_pid(pid, &mut buf);
-    let wrote = unsafe { libc::write(fd, text.as_ptr().cast(), text.len()) };
-    if wrote < 0 {
-        return Err(DaemonizeError::PidFile(Errno::current()));
+    let mut offset = 0;
+    while offset < text.len() {
+        let wrote = unsafe {
+            libc::write(fd, text[offset..].as_ptr().cast(), text.len() - offset)
+        };
+        if wrote > 0 {
+            offset += wrote as usize;
+            continue;
+        }
+        let error = if wrote == 0 { Errno(libc::EIO) } else { Errno::current() };
+        if wrote < 0 && error.0 == libc::EINTR {
+            continue;
+        }
+        unsafe { libc::close(fd) };
+        return Err(DaemonizeError::PidFile(error));
     }
 
     // **The descriptor stays open on purpose, and is deliberately leaked.** `flock` is released
@@ -239,7 +271,7 @@ fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
         buf[i] = b'0' + (n % 10) as u8;
         n /= 10;
     }
-    buf[buf.len() - 1] = buf[buf.len() - 1];
+
     &buf[i..]
 }
 
