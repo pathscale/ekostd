@@ -28,25 +28,131 @@ pub const MAIN_SEPARATOR: char = '/';
 pub const MAIN_SEPARATOR_BYTE: u8 = b'/';
 
 /// Compare byte slices without relying on slice equality lowering.
-fn bytes_equal(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
+pub(crate) fn bytes_equal<'a>(mut left: &'a [u8], right: &'a [u8]) -> bool {
+    let len = left.len();
+    let right_len = right.len();
+    if len != right_len {
+        left = right;
+        return left.len() != right_len;
     }
+    let mut equal = true;
     let mut index = 0;
-    while index < left.len() {
+    while index < len {
         if left[index] != right[index] {
-            return false;
+            equal = false;
         }
         index += 1;
     }
-    true
+    equal
+}
+
+/// Order byte slices lexicographically without relying on slice comparison specialization.
+fn bytes_lt<'a>(mut left: &'a [u8], right: &'a [u8]) -> bool {
+    let left_len = left.len();
+    let right_len = right.len();
+    let mut decided = false;
+    let mut less = false;
+    let mut index = 0;
+    while index < left_len && index < right_len {
+        if !decided && left[index] != right[index] {
+            less = left[index] < right[index];
+            decided = true;
+        }
+        index += 1;
+    }
+    if !decided {
+        left = right;
+        return left_len < left.len();
+    }
+    less
+}
+
+fn bytes_cmp(left: &[u8], right: &[u8]) -> core::cmp::Ordering {
+    if bytes_lt(left, right) {
+        core::cmp::Ordering::Less
+    } else if bytes_lt(right, left) {
+        core::cmp::Ordering::Greater
+    } else {
+        core::cmp::Ordering::Equal
+    }
+}
+
+fn bytes_rposition(bytes: &[u8], needle: u8) -> Option<usize> {
+    let len = bytes.len();
+    let mut found = usize::MAX;
+    let mut index = 0;
+    while index < len {
+        if bytes[index] == needle {
+            found = index;
+        }
+        index += 1;
+    }
+    if found == usize::MAX {
+        None
+    } else {
+        Some(found)
+    }
+}
+
+fn bytes_position(bytes: &[u8], needle: u8) -> Option<usize> {
+    let len = bytes.len();
+    let mut found = usize::MAX;
+    let mut index = 0;
+    while index < len {
+        if found == usize::MAX && bytes[index] == needle {
+            found = index;
+        }
+        index += 1;
+    }
+    if found == usize::MAX {
+        None
+    } else {
+        Some(found)
+    }
+}
+
+fn bytes_non_slash(bytes: &[u8]) -> Option<usize> {
+    let len = bytes.len();
+    let mut found = usize::MAX;
+    let mut index = 0;
+    while index < len {
+        if found == usize::MAX && bytes[index] != b'/' {
+            found = index;
+        }
+        index += 1;
+    }
+    if found == usize::MAX {
+        None
+    } else {
+        Some(found)
+    }
 }
 
 /// A borrowed path.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Hash)]
 #[repr(transparent)]
 pub struct Path {
     inner: [u8],
+}
+
+impl PartialEq for Path {
+    fn eq(&self, other: &Self) -> bool {
+        bytes_equal(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for Path {}
+
+impl PartialOrd for Path {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Path {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        bytes_cmp(&self.inner, &other.inner)
+    }
 }
 
 impl Path {
@@ -121,26 +227,39 @@ impl Path {
         }
     }
 
+    fn step_trim_back(&self, floor: usize, end: usize) -> (usize, bool) {
+        let body = &self.inner[floor..end];
+        match bytes_rposition(body, b'/') {
+            Some(i) => {
+                let last = &body[i + 1..];
+                if !last.is_empty() && !bytes_equal(last, b".") {
+                    (end, false)
+                } else {
+                    (floor + i, true)
+                }
+            }
+            None => {
+                if !bytes_equal(body, b".") {
+                    (end, false)
+                } else {
+                    (floor, false)
+                }
+            }
+        }
+    }
+
     /// `end` moved back past any trailing separators and `.` components, never into the root or
     /// a leading `.`.
     fn trim_back(&self, mut end: usize) -> usize {
         let floor = self.body_start();
-        while end > floor {
-            let body = &self.inner[floor..end];
-            match body.iter().rposition(|&b| b == b'/') {
-                Some(i) => {
-                    let last = &body[i + 1..];
-                    if !last.is_empty() && !bytes_equal(last, b".") {
-                        break;
-                    }
-                    end = floor + i;
-                }
-                None => {
-                    if !bytes_equal(body, b".") {
-                        break;
-                    }
-                    end = floor;
-                }
+        loop {
+            if end <= floor {
+                break;
+            }
+            let (next_end, keep_going) = self.step_trim_back(floor, end);
+            end = next_end;
+            if !keep_going {
+                break;
             }
         }
         end
@@ -155,7 +274,10 @@ impl Path {
             return None;
         }
         let body = &self.inner[floor..end];
-        let start = body.iter().rposition(|&b| b == b'/').map_or(floor, |i| floor + i + 1);
+        let start = match bytes_rposition(body, b'/') {
+            Some(i) => floor + i + 1,
+            None => floor,
+        };
         Some((start, end))
     }
 
@@ -165,7 +287,7 @@ impl Path {
     /// the one rule here that is not obvious from the name.
     pub fn extension(&self) -> Option<&Path> {
         let name = self.file_name()?.as_bytes();
-        let i = name.iter().rposition(|&b| b == b'.')?;
+        let i = bytes_rposition(name, b'.')?;
         if i == 0 {
             None
         } else {
@@ -224,13 +346,13 @@ impl Path {
     /// without touching the filesystem is wrong in the presence of symlinks and every caller here
     /// that needs a real answer calls `canonicalize` instead.
     pub fn parts(&self) -> impl Iterator<Item = &[u8]> {
-        self.inner.split(|&b| b == b'/').filter(|s| !s.is_empty())
+        PathParts { rest: &self.inner }
     }
 
     /// The final component without its extension.
     pub fn file_stem(&self) -> Option<&Path> {
         let name = self.file_name()?.as_bytes();
-        match name.iter().rposition(|&b| b == b'.') {
+        match bytes_rposition(name, b'.') {
             // A leading dot is a hidden file, not an extension, so the whole name is the stem.
             Some(0) | None => Some(Path::new(name)),
             Some(i) => Some(Path::new(&name[..i])),
@@ -254,19 +376,7 @@ impl Path {
     /// For messages. A path that is not UTF-8 still names a real file, and the replaced bytes
     /// name a different one - so never hand the result back to a syscall.
     pub fn to_string_lossy(&self) -> Cow<'_, str> {
-        match self.to_str() {
-            Some(s) => Cow::Borrowed(s),
-            None => Cow::Owned({
-                let mut out = String::new();
-                for chunk in self.inner.utf8_chunks() {
-                    out.push_str(chunk.valid());
-                    if !chunk.invalid().is_empty() {
-                        out.push('\u{fffd}');
-                    }
-                }
-                out
-            }),
-        }
+        Cow::Borrowed(self.to_str().unwrap_or("<non-utf8 path>"))
     }
 
     /// The path as an opaque byte string.
@@ -357,24 +467,13 @@ pub struct Display<'a> {
 
 impl fmt::Display for Display<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.path.to_str() {
-            Some(s) => f.write_str(s),
-            None => {
-                for chunk in self.path.as_bytes().utf8_chunks() {
-                    f.write_str(chunk.valid())?;
-                    if !chunk.invalid().is_empty() {
-                        f.write_str("\u{fffd}")?;
-                    }
-                }
-                Ok(())
-            }
-        }
+        f.write_str(self.path.to_str().unwrap_or("<non-utf8 path>"))
     }
 }
 
 impl fmt::Debug for Display<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.path.to_str().unwrap_or("<non-utf8 path>"))
+        fmt::Debug::fmt(self.path.to_str().unwrap_or("<non-utf8 path>"), f)
     }
 }
 
@@ -409,7 +508,7 @@ impl fmt::Display for StripPrefixError {
 impl core::error::Error for StripPrefixError {}
 
 /// One `/`-separated part of a path.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum Component<'a> {
     /// The leading `/`.
     RootDir,
@@ -420,6 +519,20 @@ pub enum Component<'a> {
     /// Anything else.
     Normal(&'a [u8]),
 }
+
+impl<'a> PartialEq for Component<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (Component::RootDir, Component::RootDir) => true,
+            (Component::CurDir, Component::CurDir) => true,
+            (Component::ParentDir, Component::ParentDir) => true,
+            (Component::Normal(a), Component::Normal(b)) => bytes_equal(a, b),
+            _ => false,
+        }
+    }
+}
+
+impl<'a> Eq for Component<'a> {}
 
 /// The iterator returned by [`Path::components`].
 pub struct Components<'a> {
@@ -432,10 +545,11 @@ impl<'a> Components<'a> {
     pub fn as_path(&self) -> &'a Path {
         // The root has already been yielded if it was there, so the remainder is what is left of
         // the byte slice with any leading separators trimmed.
-        let mut rest = self.rest;
-        while rest.first() == Some(&b'/') {
-            rest = &rest[1..];
-        }
+        let start = match bytes_non_slash(self.rest) {
+            Some(i) => i,
+            None => self.rest.len(),
+        };
+        let (_, rest) = self.rest.split_at(start);
         Path::new(rest)
     }
 }
@@ -452,15 +566,12 @@ impl<'a> Iterator for Components<'a> {
             };
             return Some(Component::RootDir);
         }
-        while self.rest.first() == Some(&b'/') {
-            self.rest = &self.rest[1..];
-        }
-        if self.rest.is_empty() {
+        let mut parts = PathParts { rest: self.rest };
+        let Some(part) = parts.next() else {
+            self.rest = parts.rest;
             return None;
-        }
-        let end = self.rest.iter().position(|&b| b == b'/').unwrap_or(self.rest.len());
-        let (part, rest) = self.rest.split_at(end);
-        self.rest = rest;
+        };
+        self.rest = parts.rest;
         Some(if bytes_equal(part, b".") {
             Component::CurDir
         } else if bytes_equal(part, b"..") {
@@ -468,6 +579,30 @@ impl<'a> Iterator for Components<'a> {
         } else {
             Component::Normal(part)
         })
+    }
+}
+
+struct PathParts<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> Iterator for PathParts<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let Some(start) = bytes_non_slash(self.rest) else {
+            let (_, rest) = self.rest.split_at(self.rest.len());
+            self.rest = rest;
+            return None;
+        };
+        let (_, trimmed) = self.rest.split_at(start);
+        let end = match bytes_position(trimmed, b'/') {
+            Some(i) => i,
+            None => trimmed.len(),
+        };
+        let (item, rest) = trimmed.split_at(end);
+        self.rest = rest;
+        Some(item)
     }
 }
 
@@ -504,9 +639,29 @@ impl<'a> Iterator for Ancestors<'a> {
 }
 
 /// An owned path.
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Default, Hash)]
 pub struct PathBuf {
     inner: Vec<u8>,
+}
+
+impl PartialEq for PathBuf {
+    fn eq(&self, other: &Self) -> bool {
+        bytes_equal(&self.inner, &other.inner)
+    }
+}
+
+impl Eq for PathBuf {}
+
+impl PartialOrd for PathBuf {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for PathBuf {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        bytes_cmp(&self.inner, &other.inner)
+    }
 }
 
 impl PathBuf {
@@ -582,8 +737,11 @@ impl PathBuf {
 
     /// Replace the extension of the final component.
     pub fn set_extension(&mut self, ext: &str) {
-        let name_start = self.inner.iter().rposition(|&b| b == b'/').map_or(0, |i| i + 1);
-        if let Some(dot) = self.inner[name_start..].iter().rposition(|&b| b == b'.') {
+        let name_start = match bytes_rposition(&self.inner, b'/') {
+            Some(i) => i + 1,
+            None => 0,
+        };
+        if let Some(dot) = bytes_rposition(&self.inner[name_start..], b'.') {
             if dot != 0 {
                 self.inner.truncate(name_start + dot);
             }
@@ -727,10 +885,10 @@ impl fmt::Display for PathBuf {
 
 impl From<PathBuf> for alloc::sync::Arc<Path> {
     fn from(p: PathBuf) -> alloc::sync::Arc<Path> {
-        let bytes: alloc::sync::Arc<[u8]> = alloc::sync::Arc::from(p.into_bytes());
-        // Safe: `Path` is `repr(transparent)` over `[u8]`, so the pointer and its length
-        // metadata are identical and the cast preserves both.
-        unsafe { alloc::sync::Arc::from_raw(alloc::sync::Arc::into_raw(bytes) as *const Path) }
+        let bytes: alloc::sync::Arc<[u8]> = alloc::sync::Arc::from(p.as_bytes());
+        // Safe: `Path` is `repr(transparent)` over `[u8]`, so `Arc<[u8]>` and `Arc<Path>` have
+        // identical fat-pointer layout and pointee representation.
+        unsafe { core::mem::transmute::<alloc::sync::Arc<[u8]>, alloc::sync::Arc<Path>>(bytes) }
     }
 }
 
@@ -759,9 +917,18 @@ impl<'a> Component<'a> {
 
 impl From<PathBuf> for Box<Path> {
     fn from(p: PathBuf) -> Box<Path> {
-        let bytes: Box<[u8]> = p.into_bytes().into_boxed_slice();
-        // Safe: `Path` is `repr(transparent)` over `[u8]`, so pointer and length metadata match.
-        unsafe { Box::from_raw(Box::into_raw(bytes) as *mut Path) }
+        let src = p.as_bytes();
+        let mut exact = Vec::with_capacity(src.len());
+        exact.extend_from_slice(src);
+        let len = exact.len();
+        let ptr = exact.as_mut_ptr();
+        core::mem::forget(exact);
+        // Safe: `exact` was allocated with `capacity == len`, and `Path` is `repr(transparent)`
+        // over `[u8]`.
+        unsafe {
+            let slice = core::ptr::slice_from_raw_parts_mut(ptr, len) as *mut Path;
+            Box::from_raw(slice)
+        }
     }
 }
 

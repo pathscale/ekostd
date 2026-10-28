@@ -135,7 +135,11 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> crate::file::Result<()> {
 /// the name, and only a real directory is descended into.
 pub fn remove_dir_all(path: impl AsRef<Path>) -> crate::file::Result<()> {
     let path = path.as_ref();
-    for child in read_dir(path)? {
+    let children = read_dir(path)?;
+    let mut i = 0;
+    while i < children.len() {
+        let child = &children[i];
+        i += 1;
         // `symlink_metadata` rather than `metadata`: the question is what the *name* is, not
         // what it points at.
         let link = crate::file::symlink_metadata(child.as_path())?;

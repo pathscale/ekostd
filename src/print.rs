@@ -11,8 +11,36 @@
 //! what `std` does *not* do - `std::eprintln!` panics on a broken pipe, which turns `ekod | head`
 //! into a compiler crash.
 
-use alloc::string::String;
-use core::fmt::Write as _;
+use alloc::vec::Vec;
+
+struct FdBuf(Vec<u8>);
+
+impl core::fmt::Write for FdBuf {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
+    }
+
+    fn write_char(&mut self, c: char) -> core::fmt::Result {
+        let code = c as u32;
+        if code < 0x80 {
+            self.0.push(code as u8);
+        } else if code < 0x800 {
+            self.0.push((0xC0 | (code >> 6)) as u8);
+            self.0.push((0x80 | (code & 0x3F)) as u8);
+        } else if code < 0x10000 {
+            self.0.push((0xE0 | (code >> 12)) as u8);
+            self.0.push((0x80 | ((code >> 6) & 0x3F)) as u8);
+            self.0.push((0x80 | (code & 0x3F)) as u8);
+        } else {
+            self.0.push((0xF0 | (code >> 18)) as u8);
+            self.0.push((0x80 | ((code >> 12) & 0x3F)) as u8);
+            self.0.push((0x80 | ((code >> 6) & 0x3F)) as u8);
+            self.0.push((0x80 | (code & 0x3F)) as u8);
+        }
+        Ok(())
+    }
+}
 
 /// Write bytes to a descriptor, retrying a short write and giving up on any error.
 ///
@@ -34,10 +62,10 @@ pub fn write_fd(fd: i32, mut bytes: &[u8]) {
 
 /// The formatting half, kept out of the macro so the macro expands to one call.
 pub fn emit(fd: i32, args: core::fmt::Arguments<'_>) {
-    let mut s = String::new();
-    // Formatting into a String cannot fail; the result is discarded to avoid an unwrap.
-    let _ = s.write_fmt(args);
-    write_fd(fd, s.as_bytes());
+    let mut s = FdBuf(Vec::new());
+    // Formatting into a buffer cannot fail; the result is discarded to avoid an unwrap.
+    let _ = core::fmt::Write::write_fmt(&mut s, args);
+    write_fd(fd, &s.0);
 }
 
 /// `eprintln!` without `std`.

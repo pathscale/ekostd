@@ -287,7 +287,7 @@ impl<T: 'static> ThreadLocal<T> {
                 }
             }
         }
-        let existing = self.key.load(Ordering::Acquire);
+        let existing = self.key.fetch_add(0, Ordering::Acquire);
         if existing != 0 {
             return Some((existing - 1) as libc::pthread_key_t);
         }
@@ -310,6 +310,19 @@ impl<T: 'static> ThreadLocal<T> {
         }
     }
 
+    unsafe fn alloc_tls_box(value: T) -> *mut T {
+        let layout = core::alloc::Layout::new::<T>();
+        if layout.size() == 0 {
+            return core::ptr::NonNull::<T>::dangling().as_ptr();
+        }
+        let raw = unsafe { alloc::alloc::alloc(layout).cast::<T>() };
+        if raw.is_null() {
+            alloc::alloc::handle_alloc_error(layout);
+        }
+        unsafe { core::ptr::write(raw, value) };
+        raw
+    }
+
     /// This thread's value, creating it from `init` on first use.
     ///
     /// `None` only when the key could not be created, which is a process out of thread-local
@@ -321,7 +334,7 @@ impl<T: 'static> ThreadLocal<T> {
         unsafe {
             let existing = libc::pthread_getspecific(key);
             let ptr = if existing.is_null() {
-                let boxed = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(init()));
+                let boxed = Self::alloc_tls_box(init());
                 libc::pthread_setspecific(key, boxed.cast());
                 boxed
             } else {
@@ -389,14 +402,14 @@ impl Condvar {
     /// does not hold it races with a thread entering `wait`, and gets a best-effort answer - a
     /// `false` means nobody had entered `wait` yet, not that nobody ever will.
     pub fn notify_one(&self) -> bool {
-        let had_waiter = self.waiters.load(core::sync::atomic::Ordering::Relaxed) > 0;
+        let had_waiter = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed) > 0;
         unsafe { libc::pthread_cond_signal(self.inner.get()) };
         had_waiter
     }
 
     /// Wake all of them. Returns how many were waiting.
     pub fn notify_all(&self) -> usize {
-        let waiting = self.waiters.load(core::sync::atomic::Ordering::Relaxed);
+        let waiting = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed);
         unsafe { libc::pthread_cond_broadcast(self.inner.get()) };
         waiting
     }
@@ -453,7 +466,7 @@ impl<T> OnceLock<T> {
     /// The value, if it has been initialised.
     pub fn get(&self) -> Option<&T> {
         use core::sync::atomic::Ordering;
-        if self.state.load(Ordering::Acquire) != ONCE_READY {
+        if self.state.fetch_add(0, Ordering::Acquire) != ONCE_READY {
             return None;
         }
         // Safe: the Acquire load paired with the Release store in `get_or_init` means the write
@@ -931,7 +944,7 @@ impl<T> JoinHandle<T> {
 
 /// The handle a scoped thread is started through.
 pub struct Scope<'scope, 'env: 'scope> {
-    handles: core::cell::RefCell<Vec<libc::pthread_t>>,
+    handles: *mut Vec<libc::pthread_t>,
     _marker: core::marker::PhantomData<(&'scope (), &'env ())>,
 }
 
@@ -974,7 +987,8 @@ impl<'scope, 'env> Scope<'scope, 'env> {
             drop(unsafe { Box::from_raw(payload) });
             return;
         }
-        self.handles.borrow_mut().push(tid);
+        let handles = self.handles;
+        unsafe { (*handles).push(tid) };
     }
 }
 
@@ -987,11 +1001,18 @@ pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
 {
-    let sc =
-        Scope { handles: core::cell::RefCell::new(Vec::new()), _marker: core::marker::PhantomData };
+    let mut handles: Vec<libc::pthread_t> = Vec::new();
+    let sc = Scope {
+        handles: core::ptr::from_mut(&mut handles),
+        _marker: core::marker::PhantomData,
+    };
     let out = f(&sc);
-    for tid in sc.handles.borrow().iter() {
-        unsafe { libc::pthread_join(*tid, core::ptr::null_mut()) };
+    let slice = handles.as_slice();
+    let len = slice.len();
+    let mut i = 0usize;
+    while i < len {
+        unsafe { libc::pthread_join(slice[i], core::ptr::null_mut()) };
+        i += 1;
     }
     out
 }
@@ -1022,8 +1043,12 @@ where
 ///
 /// Only a pointer is stored, so `T` need not be `'static` in the value - the borrow is live
 /// exactly as long as [`ScopedKey::set`]'s closure runs, which is what makes reading it sound.
+fn init_scoped_cell() -> core::cell::Cell<*const ()> {
+    core::cell::Cell::new(core::ptr::null())
+}
+
 pub struct ScopedKey<T: 'static> {
-    slot: LocalKey<core::cell::Cell<*const ()>>,
+    slot: ThreadLocal<core::cell::Cell<*const ()>>,
     _marker: core::marker::PhantomData<T>,
 }
 
@@ -1041,7 +1066,7 @@ impl<T: 'static> ScopedKey<T> {
     /// Not called directly; [`scoped_thread_local!`] builds these.
     pub const fn new() -> ScopedKey<T> {
         ScopedKey {
-            slot: LocalKey::new(|| core::cell::Cell::new(core::ptr::null())),
+            slot: ThreadLocal::new(),
             _marker: core::marker::PhantomData,
         }
     }
@@ -1062,17 +1087,22 @@ impl<T: 'static> ScopedKey<T> {
     /// `ekod` that was: refuse one file, then compile a valid one, and the daemon died.
     pub fn set<R>(&'static self, value: &T, f: impl FnOnce() -> R) -> R {
         struct Reset {
-            slot: &'static LocalKey<core::cell::Cell<*const ()>>,
+            slot: &'static ThreadLocal<core::cell::Cell<*const ()>>,
             previous: *const (),
         }
 
         impl Drop for Reset {
             fn drop(&mut self) {
-                self.slot.set(self.previous);
+                self.slot
+                    .with(|| init_scoped_cell(), |c| c.set(self.previous))
+                    .expect("a thread can always reach its own key");
             }
         }
 
-        let previous = self.slot.replace((value as *const T).cast());
+        let previous = self
+            .slot
+            .with(|| init_scoped_cell(), |c| c.replace((value as *const T).cast()))
+            .expect("a thread can always reach its own key");
         let _reset = Reset { slot: &self.slot, previous };
         f()
     }
@@ -1083,7 +1113,10 @@ impl<T: 'static> ScopedKey<T> {
     /// caller reaching for session globals outside a session has a bug that a `None` would only
     /// move somewhere less obvious.
     pub fn with<R>(&'static self, f: impl FnOnce(&T) -> R) -> R {
-        let p = self.slot.get();
+        let p = self
+            .slot
+            .with(|| init_scoped_cell(), |c| c.get())
+            .expect("a thread can always reach its own key");
         assert!(!p.is_null(), "cannot access a scoped thread local that has not been set");
         // Safe: the pointer was written by `set`, whose closure is still running - so the
         // referent outlives this borrow - and it is cleared on the way out.
@@ -1092,7 +1125,11 @@ impl<T: 'static> ScopedKey<T> {
 
     /// Whether a value is installed on this thread.
     pub fn is_set(&'static self) -> bool {
-        !self.slot.get().is_null()
+        !self
+            .slot
+            .with(|| init_scoped_cell(), |c| c.get())
+            .expect("a thread can always reach its own key")
+            .is_null()
     }
 }
 
