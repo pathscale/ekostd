@@ -4,15 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 license = "Apache-2.0 OR MIT"
-description = "Panic handler and personality tied to the compiler frontend instance"
+description = "Abort-only panic handler for the compiler frontend"
 
 [lib]
 path = "src/lib.rs"
 test = false
 doctest = false
-
-[dependencies]
-frontend = "^0.7.1"
-ekostd = { version = "^0.2.3", features = ["nightly"] }
 
 [workspace]

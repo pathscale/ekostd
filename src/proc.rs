@@ -28,3 +28,9 @@ pub fn exit(code: i32) -> ! {
     // Safe: `exit` does not return, and the process is being torn down either way.
     unsafe { libc::exit(code) }
 }
+
+/// Terminate immediately without unwinding or running Rust destructors.
+pub fn abort() -> ! {
+    // Safe: abort takes no arguments and never returns.
+    unsafe { libc::abort() }
+}
