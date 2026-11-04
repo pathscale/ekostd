@@ -23,6 +23,13 @@ pub extern "C" fn rust_eh_personality(
     unsafe { abort() }
 }
 
+// C spelling _Unwind_Resume exports as __Unwind_Resume on Mach-O.
+// This link-compatibility trap never inspects or resumes the exception.
+#[unsafe(no_mangle)]
+pub extern "C" fn _Unwind_Resume(_exception: *mut core::ffi::c_void) -> ! {
+    unsafe { abort() }
+}
+
 struct Stderr;
 
 impl fmt::Write for Stderr {
