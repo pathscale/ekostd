@@ -1,0 +1,22 @@
+{
+  "at": "2026-11-04T22:33:46.936Z",
+  "status": "inactive historical workarounds; never applied automatically",
+  "from": "../ekopathrs/vendor/rust",
+  "to": "../rust-stdlib",
+  "operation": "rename original nested Git repository, no clone/copy/new branch/worktree",
+  "sourceHead": "5321a4f40c957cf3587c055e77461febc2ebc865",
+  "cleanSource": true,
+  "libraryRoot": "../rust-stdlib/library",
+  "retiredPatch": {
+    "path": "compat/retired/rust-core-workarounds.patch",
+    "sha256": "5051921eac4c37b6fed5146b7824db74b8d9fb2212546d1c2e22749a9cd6ad08",
+    "files": [
+      "library/core/src/num/int_macros.rs",
+      "library/core/src/num/mod.rs",
+      "library/core/src/num/uint_macros.rs",
+      "library/core/src/ptr/mod.rs",
+      "library/core/src/slice/mod.rs"
+    ]
+  },
+  "reason": "Compiler checkout owns compiler source. Temporary compatibility history lives in ekostd. These workarounds include nonportable native-endian rewrites and must not silently define a clean Rust library baseline."
+}
