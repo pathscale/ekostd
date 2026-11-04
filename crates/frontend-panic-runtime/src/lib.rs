@@ -10,6 +10,19 @@ unsafe extern "C" {
     fn abort() -> !;
 }
 
+// Match the Itanium personality ABI used by supported Darwin and Linux targets.
+// This link-compatibility trap intentionally does not inspect unwinder state.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_eh_personality(
+    _version: i32,
+    _actions: i32,
+    _exception_class: u64,
+    _exception_object: *mut core::ffi::c_void,
+    _context: *mut core::ffi::c_void,
+) -> i32 {
+    unsafe { abort() }
+}
+
 struct Stderr;
 
 impl fmt::Write for Stderr {
