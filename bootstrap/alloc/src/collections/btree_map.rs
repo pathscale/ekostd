@@ -7,6 +7,18 @@ use core::ops::Index;
 
 pub struct BTreeMap<K, V> { entries: Vec<(K, V)> }
 
+pub type Iter<'a, K, V> = core::iter::Map<core::slice::Iter<'a, (K, V)>, fn(&(K, V)) -> (&K, &V)>;
+pub type IterMut<'a, K, V> = core::iter::Map<core::slice::IterMut<'a, (K, V)>, fn(&mut (K, V)) -> (&K, &mut V)>;
+pub type Keys<'a, K, V> = core::iter::Map<core::slice::Iter<'a, (K, V)>, fn(&(K, V)) -> &K>;
+pub type Values<'a, K, V> = core::iter::Map<core::slice::Iter<'a, (K, V)>, fn(&(K, V)) -> &V>;
+pub type ValuesMut<'a, K, V> = core::iter::Map<core::slice::IterMut<'a, (K, V)>, fn(&mut (K, V)) -> &mut V>;
+
+fn map_iter<K, V>((k, v): &(K, V)) -> (&K, &V) { (k, v) }
+fn map_iter_mut<K, V>((k, v): &mut (K, V)) -> (&K, &mut V) { (&*k, v) }
+fn map_key<K, V>((k, _): &(K, V)) -> &K { k }
+fn map_val<K, V>((_, v): &(K, V)) -> &V { v }
+fn map_val_mut<K, V>((_, v): &mut (K, V)) -> &mut V { v }
+
 impl<K, V> BTreeMap<K, V> {
     pub const fn new() -> Self { Self { entries: Vec::new() } }
     fn insert_at(&mut self, index: usize, pair: (K, V)) {
@@ -30,15 +42,15 @@ impl<K, V> BTreeMap<K, V> {
     pub fn clear(&mut self) { self.entries.clear(); }
     pub fn len(&self) -> usize { self.entries.len() }
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (&K, &V)> + ExactSizeIterator {
-        self.entries.iter().map(|(k, v)| (k, v))
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        self.entries.iter().map(map_iter::<K, V>)
     }
-    pub fn iter_mut(&mut self) -> impl DoubleEndedIterator<Item = (&K, &mut V)> + ExactSizeIterator {
-        self.entries.iter_mut().map(|(k, v)| (&*k, v))
+    pub fn iter_mut(&mut self) -> IterMut<'_, K, V> {
+        self.entries.iter_mut().map(map_iter_mut::<K, V>)
     }
-    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &K> + ExactSizeIterator { self.entries.iter().map(|(k, _)| k) }
-    pub fn values(&self) -> impl DoubleEndedIterator<Item = &V> + ExactSizeIterator { self.entries.iter().map(|(_, v)| v) }
-    pub fn values_mut(&mut self) -> impl DoubleEndedIterator<Item = &mut V> + ExactSizeIterator { self.entries.iter_mut().map(|(_, v)| v) }
+    pub fn keys(&self) -> Keys<'_, K, V> { self.entries.iter().map(map_key::<K, V>) }
+    pub fn values(&self) -> Values<'_, K, V> { self.entries.iter().map(map_val::<K, V>) }
+    pub fn values_mut(&mut self) -> ValuesMut<'_, K, V> { self.entries.iter_mut().map(map_val_mut::<K, V>) }
     pub fn first_key_value(&self) -> Option<(&K, &V)> { self.entries.first().map(|(k, v)| (k, v)) }
     pub fn last_key_value(&self) -> Option<(&K, &V)> { self.entries.last().map(|(k, v)| (k, v)) }
     pub fn pop_first(&mut self) -> Option<(K, V)> { if self.is_empty() { None } else { Some(self.remove_at(0)) } }

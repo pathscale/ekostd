@@ -26,6 +26,6 @@ pub fn format(args: core::fmt::Arguments<'_>) -> crate::string::String {
 #[macro_export]
 macro_rules! format {
     ($($arg:tt)*) => {{
-        $crate::fmt::format(::core::format_args!($($arg)*))
+        alloc::fmt::format(format_args!($($arg)*))
     }};
 }

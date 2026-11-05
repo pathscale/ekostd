@@ -22,7 +22,7 @@ impl<T> Vec<T> {
         if capacity == 0 {
             return Self::new();
         }
-        let layout = Layout::array::<T>(capacity).unwrap_or_else(|_| panic!("capacity overflow"));
+        let layout = Layout::array::<T>(capacity).expect("capacity overflow");
         let pointer = unsafe { alloc::alloc(layout).cast::<T>() };
         Self { pointer: unsafe { NonNull::new_unchecked(pointer) }, length: 0, capacity }
     }
@@ -191,7 +191,7 @@ impl<T> Vec<T> {
     }
 
     fn reserve_inner(&mut self, additional: usize, exact: bool) {
-        let required = self.length.checked_add(additional).unwrap_or_else(|| panic!("capacity overflow"));
+        let required = self.length.checked_add(additional).expect("capacity overflow");
         if required <= self.capacity { return; }
         if mem::size_of::<T>() == 0 {
             self.capacity = usize::MAX;
@@ -199,11 +199,11 @@ impl<T> Vec<T> {
         }
         let doubled = self.capacity.checked_mul(2).unwrap_or(required);
         let new_capacity = if exact { required } else { core::cmp::max(required, doubled.max(4)) };
-        let new_layout = Layout::array::<T>(new_capacity).unwrap_or_else(|_| panic!("capacity overflow"));
+        let new_layout = Layout::array::<T>(new_capacity).expect("capacity overflow");
         let new_pointer = if self.capacity == 0 {
             unsafe { alloc::alloc(new_layout).cast::<T>() }
         } else {
-            let old_layout = Layout::array::<T>(self.capacity).unwrap_or_else(|_| panic!("capacity overflow"));
+            let old_layout = Layout::array::<T>(self.capacity).expect("capacity overflow");
             unsafe { alloc::realloc(self.pointer.as_ptr().cast(), old_layout, new_layout.size()).cast::<T>() }
         };
         self.pointer = unsafe { NonNull::new_unchecked(new_pointer) };

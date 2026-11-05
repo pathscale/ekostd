@@ -1,4 +1,5 @@
 #![no_std]
+#![feature(core_intrinsics)]
 
 #[macro_use]
 extern crate core;
@@ -10,7 +11,7 @@ static PANICKING: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
-    fn abort() -> !;
+    fn abort();
 }
 
 // Match the Itanium personality ABI used by supported Darwin and Linux targets.
@@ -23,14 +24,15 @@ pub extern "C" fn rust_eh_personality(
     _exception_object: *mut core::ffi::c_void,
     _context: *mut core::ffi::c_void,
 ) -> i32 {
-    unsafe { abort() }
+    unsafe { abort(); }
+    5
 }
 
 // C spelling _Unwind_Resume exports as __Unwind_Resume on Mach-O.
 // This link-compatibility trap never inspects or resumes the exception.
 #[unsafe(no_mangle)]
 pub extern "C" fn _Unwind_Resume(_exception: *mut core::ffi::c_void) -> ! {
-    unsafe { abort() }
+    unsafe { abort(); core::intrinsics::abort() }
 }
 
 struct Stderr;
@@ -51,9 +53,6 @@ fn write_fmt(args: fmt::Arguments<'_>) {
 
 #[panic_handler]
 fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
-    if PANICKING.swap(true, Ordering::Relaxed) {
-        unsafe { abort() }
-    }
     if let Some(location) = info.location() {
         write_fmt(format_args!("panicked at {}:{}: ", location.file(), location.line()));
     } else {
@@ -61,6 +60,7 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     }
     write_fmt(format_args!("{}\n", info.message()));
     unsafe {
-        abort()
+        abort();
+        core::intrinsics::abort()
     }
 }

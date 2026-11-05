@@ -10,8 +10,6 @@ use core::ops::Deref;
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-const MAX_REFCOUNT: usize = isize::MAX as usize;
-
 #[repr(C)]
 struct ArcInner<T: ?Sized> {
     strong: AtomicUsize,
@@ -21,7 +19,6 @@ struct ArcInner<T: ?Sized> {
 
 pub struct Arc<T: ?Sized> {
     ptr: NonNull<ArcInner<T>>,
-    phantom: PhantomData<ArcInner<T>>,
 }
 
 pub struct Weak<T: ?Sized> {
@@ -54,7 +51,10 @@ unsafe fn layout_for_inner<T: ?Sized>(ptr: *const ArcInner<T>) -> Layout {
     let align = unsafe { mem::align_of_val_raw(value_ptr) };
     let header = header_layout();
     let pad = header.padding_needed_for(align);
-    let total_size = header.size().checked_add(pad).and_then(|n| n.checked_add(size)).unwrap();
+    let total_size = match header.size().checked_add(pad) {
+        Some(n) => n.checked_add(size).unwrap(),
+        None => panic!("layout_for_inner overflow"),
+    };
     let total_align = if header.align() > align { header.align() } else { align };
     unsafe { Layout::from_size_align_unchecked(total_size, total_align) }
 }
@@ -66,7 +66,7 @@ impl<T> Arc<T> {
             weak: AtomicUsize::new(1),
             value,
         });
-        Self { ptr: unsafe { NonNull::new_unchecked(Box::into_raw(boxed)) }, phantom: PhantomData }
+        Self { ptr: unsafe { NonNull::new_unchecked(Box::into_raw(boxed)) } }
     }
 }
 
@@ -77,10 +77,10 @@ impl<T: ?Sized> Arc<T> {
     }
 
     pub fn clone(this: &Self) -> Self {
-        if this.inner().strong.fetch_add(1, Ordering::Relaxed) > MAX_REFCOUNT {
+        if this.inner().strong.fetch_add(1, Ordering::Relaxed) > (isize::MAX as usize) {
             panic!("Arc strong count overflow");
         }
-        Self { ptr: this.ptr, phantom: PhantomData }
+        Self { ptr: this.ptr }
     }
 
     pub fn downgrade(this: &Self) -> Weak<T> {
@@ -91,7 +91,7 @@ impl<T: ?Sized> Arc<T> {
                 cur = this.inner().weak.load(Ordering::Relaxed);
                 continue;
             }
-            if cur > MAX_REFCOUNT {
+            if cur > (isize::MAX as usize) {
                 panic!("Arc weak count overflow");
             }
             match this.inner().weak.compare_exchange_weak(cur, cur + 1, Ordering::Acquire, Ordering::Relaxed) {
@@ -152,7 +152,7 @@ impl<T: ?Sized> Arc<T> {
         let offset = unsafe { data_offset_for_ptr(ptr) };
         let byte_ptr = (ptr as *const u8).wrapping_sub(offset);
         let inner_ptr = byte_ptr.with_metadata_of(ptr as *const ArcInner<T>) as *mut ArcInner<T>;
-        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) }, phantom: PhantomData }
+        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
     }
 
     #[inline(never)]
@@ -199,23 +199,29 @@ impl<T: ?Sized> Weak<T> {
         let mut n = inner.strong.load(Ordering::Relaxed);
         loop {
             if n == 0 { return None; }
-            if n > MAX_REFCOUNT { panic!("Arc strong count overflow"); }
+            if n > (isize::MAX as usize) { panic!("Arc strong count overflow"); }
             match inner.strong.compare_exchange_weak(n, n + 1, Ordering::Acquire, Ordering::Relaxed) {
-                Ok(_) => return Some(Arc { ptr: self.ptr, phantom: PhantomData }),
+                Ok(_) => return Some(Arc { ptr: self.ptr }),
                 Err(actual) => n = actual,
             }
         }
     }
 
     pub fn strong_count(&self) -> usize {
-        self.inner().map_or(0, |inner| inner.strong.load(Ordering::Acquire))
+        match self.inner() {
+            Some(inner) => inner.strong.load(Ordering::Acquire),
+            None => 0,
+        }
     }
 
     pub fn weak_count(&self) -> usize {
-        self.inner().map_or(0, |inner| {
-            let weak = inner.weak.load(Ordering::Acquire);
-            if inner.strong.load(Ordering::Relaxed) == 0 { 0 } else { weak.saturating_sub(1) }
-        })
+        match self.inner() {
+            Some(inner) => {
+                let weak = inner.weak.load(Ordering::Acquire);
+                if inner.strong.load(Ordering::Relaxed) == 0 { 0 } else { weak.saturating_sub(1) }
+            }
+            None => 0,
+        }
     }
 
     pub fn as_ptr(&self) -> *const T {
@@ -235,7 +241,7 @@ impl<T: ?Sized> Weak<T> {
 
     pub fn clone(this: &Self) -> Self {
         if let Some(inner) = this.inner() {
-            if inner.weak.fetch_add(1, Ordering::Relaxed) > MAX_REFCOUNT {
+            if inner.weak.fetch_add(1, Ordering::Relaxed) > (isize::MAX as usize) {
                 panic!("Weak count overflow");
             }
         }
@@ -321,7 +327,7 @@ impl<T: Clone> From<&[T]> for Arc<[T]> {
         for (i, item) in values.iter().enumerate() {
             unsafe { data_ptr.add(i).write(item.clone()) };
         }
-        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) }, phantom: PhantomData }
+        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
     }
 }
 
@@ -334,7 +340,7 @@ impl<T> From<Vec<T>> for Arc<[T]> {
             ptr::copy_nonoverlapping(values.as_ptr(), data_ptr, len);
             values.set_len(0);
         }
-        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) }, phantom: PhantomData }
+        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
     }
 }
 

@@ -14,7 +14,7 @@ impl<T: Ord> BTreeSet<T> {
     pub fn insert(&mut self, value: T) -> bool { self.map.insert(value, ()).is_none() }
     pub fn remove<Q: ?Sized + Ord>(&mut self, value: &Q) -> bool where T: core::borrow::Borrow<Q> { self.map.remove(value).is_some() }
     pub fn take<Q: ?Sized + Ord>(&mut self, value: &Q) -> Option<T> where T: core::borrow::Borrow<Q> { self.map.remove_entry(value).map(|(k, _)| k) }
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator { self.map.keys() }
+    pub fn iter(&self) -> crate::collections::btree_map::Keys<'_, T, ()> { self.map.keys() }
     pub fn first(&self) -> Option<&T> { self.map.first_key_value().map(|(k, _)| k) }
     pub fn last(&self) -> Option<&T> { self.map.last_key_value().map(|(k, _)| k) }
     pub fn pop_first(&mut self) -> Option<T> { self.map.pop_first().map(|(k, _)| k) }

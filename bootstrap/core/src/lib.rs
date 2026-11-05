@@ -11,6 +11,8 @@
 #![feature(decl_macro, allow_internal_unstable, structural_match)]
 #![feature(adt_const_params, generic_const_parameter_types)]
 
+extern crate self as core;
+
 #[macro_use]
 pub mod macros;
 

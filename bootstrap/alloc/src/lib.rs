@@ -18,10 +18,10 @@ pub mod vec;
 
 #[macro_export]
 macro_rules! vec {
-    () => { $crate::vec::Vec::new() };
-    ($elem:expr; $n:expr) => { $crate::vec::Vec::from_elem($elem, $n) };
+    () => { alloc::vec::Vec::new() };
+    ($elem:expr; $n:expr) => { alloc::vec::Vec::from_elem($elem, $n) };
     ($($item:expr),+ $(,)?) => {{
-        let mut result = $crate::vec::Vec::new();
+        let mut result = alloc::vec::Vec::new();
         $(result.push($item);)+
         result
     }};

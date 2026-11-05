@@ -41,16 +41,20 @@ pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
 
 pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
     if layout.size() == 0 {
-        let new_layout = Layout::from_size_align(new_size, layout.align())
-            .unwrap_or_else(|_| core::alloc::handle_alloc_error(layout));
+        let new_layout = match Layout::from_size_align(new_size, layout.align()) {
+            Ok(l) => l,
+            Err(_) => core::alloc::handle_alloc_error(layout),
+        };
         return unsafe { alloc(new_layout) };
     }
     if new_size == 0 {
         unsafe { dealloc(ptr, layout) };
         return layout.align() as *mut u8;
     }
-    let new_layout = Layout::from_size_align(new_size, layout.align())
-        .unwrap_or_else(|_| core::alloc::handle_alloc_error(layout));
+    let new_layout = match Layout::from_size_align(new_size, layout.align()) {
+        Ok(l) => l,
+        Err(_) => core::alloc::handle_alloc_error(layout),
+    };
     let result = unsafe { __rust_realloc(ptr, layout.size(), layout.align(), new_size) };
     if result.is_null() {
         core::alloc::handle_alloc_error(new_layout);

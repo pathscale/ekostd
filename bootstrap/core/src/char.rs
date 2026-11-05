@@ -17,9 +17,7 @@ impl char {
     pub const fn encode_utf8(self, dst: &mut [u8]) -> &mut str {
         let n = self as u32;
         let len = self.len_utf8();
-        if dst.len() < len {
-            crate::intrinsics::abort();
-        }
+        let _ = dst[len - 1];
         if len == 1 { dst[0] = n as u8; }
         else if len == 2 {
             dst[0] = (0xc0 | (n >> 6)) as u8; dst[1] = (0x80 | (n & 0x3f)) as u8;

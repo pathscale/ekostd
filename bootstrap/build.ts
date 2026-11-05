@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,7 @@ type Manifest = {
 type Attempt = {
   stage: string; unit: string; argv: string[]; status: string;
   exitCode?: number; reason?: string; stdout?: string; stderr?: string;
+  elapsedMs: number; timedOut?: boolean;
 };
 const repo = await realpath(fileURLToPath(new URL("../", import.meta.url)));
 const options = new Map<string, string>();
@@ -21,12 +22,19 @@ let execute = false;
 for (let i = 2; i < process.argv.length; i++) {
   const name = process.argv[i];
   if (name === "--run") { execute = true; continue; }
-  if (!["--out", "--rustc", "--ekopathrs", "--ekors", "--socket"].includes(name)
+  if (["--per-unit-daemon", "--shared-socket"].includes(name)) {
+    if (options.has(name)) throw new Error(`invalid or duplicate option: ${name}`);
+    options.set(name, "true");
+    continue;
+  }
+  if (!["--out", "--rustc", "--ekopathrs", "--ekors", "--socket", "--ekod-bin", "--timeout-ms"].includes(name)
       || options.has(name) || !process.argv[i + 1] || process.argv[i + 1].startsWith("--")) {
     throw new Error(`invalid or duplicate option: ${name}`);
   }
   options.set(name, process.argv[++i]);
 }
+const timeoutMs = Number(options.get("--timeout-ms") ?? "15000");
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be a positive integer");
 const outOption = options.get("--out");
 if (!outOption || !isAbsolute(outOption)) throw new Error("--out requires a fresh absolute directory");
 const out = resolve(outOption);
@@ -115,14 +123,38 @@ async function snapshot(): Promise<Record<string, string>> {
 const before = await snapshot();
 await writeFile(join(out, "source-identities.json"), JSON.stringify(before, null, 2) + "\n");
 const attempts: Attempt[] = [];
-const report = async () => writeFile(join(out, "outcomes.json"), JSON.stringify({
-  mode: execute ? "run" : "plan", target: m.target, cfg: m.cfg, panic: m.panic,
-  cwd: repo, environment: { RUSTC_BOOTSTRAP: "1", inherited: false },
-  bootstrapAccepted: false, attempts,
-}, null, 2) + "\n");
+let reportQueue = Promise.resolve();
+const report = () => {
+  const paired = new Map<string, { stage0?: Attempt; stage1?: Attempt }>();
+  for (const a of attempts) {
+    if (a.stage !== "stage0" && a.stage !== "stage1") continue;
+    const row = paired.get(a.unit) ?? {};
+    row[a.stage] = a;
+    paired.set(a.unit, row);
+  }
+  const benchmarks = [...paired].map(([unit, row]) => ({
+    unit, stage0RustcMs: row.stage0?.elapsedMs ?? null,
+    stage1EkodMs: row.stage1?.elapsedMs ?? null,
+    stage0Status: row.stage0?.status ?? null, stage1Status: row.stage1?.status ?? null,
+    speedupRatio: row.stage0 && row.stage1 && row.stage1.elapsedMs > 0
+      ? row.stage0.elapsedMs / row.stage1.elapsedMs : null,
+  }));
+  const body = JSON.stringify({
+    mode: execute ? "run" : "plan", target: m.target, cfg: m.cfg, panic: m.panic,
+    cwd: repo, environment: { RUSTC_BOOTSTRAP: "1", inherited: false },
+    bootstrapAccepted: false, attempts, benchmarks,
+  }, null, 2) + "\n";
+  reportQueue = reportQueue.then(() => writeFile(join(out, "outcomes.json"), body));
+  return reportQueue;
+};
 const rustc = options.get("--rustc") ?? "rustc";
 const ekors = options.get("--ekors");
 const socket = options.get("--socket");
+const defaultEkod = join(compilerRepo, "ekod/target/release/ekod");
+const defaultEkodExists = await access(defaultEkod).then(() => true, () => false);
+const ekodBin = options.get("--ekod-bin") ?? (defaultEkodExists ? defaultEkod : undefined);
+const dedicatedDaemons = !options.has("--shared-socket") && Boolean(ekodBin)
+  && (options.has("--per-unit-daemon") || options.has("--ekod-bin") || Boolean(socket && defaultEkodExists));
 async function run(a: Attempt): Promise<void> {
   attempts.push(a);
   await report();
@@ -130,40 +162,67 @@ async function run(a: Attempt): Promise<void> {
   if (a.status !== "ready") return;
   a.stdout = join(out, `${a.stage}-${a.unit}.stdout`);
   a.stderr = join(out, `${a.stage}-${a.unit}.stderr`);
+  const started = performance.now();
   try {
     const child = Bun.spawn(a.argv, {
       cwd: repo, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", RUSTC_BOOTSTRAP: "1" },
       stdin: "ignore", stdout: Bun.file(a.stdout), stderr: Bun.file(a.stderr),
     });
-    a.exitCode = await child.exited;
-    a.status = a.exitCode === 0 ? "command-exited-zero" : "failed";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      child.exited.then(code => ({ code })),
+      new Promise<{ timeout: true }>(resolveTimeout => {
+        timer = setTimeout(() => { a.timedOut = true; child.kill("SIGKILL"); resolveTimeout({ timeout: true }); }, timeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if ("timeout" in outcome) a.status = "timed-out";
+    else { a.exitCode = outcome.code; a.status = a.exitCode === 0 ? "command-exited-zero" : "failed"; }
   } catch (e) { a.status = "spawn-failed"; a.reason = String(e); }
+  a.elapsedMs = performance.now() - started;
   await report();
+}
+async function waitForSocket(path: string): Promise<void> {
+  const { stat } = await import("node:fs/promises");
+  const deadline = performance.now() + 3000;
+  while (performance.now() < deadline) {
+    if (await stat(path).then(() => true, () => false)) return;
+    await new Promise(resolveWait => setTimeout(resolveWait, 50));
+  }
+  throw new Error(`ekod socket did not appear: ${path}`);
 }
 const artifact = (u: Unit) => join(stage0, `lib${u.crate}.rlib`);
+const stage0Promises = new Map<string, Promise<Attempt>>();
 for (const u of m.units) {
-  const argv = [rustc, roots.get(u.key)!, "--crate-name", u.crate, "--crate-type", "rlib",
-    "--edition", u.edition, "--target", m.target, "-Cpanic=abort", "-Cdebug-assertions=no",
-    "-Coverflow-checks=no", "--sysroot", sysroot, "-L", `dependency=${stage0}`,
-    ...m.cfg.flatMap(c => ["--cfg", c]),
-    ...u.dependencies.flatMap(d => ["--extern", `${units.get(d)!.crate}=${artifact(units.get(d)!)}`]),
-    "-o", artifact(u)];
-  const blocked = u.dependencies.filter(d => !attempts.some(a => a.stage === "stage0" && a.unit === d && a.status === "rlib-produced"));
-  const a: Attempt = { stage: "stage0", unit: u.key, argv,
-    status: !execute ? "not-run" : missing.has(u.key) ? "missing-source" : blocked.length ? "blocked" : "ready",
-    reason: missing.get(u.key) ?? (blocked.length ? `dependencies: ${blocked.join(",")}` : undefined) };
-  await run(a);
-  if (a.status === "command-exited-zero") {
-    a.status = await Bun.file(artifact(u)).exists() && (await Bun.file(artifact(u)).size) > 0 ? "rlib-produced" : "missing-artifact";
-  }
-  await report();
+  const promise = (async (): Promise<Attempt> => {
+    const dependencies = await Promise.all(u.dependencies.map(d => stage0Promises.get(d)!));
+    const argv = [rustc, roots.get(u.key)!, "--crate-name", u.crate, "--crate-type", "rlib",
+      "--edition", u.edition, "--target", m.target, "-Cpanic=abort", "-Cdebug-assertions=no",
+      "-Coverflow-checks=no", "--sysroot", sysroot, "-L", `dependency=${stage0}`,
+      ...m.cfg.flatMap(c => ["--cfg", c]),
+      ...u.dependencies.flatMap(d => ["--extern", `${units.get(d)!.crate}=${artifact(units.get(d)!)}`]),
+      "-o", artifact(u)];
+    const blocked = dependencies.filter(a => a.status !== "rlib-produced").map(a => a.unit);
+    const a: Attempt = { stage: "stage0", unit: u.key, argv,
+      status: !execute ? "not-run" : missing.has(u.key) ? "missing-source" : blocked.length ? "blocked" : "ready",
+      reason: missing.get(u.key) ?? (blocked.length ? `dependencies: ${blocked.join(",")}` : undefined), elapsedMs: 0 };
+    await run(a);
+    if (a.status === "command-exited-zero") {
+      a.status = await Bun.file(artifact(u)).exists() && (await Bun.file(artifact(u)).size) > 0 ? "rlib-produced" : "missing-artifact";
+    }
+    await report();
+    return a;
+  })();
+  stage0Promises.set(u.key, promise);
 }
+  const stage0Done = Promise.all(stage0Promises.values());
 function closure(u: Unit, result = new Set<string>()): Set<string> {
   for (const d of u.dependencies) { if (!result.has(d)) { result.add(d); closure(units.get(d)!, result); } }
   result.add(u.key);
   return result;
 }
-for (const root of m.units.filter(u => !u.language)) {
+const stage1Roots = m.units.filter(u => !u.language);
+await Promise.all(stage1Roots.map(async root => {
   const selected = m.units.filter(u => closure(root).has(u.key));
   const language = selected.filter(u => u.language);
   const graph = {
@@ -185,21 +244,43 @@ for (const root of m.units.filter(u => !u.language)) {
   const objects = join(out, `stage1-${root.key}`);
   await mkdir(objects);
   const absent = selected.filter(u => missing.has(u.key)).map(u => u.key);
+  const shortKey = root.key.slice(0, 8);
+  const dedicatedSocket = dedicatedDaemons ? `/tmp/ekod-${shortKey}-${process.pid}.sock` : socket;
+  let daemon: ReturnType<typeof Bun.spawn> | undefined;
   const a: Attempt = { stage: "stage1", unit: root.key,
-    argv: ekors && socket ? [ekors, "--socket", socket, "compile",
+    argv: ekors && dedicatedSocket ? [ekors, "--socket", dedicatedSocket, "compile",
       `--source-graph=${graphPath}`, "--target", `dir=${objects}`] : [],
-    status: !execute ? "not-run" : absent.length ? "missing-source" : !ekors || !socket ? "missing-eko-endpoint" : "ready",
-    reason: absent.length ? `sources: ${absent.join(",")}` : undefined };
-  await run(a);
-  if (a.status === "command-exited-zero") {
-    try {
-      const emitted = (await readdir(objects, { recursive: true })).filter(n => n.endsWith(".o"));
-      const nonempty = await Promise.all(emitted.map(n => Bun.file(join(objects, n)).size > 0));
-      a.status = emitted.length > 0 && nonempty.every(Boolean) ? "source-objects-produced" : "request-or-object-failed";
-    } catch (e) { a.status = "invalid-response"; a.reason = String(e); }
+    status: !execute ? "not-run" : absent.length ? "missing-source" : !ekors || !dedicatedSocket ? "missing-eko-endpoint" : "ready",
+    reason: absent.length ? `sources: ${absent.join(",")}` : undefined, elapsedMs: 0 };
+  try {
+    if (a.status === "ready" && dedicatedDaemons) {
+      await Promise.all([unlink(dedicatedSocket!).catch(() => {}), unlink(`${dedicatedSocket}.control`).catch(() => {})]);
+      const daemonHome = join(out, `home-${root.key}`);
+      await mkdir(daemonHome, { recursive: true });
+      const daemonLog = join(out, `ekod-${root.key}.stderr`);
+      daemon = Bun.spawn([ekodBin!, "--socket", dedicatedSocket!], {
+        cwd: repo, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: daemonHome }, stdin: "ignore", stdout: Bun.file(daemonLog), stderr: Bun.file(daemonLog),
+      });
+      try { await waitForSocket(dedicatedSocket!); }
+      catch (e) { daemon.kill("SIGKILL"); a.status = "daemon-start-failed"; a.reason = `${String(e)} (log: ${await readFile(daemonLog, "utf8").catch(() => "")})`; }
+    }
+    await run(a);
+    if (a.status === "command-exited-zero") {
+      try {
+        const emitted = (await readdir(objects, { recursive: true })).filter(n => n.endsWith(".o"));
+        const nonempty = await Promise.all(emitted.map(n => Bun.file(join(objects, n)).size > 0));
+        a.status = emitted.length > 0 && nonempty.every(Boolean) ? "source-objects-produced" : "request-or-object-failed";
+      } catch (e) { a.status = "invalid-response"; a.reason = String(e); }
+    }
+    await report();
+  } finally {
+    if (daemon) {
+      daemon.kill("SIGKILL");
+      if (dedicatedSocket) await Promise.all([unlink(dedicatedSocket).catch(() => {}), unlink(`${dedicatedSocket}.control`).catch(() => {})]);
+    }
   }
-  await report();
-}
+}));
+await stage0Done;
 try {
   const after = await snapshot();
   await writeFile(join(out, "source-identities-after.json"), JSON.stringify(after, null, 2) + "\n");
