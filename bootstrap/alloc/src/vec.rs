@@ -57,6 +57,112 @@ impl<T> Vec<T> {
         self.length += 1;
     }
 
+    pub fn insert(&mut self, index: usize, value: T) {
+        assert!(index <= self.length, "insertion index out of bounds");
+        self.reserve(1);
+        unsafe {
+            let p = self.pointer.as_ptr().add(index);
+            ptr::copy(p, p.add(1), self.length - index);
+            p.write(value);
+        }
+        self.length += 1;
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        assert!(index < self.length, "removal index out of bounds");
+        unsafe {
+            let p = self.pointer.as_ptr().add(index);
+            let value = p.read();
+            ptr::copy(p.add(1), p, self.length - index - 1);
+            self.length -= 1;
+            value
+        }
+    }
+
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        assert!(index < self.length, "swap_remove index out of bounds");
+        unsafe {
+            let p = self.pointer.as_ptr();
+            let value = p.add(index).read();
+            self.length -= 1;
+            if index != self.length { p.add(index).write(p.add(self.length).read()); }
+            value
+        }
+    }
+
+    pub fn retain<F: FnMut(&T) -> bool>(&mut self, mut keep: F) {
+        let mut write = 0;
+        for read in 0..self.length {
+            unsafe {
+                let p = self.pointer.as_ptr();
+                if keep(&*p.add(read)) {
+                    if read != write { p.add(write).write(p.add(read).read()); }
+                    write += 1;
+                } else { ptr::drop_in_place(p.add(read)); }
+            }
+        }
+        self.length = write;
+    }
+
+    pub fn dedup(&mut self) where T: PartialEq {
+        if self.length < 2 { return; }
+        let mut write = 1;
+        for read in 1..self.length {
+            unsafe {
+                let p = self.pointer.as_ptr();
+                if *p.add(write - 1) == *p.add(read) {
+                    ptr::drop_in_place(p.add(read));
+                } else {
+                    if read != write { p.add(write).write(p.add(read).read()); }
+                    write += 1;
+                }
+            }
+        }
+        self.length = write;
+    }
+
+    pub fn append(&mut self, other: &mut Self) {
+        self.reserve(other.length);
+        unsafe {
+            ptr::copy_nonoverlapping(other.as_ptr(), self.pointer.as_ptr().add(self.length), other.length);
+            self.length += other.length;
+            other.length = 0;
+        }
+    }
+
+    pub fn split_off(&mut self, at: usize) -> Self {
+        assert!(at <= self.length, "split index out of bounds");
+        let count = self.length - at;
+        let mut result = Self::with_capacity(count);
+        unsafe {
+            ptr::copy_nonoverlapping(self.pointer.as_ptr().add(at), result.pointer.as_ptr(), count);
+            result.length = count;
+            self.length = at;
+        }
+        result
+    }
+
+    pub fn resize(&mut self, new_len: usize, value: T) where T: Clone {
+        if new_len <= self.length { self.truncate(new_len); return; }
+        let count = new_len - self.length;
+        self.reserve(count);
+        for _ in 1..count { self.push(value.clone()); }
+        if count != 0 { self.push(value); }
+    }
+
+    pub fn resize_with<F: FnMut() -> T>(&mut self, new_len: usize, mut make: F) {
+        if new_len <= self.length { self.truncate(new_len); return; }
+        self.reserve(new_len - self.length);
+        while self.length < new_len { self.push(make()); }
+    }
+
+    pub fn from_elem(elem: T, n: usize) -> Vec<T> where T: Clone {
+        let mut result = Vec::with_capacity(n);
+        for _ in 1..n { result.push(elem.clone()); }
+        if n != 0 { result.push(elem); }
+        result
+    }
+
     pub fn pop(&mut self) -> Option<T> {
         if self.length == 0 {
             return None;
@@ -181,3 +287,35 @@ impl<T: PartialEq> PartialEq for Vec<T> {
 }
 
 impl<T: Eq> Eq for Vec<T> {}
+
+impl<T> AsRef<[T]> for Vec<T> { fn as_ref(&self) -> &[T] { self.as_slice() } }
+impl<T> AsMut<[T]> for Vec<T> { fn as_mut(&mut self) -> &mut [T] { self.as_mut_slice() } }
+impl<T> core::borrow::Borrow<[T]> for Vec<T> { fn borrow(&self) -> &[T] { self.as_slice() } }
+impl<T> core::borrow::BorrowMut<[T]> for Vec<T> { fn borrow_mut(&mut self) -> &mut [T] { self.as_mut_slice() } }
+impl<T, I> core::ops::Index<I> for Vec<T> where I: core::slice::SliceIndex<[T]> {
+    type Output = I::Output;
+    fn index(&self, index: I) -> &Self::Output { &self.as_slice()[index] }
+}
+impl<T, I> core::ops::IndexMut<I> for Vec<T> where I: core::slice::SliceIndex<[T]> {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output { &mut self.as_mut_slice()[index] }
+}
+impl<T: Clone> From<&[T]> for Vec<T> { fn from(values: &[T]) -> Self { let mut v=Self::with_capacity(values.len()); v.extend_from_slice(values); v } }
+impl<T> From<crate::boxed::Box<[T]>> for Vec<T> { fn from(values: crate::boxed::Box<[T]>) -> Self { crate::boxed::Box::into_vec(values) } }
+impl<T> core::iter::FromIterator<T> for Vec<T> { fn from_iter<I: IntoIterator<Item=T>>(iter: I) -> Self { let mut v=Self::new(); v.extend(iter); v } }
+impl<T> core::iter::Extend<T> for Vec<T> { fn extend<I: IntoIterator<Item=T>>(&mut self, iter: I) { let iter=iter.into_iter(); self.reserve(iter.size_hint().0); for item in iter { self.push(item); } } }
+impl<T> IntoIterator for Vec<T> {
+    type Item=T; type IntoIter=IntoIter<T>;
+    fn into_iter(self)->IntoIter<T> { let back=self.length; IntoIter { vec: self, front: 0, back } }
+}
+impl<'a,T> IntoIterator for &'a Vec<T> { type Item=&'a T; type IntoIter=core::slice::Iter<'a,T>; fn into_iter(self)->Self::IntoIter { self.as_slice().iter() } }
+impl<'a,T> IntoIterator for &'a mut Vec<T> { type Item=&'a mut T; type IntoIter=core::slice::IterMut<'a,T>; fn into_iter(self)->Self::IntoIter { self.as_mut_slice().iter_mut() } }
+
+pub struct IntoIter<T> { vec: Vec<T>, front: usize, back: usize }
+impl<T> Iterator for IntoIter<T> {
+    type Item=T;
+    fn next(&mut self)->Option<T> { if self.front==self.back{return None} let i=self.front; self.front+=1; Some(unsafe{self.vec.pointer.as_ptr().add(i).read()}) }
+    fn size_hint(&self)->(usize,Option<usize>) { let n=self.back-self.front;(n,Some(n)) }
+}
+impl<T> DoubleEndedIterator for IntoIter<T> { fn next_back(&mut self)->Option<T> { if self.front==self.back{return None} self.back-=1; Some(unsafe{self.vec.pointer.as_ptr().add(self.back).read()}) } }
+impl<T> ExactSizeIterator for IntoIter<T> {}
+impl<T> Drop for IntoIter<T> { fn drop(&mut self) { unsafe { let p=self.vec.pointer.as_ptr(); for i in self.front..self.back { ptr::drop_in_place(p.add(i)); } self.vec.length=0; } } }

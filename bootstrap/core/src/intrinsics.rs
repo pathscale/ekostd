@@ -1,5 +1,64 @@
 //! Compiler-recognized declarations matching the selected rustc's core source.
-use crate::marker::Sized;
+use crate::clone::Clone;
+use crate::cmp::{Eq, PartialEq};
+use crate::marker::{Copy, Sized};
+
+#[repr(u32)]
+pub enum AtomicOrdering { Relaxed = 0, Release = 1, Acquire = 2, AcqRel = 3, SeqCst = 4 }
+impl Copy for AtomicOrdering {}
+impl Clone for AtomicOrdering { fn clone(&self) -> Self { *self } }
+impl PartialEq for AtomicOrdering {
+    fn eq(&self, other: &Self) -> bool { (*self as u32) == (*other as u32) }
+}
+impl Eq for AtomicOrdering {}
+impl crate::marker::StructuralPartialEq for AtomicOrdering {}
+impl crate::marker::ConstParamTy_ for AtomicOrdering {}
+
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_load<T: Copy, const ORD: AtomicOrdering>(src: *const T) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_store<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, val: T);
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_xchg<T: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: T) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_cxchg<T: Copy, const SUCCESS: AtomicOrdering, const FAILURE: AtomicOrdering>(dst: *mut T, old: T, src: T) -> (T, bool);
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_cxchgweak<T: Copy, const SUCCESS: AtomicOrdering, const FAILURE: AtomicOrdering>(dst: *mut T, old: T, src: T) -> (T, bool);
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_xadd<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_xsub<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_and<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_or<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_xor<T: Copy, U: Copy, const ORD: AtomicOrdering>(dst: *mut T, src: U) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_fence<const ORD: AtomicOrdering>();
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub unsafe fn atomic_singlethreadfence<const ORD: AtomicOrdering>();
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub fn wrapping_add<T: Copy>(a: T, b: T) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub fn wrapping_sub<T: Copy>(a: T, b: T) -> T;
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub fn wrapping_mul<T: Copy>(a: T, b: T) -> T;
 
 #[rustc_intrinsic]
 #[rustc_nounwind]
@@ -74,4 +133,14 @@ pub const unsafe fn unreachable() -> !;
 
 #[rustc_intrinsic]
 #[rustc_nounwind]
-pub fn abort() -> !;
+pub const fn abort() -> !;
+
+#[lang = "discriminant_kind"]
+pub trait DiscriminantKind {
+    #[lang = "discriminant_type"]
+    type Discriminant: Clone + Copy + crate::fmt::Debug + Eq + PartialEq + crate::hash::Hash + crate::cmp::PartialOrd + crate::cmp::Ord;
+}
+
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discriminant;

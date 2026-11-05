@@ -13,11 +13,21 @@ pub const trait Clone: Sized {
     }
 }
 
+pub unsafe trait TrivialClone: Clone + Copy {}
+
+pub struct AssertParamIsClone<T: Clone + PointeeSized> {
+    _field: crate::marker::PhantomData<T>,
+}
+pub struct AssertParamIsCopy<T: Copy + PointeeSized> {
+    _field: crate::marker::PhantomData<T>,
+}
+
 macro_rules! scalar_clone {
     ($($ty:ty),* $(,)?) => { $(
         const impl Clone for $ty {
             fn clone(&self) -> Self { *self }
         }
+        unsafe impl TrivialClone for $ty {}
     )* };
 }
 scalar_clone!(bool, char, u8, u16, u32, u64, u128, usize,
@@ -26,14 +36,18 @@ scalar_clone!(bool, char, u8, u16, u32, u64, u128, usize,
 const impl<T: PointeeSized> Clone for *const T {
     fn clone(&self) -> Self { *self }
 }
+unsafe impl<T: PointeeSized> TrivialClone for *const T {}
 const impl<T: PointeeSized> Clone for *mut T {
     fn clone(&self) -> Self { *self }
 }
+unsafe impl<T: PointeeSized> TrivialClone for *mut T {}
 const impl<T: PointeeSized> Clone for &T {
     fn clone(&self) -> Self { *self }
 }
+unsafe impl<T: PointeeSized> TrivialClone for &T {}
 impl<T: PointeeSized> !Clone for &mut T {}
 
 impl<T: Copy, const N: usize> Clone for [T; N] {
     fn clone(&self) -> Self { *self }
 }
+unsafe impl<T: Copy + TrivialClone, const N: usize> TrivialClone for [T; N] {}

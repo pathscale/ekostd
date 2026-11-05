@@ -124,3 +124,30 @@ impl core::convert::From<&str> for String {
         result
     }
 }
+
+pub trait ToString { fn to_string(&self) -> String; }
+impl<T: core::fmt::Display + ?Sized> ToString for T {
+    fn to_string(&self) -> String {
+        use core::fmt::Write;
+        let mut value=String::new();
+        let _=write!(&mut value, "{}", self);
+        value
+    }
+}
+impl core::fmt::Write for String { fn write_str(&mut self, s:&str)->core::fmt::Result { self.push_str(s); Ok(()) } }
+impl core::fmt::Display for String { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result { f.write_str(self.as_str()) } }
+impl core::fmt::Debug for String { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result { core::fmt::Debug::fmt(self.as_str(),f) } }
+impl PartialEq for String { fn eq(&self, other:&Self)->bool { self.as_str()==other.as_str() } }
+impl Eq for String {}
+impl PartialOrd for String { fn partial_cmp(&self,other:&Self)->Option<core::cmp::Ordering>{Some(self.cmp(other))} }
+impl Ord for String { fn cmp(&self,other:&Self)->core::cmp::Ordering { self.as_str().cmp(other.as_str()) } }
+impl core::hash::Hash for String { fn hash<H:core::hash::Hasher>(&self,state:&mut H){self.as_str().hash(state)} }
+impl Clone for String { fn clone(&self)->Self { Self::from(self.as_str()) } }
+impl AsRef<str> for String { fn as_ref(&self)->&str { self.as_str() } }
+impl AsRef<[u8]> for String { fn as_ref(&self)->&[u8] { &self.vec } }
+impl core::borrow::Borrow<str> for String { fn borrow(&self)->&str { self.as_str() } }
+impl core::ops::Add<&str> for String { type Output=String; fn add(mut self,s:&str)->String { self.push_str(s); self } }
+impl core::ops::AddAssign<&str> for String { fn add_assign(&mut self,s:&str){self.push_str(s)} }
+impl core::iter::FromIterator<char> for String { fn from_iter<I:IntoIterator<Item=char>>(iter:I)->Self { let mut s=Self::new(); for c in iter{s.push(c)} s } }
+impl<'a> core::iter::FromIterator<&'a str> for String { fn from_iter<I:IntoIterator<Item=&'a str>>(iter:I)->Self { let mut s=Self::new(); for p in iter{s.push_str(p)} s } }
+impl core::iter::FromIterator<String> for String { fn from_iter<I:IntoIterator<Item=String>>(iter:I)->Self { let mut s=Self::new(); for p in iter{s.push_str(p.as_str())} s } }

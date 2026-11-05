@@ -82,12 +82,95 @@ macro_rules! panic_2021 {
     ($($arg:tt)+) => { $crate::panic::panic_fmt($crate::format_args!($($arg)+)) };
 }
 pub use crate::panic_2021;
+unsafe extern "Rust" {
+    #[lang = "panic_impl"]
+    fn panic_impl(info: &PanicInfo<'_>) -> !;
+}
+
+#[lang = "panic_fmt"]
 #[track_caller]
-pub fn panic_fmt(args: fmt::Arguments<'_>) -> ! {
-    unsafe extern "Rust" {
-        #[lang = "panic_impl"]
-        fn panic_impl(info: &PanicInfo<'_>) -> !;
-    }
+#[rustc_do_not_const_check]
+pub const fn panic_fmt(args: fmt::Arguments<'_>) -> ! {
     let info = PanicInfo::new(&args, Location::caller(), true, false);
     unsafe { panic_impl(&info) }
+}
+
+#[lang = "panic_nounwind"]
+#[rustc_nounwind]
+#[rustc_do_not_const_check]
+pub const fn panic_nounwind(expr: &'static str) -> ! {
+    let args = fmt::Arguments::from_str(expr);
+    let info = PanicInfo::new(&args, Location::caller(), false, false);
+    unsafe { panic_impl(&info) }
+}
+
+#[lang = "panic_bounds_check"]
+#[track_caller]
+pub fn panic_bounds_check(index: usize, len: usize) -> ! {
+    panic_fmt(crate::format_args!("index out of bounds: the len is {} but the index is {}", len, index))
+}
+
+#[lang = "panic_cannot_unwind"]
+#[rustc_nounwind]
+pub fn panic_cannot_unwind() -> ! { panic_nounwind("panic in a function that cannot unwind") }
+
+#[lang = "panic_null_pointer_dereference"]
+#[track_caller]
+#[rustc_nounwind]
+pub const fn panic_null_pointer_dereference() -> ! { panic_nounwind("null pointer dereference occurred") }
+
+#[lang = "panic_misaligned_pointer_dereference"]
+#[track_caller]
+#[rustc_nounwind]
+pub const fn panic_misaligned_pointer_dereference(_required: usize, _found: usize) -> ! {
+    panic_nounwind("misaligned pointer dereference")
+}
+
+pub mod panic_const {
+    use super::panic_nounwind;
+
+    #[lang = "panic_const_add_overflow"]
+    #[track_caller]
+    pub const fn panic_const_add_overflow() -> ! { panic_nounwind("attempt to add with overflow") }
+
+    #[lang = "panic_const_sub_overflow"]
+    #[track_caller]
+    pub const fn panic_const_sub_overflow() -> ! { panic_nounwind("attempt to subtract with overflow") }
+
+    #[lang = "panic_const_mul_overflow"]
+    #[track_caller]
+    pub const fn panic_const_mul_overflow() -> ! { panic_nounwind("attempt to multiply with overflow") }
+
+    #[lang = "panic_const_div_by_zero"]
+    #[track_caller]
+    pub const fn panic_const_div_by_zero() -> ! { panic_nounwind("attempt to divide by zero") }
+
+    #[lang = "panic_const_rem_by_zero"]
+    #[track_caller]
+    pub const fn panic_const_rem_by_zero() -> ! { panic_nounwind("attempt to calculate the remainder with a divisor of zero") }
+
+    #[lang = "panic_const_neg_overflow"]
+    #[track_caller]
+    pub const fn panic_const_neg_overflow() -> ! { panic_nounwind("attempt to negate with overflow") }
+
+    #[lang = "panic_const_shr_overflow"]
+    #[track_caller]
+    pub const fn panic_const_shr_overflow() -> ! { panic_nounwind("attempt to shift right with overflow") }
+
+    #[lang = "panic_const_shl_overflow"]
+    #[track_caller]
+    pub const fn panic_const_shl_overflow() -> ! { panic_nounwind("attempt to shift left with overflow") }
+
+    #[lang = "panic_const_div_overflow"]
+    #[track_caller]
+    pub const fn panic_const_div_overflow() -> ! { panic_nounwind("attempt to divide with overflow") }
+
+    #[lang = "panic_const_rem_overflow"]
+    #[track_caller]
+    pub const fn panic_const_rem_overflow() -> ! { panic_nounwind("attempt to calculate the remainder with overflow") }
+}
+
+pub mod panicking {
+    pub use super::panic_const::*;
+    pub use super::{panic_fmt, panic_nounwind, panic_bounds_check};
 }

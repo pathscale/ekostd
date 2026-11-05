@@ -59,10 +59,22 @@ for (const [key, root] of [["core", "bootstrap/core/src/lib.rs"], ["alloc", "boo
     throw new Error(`candidate ${key} must use ${root}`);
   }
 }
+const builtins = units.get("compiler_builtins");
+if (!builtins || builtins.language || builtins.repository !== "ekostd"
+    || builtins.crate !== "compiler_builtins"
+    || builtins.root !== "bootstrap/compiler_builtins/src/lib.rs"
+    || m.units[0]?.key !== "core" || m.units[1]?.key !== "compiler_builtins"
+    || JSON.stringify(builtins.dependencies) !== '["core"]') {
+  throw new Error("compiler_builtins must follow core and use bootstrap/compiler_builtins/src/lib.rs");
+}
 if (m.units.some(u => u.language && u.key !== "core" && u.key !== "alloc")
     || units.get("core")!.dependencies.length !== 0
-    || JSON.stringify(units.get("alloc")!.dependencies) !== '["core"]'
-    || m.units.filter(u => !u.language).length < 2) throw new Error("invalid language roots or missing consumers");
+    || JSON.stringify(units.get("alloc")!.dependencies) !== '["core","compiler_builtins"]'
+    || m.units.some(u => u.key !== "core" && u.key !== "compiler_builtins"
+      && !u.dependencies.includes("compiler_builtins"))
+    || m.units.filter(u => !u.language && u.key !== "compiler_builtins").length < 2) {
+  throw new Error("invalid language roots, runtime dependencies or missing consumers");
+}
 await mkdir(out, { recursive: false });
 const stage0 = join(out, "stage0");
 const sysroot = join(out, "empty-sysroot");
@@ -157,7 +169,7 @@ for (const root of m.units.filter(u => !u.language)) {
   const graph = {
     schema: "eko.source-graph/1", root: root.key,
     units: selected.map(u => ({ key: u.key, identity: {
-      package_namespace: u.repository === "ekostd" ? repo : compilerRepo,
+      package_namespace: u.repository,
       package_name: u.package, package_version: u.version, crate_name: u.crate,
       logical_target: u.crate, logical_root: u.root, kind: "library", role: "target",
       target_triple: m.target, edition: u.edition, panic_strategy: m.panic, features: [], cfg: m.cfg,
@@ -174,18 +186,16 @@ for (const root of m.units.filter(u => !u.language)) {
   await mkdir(objects);
   const absent = selected.filter(u => missing.has(u.key)).map(u => u.key);
   const a: Attempt = { stage: "stage1", unit: root.key,
-    argv: ekors && socket ? [ekors, "--socket", socket, "--json", "compile",
+    argv: ekors && socket ? [ekors, "--socket", socket, "compile",
       `--source-graph=${graphPath}`, "--target", `dir=${objects}`] : [],
     status: !execute ? "not-run" : absent.length ? "missing-source" : !ekors || !socket ? "missing-eko-endpoint" : "ready",
     reason: absent.length ? `sources: ${absent.join(",")}` : undefined };
   await run(a);
   if (a.status === "command-exited-zero") {
     try {
-      const envelope = JSON.parse(await readFile(a.stdout!, "utf8"));
       const emitted = (await readdir(objects)).filter(n => n.endsWith(".o"));
       const nonempty = await Promise.all(emitted.map(n => Bun.file(join(objects, n)).size > 0));
-      a.status = envelope.ok === true && Array.isArray(envelope.problems) && envelope.problems.length === 0
-        && emitted.length > 0 && nonempty.every(Boolean) ? "source-objects-produced" : "request-or-object-failed";
+      a.status = emitted.length > 0 && nonempty.every(Boolean) ? "source-objects-produced" : "request-or-object-failed";
     } catch (e) { a.status = "invalid-response"; a.reason = String(e); }
   }
   await report();

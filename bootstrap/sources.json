@@ -16,6 +16,17 @@
       "dependencies": []
     },
     {
+      "key": "compiler_builtins",
+      "repository": "ekostd",
+      "root": "bootstrap/compiler_builtins/src/lib.rs",
+      "package": "compiler_builtins",
+      "version": "0.0.0",
+      "crate": "compiler_builtins",
+      "edition": "2024",
+      "language": false,
+      "dependencies": ["core"]
+    },
+    {
       "key": "alloc",
       "repository": "ekostd",
       "root": "bootstrap/alloc/src/lib.rs",
@@ -24,7 +35,7 @@
       "crate": "alloc",
       "edition": "2024",
       "language": true,
-      "dependencies": ["core"]
+      "dependencies": ["core", "compiler_builtins"]
     },
     {
       "key": "frontend_panic_runtime",
@@ -35,7 +46,7 @@
       "crate": "frontend_panic_runtime",
       "edition": "2024",
       "language": false,
-      "dependencies": ["core"]
+      "dependencies": ["core", "compiler_builtins"]
     },
     {
       "key": "eko_debug",
@@ -46,7 +57,7 @@
       "crate": "eko_debug",
       "edition": "2021",
       "language": false,
-      "dependencies": ["core", "alloc"]
+      "dependencies": ["core", "alloc", "compiler_builtins"]
     }
   ]
 }

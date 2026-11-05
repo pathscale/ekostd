@@ -47,6 +47,37 @@ impl<T, E> Result<T, E> {
         match self { Ok(_) => None, Err(err) => Some(err) }
     }
 
+    #[track_caller]
+    pub fn unwrap(self) -> T {
+        match self {
+            Ok(value) => value,
+            Err(_) => crate::panic::panic_nounwind("called `Result::unwrap()` on an `Err` value"),
+        }
+    }
+
+    #[track_caller]
+    pub fn expect(self, msg: &str) -> T {
+        match self {
+            Ok(value) => value,
+            Err(_) => {
+                let _ = msg;
+                crate::panic::panic_nounwind("called `Result::expect()` on an `Err` value")
+            }
+        }
+    }
+
+    pub fn unwrap_or(self, default: T) -> T {
+        match self { Ok(value) => value, Err(_) => default }
+    }
+
+    pub fn unwrap_or_else<F: FnOnce(E) -> T>(self, op: F) -> T {
+        match self { Ok(value) => value, Err(err) => op(err) }
+    }
+
+    pub fn and_then<U, F: FnOnce(T) -> Result<U, E>>(self, op: F) -> Result<U, E> {
+        match self { Ok(value) => op(value), Err(err) => Err(err) }
+    }
+
     pub const fn map<U, F>(self, f: F) -> Result<U, E>
     where
         F: [const] FnOnce(T) -> U + [const] Destruct,

@@ -13,25 +13,27 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 const MAX_REFCOUNT: usize = isize::MAX as usize;
 
 #[repr(C)]
-struct ArcInner<T: PointeeSized> {
+struct ArcInner<T: ?Sized> {
     strong: AtomicUsize,
     weak: AtomicUsize,
     value: T,
 }
 
-pub struct Arc<T: PointeeSized> {
+pub struct Arc<T: ?Sized> {
     ptr: NonNull<ArcInner<T>>,
     phantom: PhantomData<ArcInner<T>>,
 }
 
-pub struct Weak<T: PointeeSized> {
+pub struct Weak<T: ?Sized> {
     ptr: NonNull<ArcInner<T>>,
 }
 
-unsafe impl<T: PointeeSized + Sync + Send> Send for Arc<T> {}
-unsafe impl<T: PointeeSized + Sync + Send> Sync for Arc<T> {}
-unsafe impl<T: PointeeSized + Sync + Send> Send for Weak<T> {}
-unsafe impl<T: PointeeSized + Sync + Send> Sync for Weak<T> {}
+impl<T: ?Sized> core::ops::LegacyReceiver for Arc<T> {}
+
+unsafe impl<T: ?Sized + Sync + Send> Send for Arc<T> {}
+unsafe impl<T: ?Sized + Sync + Send> Sync for Arc<T> {}
+unsafe impl<T: ?Sized + Sync + Send> Send for Weak<T> {}
+unsafe impl<T: ?Sized + Sync + Send> Sync for Weak<T> {}
 
 #[inline]
 fn header_layout() -> Layout {
@@ -39,14 +41,14 @@ fn header_layout() -> Layout {
 }
 
 #[inline]
-unsafe fn data_offset_for_ptr<T: PointeeSized>(ptr: *const T) -> usize {
+unsafe fn data_offset_for_ptr<T: ?Sized>(ptr: *const T) -> usize {
     let val_align = unsafe { mem::align_of_val_raw(ptr) };
     let layout = header_layout();
     layout.size() + layout.padding_needed_for(val_align)
 }
 
 #[inline]
-unsafe fn layout_for_inner<T: PointeeSized>(ptr: *const ArcInner<T>) -> Layout {
+unsafe fn layout_for_inner<T: ?Sized>(ptr: *const ArcInner<T>) -> Layout {
     let value_ptr = unsafe { &raw const (*ptr).value };
     let size = unsafe { mem::size_of_val_raw(value_ptr) };
     let align = unsafe { mem::align_of_val_raw(value_ptr) };
@@ -68,7 +70,7 @@ impl<T> Arc<T> {
     }
 }
 
-impl<T: PointeeSized> Arc<T> {
+impl<T: ?Sized> Arc<T> {
     #[inline]
     fn inner(&self) -> &ArcInner<T> {
         unsafe { self.ptr.as_ref() }
@@ -109,7 +111,7 @@ impl<T: PointeeSized> Arc<T> {
     }
 
     pub fn ptr_eq(this: &Self, other: &Self) -> bool {
-        ptr::addr_eq(this.as_ptr(), other.as_ptr())
+        ptr::addr_eq(Self::as_ptr(this), Self::as_ptr(other))
     }
 
     pub fn get_mut(this: &mut Self) -> Option<&mut T> {
@@ -149,7 +151,7 @@ impl<T: PointeeSized> Arc<T> {
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         let offset = unsafe { data_offset_for_ptr(ptr) };
         let byte_ptr = (ptr as *const u8).wrapping_sub(offset);
-        let inner_ptr = ptr.with_metadata_of(byte_ptr as *const ArcInner<T>) as *mut ArcInner<T>;
+        let inner_ptr = byte_ptr.with_metadata_of(ptr as *const ArcInner<T>) as *mut ArcInner<T>;
         Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) }, phantom: PhantomData }
     }
 
@@ -162,18 +164,18 @@ impl<T: PointeeSized> Arc<T> {
     }
 }
 
-impl<T: PointeeSized> Deref for Arc<T> {
+impl<T: ?Sized> Deref for Arc<T> {
     type Target = T;
     #[inline]
     fn deref(&self) -> &T { &self.inner().value }
 }
 
-impl<T: PointeeSized> Clone for Arc<T> {
+impl<T: ?Sized> Clone for Arc<T> {
     #[inline]
     fn clone(&self) -> Self { Self::clone(self) }
 }
 
-impl<T: PointeeSized> Drop for Arc<T> {
+impl<T: ?Sized> Drop for Arc<T> {
     #[inline]
     fn drop(&mut self) {
         if self.inner().strong.fetch_sub(1, Ordering::Release) != 1 { return; }
@@ -182,7 +184,7 @@ impl<T: PointeeSized> Drop for Arc<T> {
     }
 }
 
-impl<T: PointeeSized> Weak<T> {
+impl<T: ?Sized> Weak<T> {
     #[inline]
     fn inner(&self) -> Option<&ArcInner<T>> {
         if (self.ptr.as_ptr() as *const u8).addr() == usize::MAX {
@@ -227,7 +229,7 @@ impl<T: PointeeSized> Weak<T> {
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         let offset = unsafe { data_offset_for_ptr(ptr) };
         let byte_ptr = (ptr as *const u8).wrapping_sub(offset);
-        let inner_ptr = ptr.with_metadata_of(byte_ptr as *const ArcInner<T>) as *mut ArcInner<T>;
+        let inner_ptr = byte_ptr.with_metadata_of(ptr as *const ArcInner<T>) as *mut ArcInner<T>;
         Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
     }
 
@@ -247,12 +249,12 @@ impl<T> Weak<T> {
     }
 }
 
-impl<T: PointeeSized> Clone for Weak<T> {
+impl<T: ?Sized> Clone for Weak<T> {
     #[inline]
     fn clone(&self) -> Self { Self::clone(self) }
 }
 
-impl<T: PointeeSized> Drop for Weak<T> {
+impl<T: ?Sized> Drop for Weak<T> {
     fn drop(&mut self) {
         let Some(inner) = self.inner() else { return };
         if inner.weak.fetch_sub(1, Ordering::Release) == 1 {
@@ -265,26 +267,28 @@ impl<T: PointeeSized> Drop for Weak<T> {
     }
 }
 
-impl<T: PointeeSized + PartialEq> PartialEq for Arc<T> {
+impl<T: ?Sized + PartialEq> PartialEq for Arc<T> {
     fn eq(&self, other: &Self) -> bool { **self == **other }
 }
-impl<T: PointeeSized + Eq> Eq for Arc<T> {}
-impl<T: PointeeSized + PartialOrd> PartialOrd for Arc<T> {
+impl<T: ?Sized + Eq> Eq for Arc<T> {}
+impl<T: ?Sized + PartialOrd> PartialOrd for Arc<T> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> { (**self).partial_cmp(&**other) }
 }
-impl<T: PointeeSized + Ord> Ord for Arc<T> {
+impl<T: ?Sized + Ord> Ord for Arc<T> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering { (**self).cmp(&**other) }
 }
-impl<T: PointeeSized + fmt::Debug> fmt::Debug for Arc<T> {
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<Arc<U>> for Arc<T> {}
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::DispatchFromDyn<Arc<U>> for Arc<T> {}
+impl<T: ?Sized + fmt::Debug> fmt::Debug for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Debug::fmt(&**self, f) }
 }
-impl<T: PointeeSized + fmt::Display> fmt::Display for Arc<T> {
+impl<T: ?Sized + fmt::Display> fmt::Display for Arc<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { fmt::Display::fmt(&**self, f) }
 }
 impl<T: Default> Default for Arc<T> {
     fn default() -> Self { Self::new(T::default()) }
 }
-impl<T: PointeeSized> AsRef<T> for Arc<T> {
+impl<T: ?Sized> AsRef<T> for Arc<T> {
     fn as_ref(&self) -> &T { &**self }
 }
 impl<T> From<T> for Arc<T> {

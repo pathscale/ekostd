@@ -32,11 +32,40 @@ impl<T> Option<T> {
         match self { Some(value) => Some(value), None => None }
     }
 
+    #[track_caller]
+    pub const fn unwrap(self) -> T
+    where
+        T: [const] Destruct,
+    {
+        match self {
+            Some(value) => value,
+            None => crate::panic::panic_nounwind("called `Option::unwrap()` on a `None` value"),
+        }
+    }
+
+    #[track_caller]
+    pub const fn expect(self, msg: &str) -> T
+    where
+        T: [const] Destruct,
+    {
+        match self {
+            Some(value) => value,
+            None => {
+                let _ = msg;
+                crate::panic::panic_nounwind("called `Option::expect()` on a `None` value")
+            }
+        }
+    }
+
     pub const fn unwrap_or(self, default: T) -> T
     where
         T: [const] Destruct,
     {
         match self { Some(value) => value, None => default }
+    }
+
+    pub fn unwrap_or_else<F: FnOnce() -> T>(self, f: F) -> T {
+        match self { Some(value) => value, None => f() }
     }
 
     pub const fn map<U, F>(self, f: F) -> Option<U>
@@ -46,8 +75,64 @@ impl<T> Option<T> {
         match self { Some(value) => Some(f(value)), None => None }
     }
 
+    pub fn map_or<U, F: FnOnce(T) -> U>(self, default: U, f: F) -> U {
+        match self { Some(value) => f(value), None => default }
+    }
+
+    pub fn and_then<U, F: FnOnce(T) -> Option<U>>(self, f: F) -> Option<U> {
+        match self { Some(value) => f(value), None => None }
+    }
+
     pub const fn ok_or<E: [const] Destruct>(self, err: E) -> Result<T, E> {
         match self { Some(value) => Ok(value), None => Err(err) }
+    }
+
+    pub fn ok_or_else<E, F: FnOnce() -> E>(self, err: F) -> Result<T, E> {
+        match self { Some(value) => Ok(value), None => Err(err()) }
+    }
+
+    pub fn or(self, optb: Option<T>) -> Option<T> {
+        match self { Some(x) => Some(x), None => optb }
+    }
+
+    pub fn or_else<F: FnOnce() -> Option<T>>(self, f: F) -> Option<T> {
+        match self { Some(x) => Some(x), None => f() }
+    }
+
+    pub fn is_some_and<F: FnOnce(T) -> bool>(self, f: F) -> bool {
+        match self { Some(x) => f(x), None => false }
+    }
+}
+
+impl<'a, T> Option<&'a T> {
+    pub const fn copied(self) -> Option<T>
+    where
+        T: Copy,
+    {
+        match self { Some(&t) => Some(t), None => None }
+    }
+
+    pub fn cloned(self) -> Option<T>
+    where
+        T: Clone,
+    {
+        match self { Some(t) => Some(t.clone()), None => None }
+    }
+}
+
+impl<'a, T> Option<&'a mut T> {
+    pub const fn copied(self) -> Option<T>
+    where
+        T: Copy,
+    {
+        match self { Some(&mut t) => Some(t), None => None }
+    }
+
+    pub fn cloned(self) -> Option<T>
+    where
+        T: Clone,
+    {
+        match self { Some(t) => Some(t.clone()), None => None }
     }
 }
 

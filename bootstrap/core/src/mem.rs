@@ -1,4 +1,5 @@
 use crate::marker::{Destruct, PointeeSized};
+use crate::ops::{Deref, DerefMut};
 
 #[lang = "maybe_dangling"]
 #[repr(transparent)]
@@ -18,6 +19,17 @@ impl<T: crate::marker::Sized> ManuallyDrop<T> {
     }
 
     pub const fn into_inner(self) -> T { self.value.0 }
+}
+
+impl<T: ?Sized> Deref for ManuallyDrop<T> {
+    type Target = T;
+    #[inline(always)]
+    fn deref(&self) -> &T { &self.value.0 }
+}
+
+impl<T: ?Sized> DerefMut for ManuallyDrop<T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut T { &mut self.value.0 }
 }
 
 #[lang = "maybe_uninit"]
@@ -51,6 +63,16 @@ pub const unsafe fn size_of_val<T: ?Sized>(value: *const T) -> usize;
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn align_of_val<T: ?Sized>(value: *const T) -> usize;
+
+#[inline(always)]
+pub const unsafe fn size_of_val_raw<T: ?Sized>(value: *const T) -> usize {
+    unsafe { size_of_val(value) }
+}
+
+#[inline(always)]
+pub const unsafe fn align_of_val_raw<T: ?Sized>(value: *const T) -> usize {
+    unsafe { align_of_val(value) }
+}
 
 trait SizedTypeProperties: crate::marker::Sized {
     const SIZE: usize = crate::intrinsics::size_of::<Self>();

@@ -14,7 +14,7 @@ pub struct LayoutError;
 
 impl Layout {
     pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError> {
-        if align == 0 || !align.is_power_of_two() || size > isize::MAX as usize - (align - 1) {
+        if align == 0 || (align & (align - 1)) != 0 || size > (0x7fff_ffff_ffff_ffff_usize - (align - 1)) {
             Err(LayoutError)
         } else {
             Ok(Self { size, align })
@@ -32,9 +32,37 @@ impl Layout {
         // SAFETY: Type layouts satisfy the compiler's allocation layout constraints.
         unsafe { Self::from_size_align_unchecked(size_of::<T>(), align_of::<T>()) }
     }
+
+    pub fn array<T>(n: usize) -> Result<Self, LayoutError> {
+        let element_size = size_of::<T>();
+        if element_size != 0 && n > (0x7fff_ffff_ffff_ffff_usize / element_size) {
+            return Err(LayoutError);
+        }
+        Self::from_size_align(element_size * n, align_of::<T>())
+    }
+
+    pub fn for_value<T: ?Sized>(t: &T) -> Self {
+        unsafe { Self::for_value_raw(t as *const T) }
+    }
+
+    pub unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
+        let size = unsafe { crate::mem::size_of_val(t) };
+        let align = unsafe { crate::mem::align_of_val(t) };
+        unsafe { Self::from_size_align_unchecked(size, align) }
+    }
+
+    pub const fn padding_needed_for(&self, align: usize) -> usize {
+        if align == 0 { return 0; }
+        let remainder = self.size & (align - 1);
+        if remainder == 0 { 0 } else { align - remainder }
+    }
 }
 
 pub struct AllocError;
+
+pub fn handle_alloc_error(_layout: Layout) -> ! {
+    crate::intrinsics::abort()
+}
 
 pub unsafe trait GlobalAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8;

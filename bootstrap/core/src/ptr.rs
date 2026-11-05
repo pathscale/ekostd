@@ -138,16 +138,50 @@ pub fn addr_eq<T: PointeeSized, U: PointeeSized>(p: *const T, q: *const U) -> bo
 }
 
 #[repr(transparent)]
-#[rustc_layout_scalar_valid_range_start(1)]
-#[rustc_nonnull_optimization_guaranteed]
 pub struct NonNull<T: PointeeSized> {
     pointer: *const T,
 }
 
+#[lang = "dyn_metadata"]
+#[repr(transparent)]
+pub struct DynMetadata<Dyn: PointeeSized> {
+    _vtable_ptr: *const (),
+    _phantom: PhantomData<Dyn>,
+}
+
+impl<Dyn: PointeeSized> Copy for DynMetadata<Dyn> {}
+impl<Dyn: PointeeSized> Clone for DynMetadata<Dyn> {
+    fn clone(&self) -> Self { *self }
+}
+impl<Dyn: PointeeSized> PartialEq for DynMetadata<Dyn> {
+    fn eq(&self, _: &Self) -> bool { true }
+}
+impl<Dyn: PointeeSized> Eq for DynMetadata<Dyn> {}
+impl<Dyn: PointeeSized> PartialOrd for DynMetadata<Dyn> {
+    fn partial_cmp(&self, _: &Self) -> Option<Ordering> { Some(Ordering::Equal) }
+}
+impl<Dyn: PointeeSized> Ord for DynMetadata<Dyn> {
+    fn cmp(&self, _: &Self) -> Ordering { Ordering::Equal }
+}
+unsafe impl<Dyn: PointeeSized> Send for DynMetadata<Dyn> {}
+unsafe impl<Dyn: PointeeSized> Sync for DynMetadata<Dyn> {}
+unsafe impl<Dyn: PointeeSized> Freeze for DynMetadata<Dyn> {}
+impl<Dyn: PointeeSized> Unpin for DynMetadata<Dyn> {}
+
+impl<T: PointeeSized, U: PointeeSized> crate::ops::CoerceUnsized<NonNull<U>> for NonNull<T>
+where
+    T: Unsize<U>,
+{}
+
+impl<T: PointeeSized, U: PointeeSized> crate::ops::DispatchFromDyn<NonNull<U>> for NonNull<T>
+where
+    T: Unsize<U>,
+{}
+
 impl<T: Sized> NonNull<T> {
     #[inline(always)]
     pub const fn dangling() -> Self {
-        unsafe { NonNull::new_unchecked(intrinsics::align_of::<T>() as *mut T) }
+        unsafe { NonNull::new_unchecked(crate::mem::align_of::<T>() as *mut T) }
     }
 }
 
@@ -158,18 +192,22 @@ impl<T: PointeeSized> NonNull<T> {
     }
 
     #[inline(always)]
-    pub const fn new(ptr: *mut T) -> Option<Self> {
-        unsafe { intrinsics::transmute::<*mut T, Option<NonNull<T>>>(ptr) }
+    pub fn new(ptr: *mut T) -> Option<Self> {
+        if (ptr as *const u8 as usize) != 0 {
+            Some(unsafe { NonNull::new_unchecked(ptr) })
+        } else {
+            None
+        }
     }
 
     #[inline(always)]
     pub const fn from_ref(r: &T) -> Self {
-        unsafe { NonNull { pointer: r as *const T } }
+        NonNull { pointer: r as *const T }
     }
 
     #[inline(always)]
     pub const fn from_mut(r: &mut T) -> Self {
-        unsafe { NonNull { pointer: r as *mut T as *const T } }
+        NonNull { pointer: r as *mut T as *const T }
     }
 
     #[inline(always)]
@@ -213,17 +251,7 @@ impl<T: PointeeSized> NonNull<T> {
     where
         T: Sized,
     {
-        unsafe { self.offset((!count as isize).wrapping_offset_one()) }
-    }
-}
-
-trait NegateOffset {
-    fn wrapping_offset_one(self) -> isize;
-}
-impl NegateOffset for isize {
-    #[inline(always)]
-    fn wrapping_offset_one(self) -> isize {
-        unsafe { intrinsics::arith_offset(self as *const u8, 1) as isize }
+        unsafe { self.offset(0isize.wrapping_sub(count as isize)) }
     }
 }
 
@@ -258,7 +286,6 @@ impl<T: PointeeSized> Clone for NonNull<T> {
 }
 impl<T: PointeeSized> !Send for NonNull<T> {}
 impl<T: PointeeSized> !Sync for NonNull<T> {}
-impl<T: PointeeSized, U: PointeeSized> Unsize<NonNull<U>> for NonNull<T> where T: Unsize<U> {}
 impl<T: PointeeSized> Eq for NonNull<T> {}
 impl<T: PointeeSized> PartialEq for NonNull<T> {
     #[inline(always)]
@@ -314,7 +341,7 @@ impl<T: PointeeSized> Unique<T> {
     }
 
     #[inline(always)]
-    pub const fn new(ptr: *mut T) -> Option<Self> {
+    pub fn new(ptr: *mut T) -> Option<Self> {
         match NonNull::new(ptr) {
             Some(pointer) => Some(Unique { pointer, _marker: PhantomData }),
             None => None,
@@ -366,12 +393,21 @@ impl<T: PointeeSized> From<NonNull<T>> for Unique<T> {
     }
 }
 
-#[lang = "const_ptr"]
 impl<T: PointeeSized> *const T {
     #[rustc_diagnostic_item = "ptr_const_is_null"]
     #[inline(always)]
-    pub const fn is_null(self) -> bool {
-        unsafe { intrinsics::transmute::<*const u8, Option<NonNull<u8>>>(self as *const u8).is_none() }
+    pub fn is_null(self) -> bool {
+        (self as *const u8 as usize) == 0
+    }
+
+    #[inline(always)]
+    pub fn addr(self) -> usize {
+        self as *const () as usize
+    }
+
+    #[inline(always)]
+    pub const fn with_metadata_of<U: PointeeSized>(self, meta: *const U) -> *const U {
+        from_raw_parts(self as *const (), metadata(meta))
     }
 
     #[inline(always)]
@@ -385,7 +421,7 @@ impl<T: PointeeSized> *const T {
     }
 
     #[inline(always)]
-    pub const unsafe fn as_ref<'a>(self) -> Option<&'a T> {
+    pub unsafe fn as_ref<'a>(self) -> Option<&'a T> {
         if self.is_null() { None } else { unsafe { Some(&*self) } }
     }
 
@@ -418,7 +454,7 @@ impl<T: PointeeSized> *const T {
     where
         T: Sized,
     {
-        let neg = unsafe { intrinsics::arith_offset((!count) as *const u8, 1) as isize };
+        let neg = 0isize.wrapping_sub(count as isize);
         unsafe { self.offset(neg) }
     }
 
@@ -435,7 +471,7 @@ impl<T: PointeeSized> *const T {
     where
         T: Sized,
     {
-        let neg = unsafe { intrinsics::arith_offset((!count) as *const u8, 1) as isize };
+        let neg = 0isize.wrapping_sub(count as isize);
         self.wrapping_offset(neg)
     }
 
@@ -464,12 +500,21 @@ impl<T: PointeeSized> *const T {
     }
 }
 
-#[lang = "mut_ptr"]
 impl<T: PointeeSized> *mut T {
     #[rustc_diagnostic_item = "ptr_is_null"]
     #[inline(always)]
-    pub const fn is_null(self) -> bool {
+    pub fn is_null(self) -> bool {
         (self as *const T).is_null()
+    }
+
+    #[inline(always)]
+    pub fn addr(self) -> usize {
+        self as *const () as usize
+    }
+
+    #[inline(always)]
+    pub const fn with_metadata_of<U: PointeeSized>(self, meta: *const U) -> *mut U {
+        from_raw_parts_mut(self as *mut (), metadata(meta))
     }
 
     #[inline(always)]
@@ -483,12 +528,12 @@ impl<T: PointeeSized> *mut T {
     }
 
     #[inline(always)]
-    pub const unsafe fn as_ref<'a>(self) -> Option<&'a T> {
+    pub unsafe fn as_ref<'a>(self) -> Option<&'a T> {
         if self.is_null() { None } else { unsafe { Some(&*self) } }
     }
 
     #[inline(always)]
-    pub const unsafe fn as_mut<'a>(self) -> Option<&'a mut T> {
+    pub unsafe fn as_mut<'a>(self) -> Option<&'a mut T> {
         if self.is_null() { None } else { unsafe { Some(&mut *self) } }
     }
 
@@ -521,7 +566,7 @@ impl<T: PointeeSized> *mut T {
     where
         T: Sized,
     {
-        let neg = unsafe { intrinsics::arith_offset((!count) as *const u8, 1) as isize };
+        let neg = 0isize.wrapping_sub(count as isize);
         unsafe { self.offset(neg) }
     }
 
@@ -538,7 +583,7 @@ impl<T: PointeeSized> *mut T {
     where
         T: Sized,
     {
-        let neg = unsafe { intrinsics::arith_offset((!count) as *const u8, 1) as isize };
+        let neg = 0isize.wrapping_sub(count as isize);
         self.wrapping_offset(neg)
     }
 
@@ -607,7 +652,6 @@ impl<T: PointeeSized> *mut T {
     }
 }
 
-#[lang = "const_slice_ptr"]
 impl<T> *const [T] {
     #[inline(always)]
     pub const fn len(self) -> usize {
@@ -625,7 +669,6 @@ impl<T> *const [T] {
     }
 }
 
-#[lang = "mut_slice_ptr"]
 impl<T> *mut [T] {
     #[inline(always)]
     pub const fn len(self) -> usize {

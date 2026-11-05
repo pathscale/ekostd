@@ -15,9 +15,10 @@ pub trait Write {
         self.write_str(c.encode_utf8(&mut bytes))
     }
     fn write_fmt(&mut self, args: Arguments<'_>) -> Result {
-        struct Adapter<'a, T: ?Sized>(&'a mut T);
+        struct Adapter<'a, T: ?Sized + 'a>(&'a mut T);
         impl<T: Write + ?Sized> Write for Adapter<'_, T> {
             fn write_str(&mut self, s: &str) -> Result { self.0.write_str(s) }
+            fn write_fmt(&mut self, args: Arguments<'_>) -> Result { write(self, args) }
         }
         write(&mut Adapter(self), args)
     }
@@ -26,19 +27,127 @@ impl<W: Write + ?Sized> Write for &mut W {
     fn write_str(&mut self, s: &str) -> Result { (**self).write_str(s) }
 }
 pub struct Formatter<'a> { writer: &'a mut dyn Write }
-impl Formatter<'_> {
+impl<'a> Formatter<'a> {
     pub fn write_str(&mut self, s: &str) -> Result { self.writer.write_str(s) }
     pub fn write_char(&mut self, c: char) -> Result { self.writer.write_char(c) }
     pub fn write_fmt(&mut self, args: Arguments<'_>) -> Result { write(self.writer, args) }
+    pub fn debug_map(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
+    pub fn debug_set(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
+    pub fn debug_list(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
+    pub fn debug_tuple_field1_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug) -> Result {
+        attempt!(self.write_str(name));
+        attempt!(self.write_str("("));
+        attempt!(value1.fmt(self));
+        self.write_str(")")
+    }
+    pub fn debug_tuple_field2_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug) -> Result {
+        attempt!(self.write_str(name));
+        attempt!(self.write_str("("));
+        attempt!(value1.fmt(self));
+        attempt!(self.write_str(", "));
+        attempt!(value2.fmt(self));
+        self.write_str(")")
+    }
+    pub fn debug_tuple_fields_finish<'b>(&'b mut self, name: &str, values: &[&dyn Debug]) -> Result {
+        attempt!(self.write_str(name));
+        attempt!(self.write_str("("));
+        let mut i = 0;
+        while i < values.len() {
+            if i != 0 { attempt!(self.write_str(", ")); }
+            attempt!(values[i].fmt(self));
+            i += 1;
+        }
+        self.write_str(")")
+    }
+    pub fn debug_struct_field1_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug) -> Result {
+        self.debug_struct_fields_finish(name, &[name1], &[value1])
+    }
+    pub fn debug_struct_field2_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug, name2: &str, value2: &dyn Debug) -> Result {
+        self.debug_struct_fields_finish(name, &[name1, name2], &[value1, value2])
+    }
+    pub fn debug_struct_field3_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug, name2: &str, value2: &dyn Debug, name3: &str, value3: &dyn Debug) -> Result {
+        self.debug_struct_fields_finish(name, &[name1, name2, name3], &[value1, value2, value3])
+    }
+    pub fn debug_struct_field4_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug, name2: &str, value2: &dyn Debug, name3: &str, value3: &dyn Debug, name4: &str, value4: &dyn Debug) -> Result {
+        self.debug_struct_fields_finish(name, &[name1, name2, name3, name4], &[value1, value2, value3, value4])
+    }
+    pub fn debug_struct_field5_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug, name2: &str, value2: &dyn Debug, name3: &str, value3: &dyn Debug, name4: &str, value4: &dyn Debug, name5: &str, value5: &dyn Debug) -> Result {
+        self.debug_struct_fields_finish(name, &[name1, name2, name3, name4, name5], &[value1, value2, value3, value4, value5])
+    }
+    pub fn debug_struct_fields_finish<'b>(&'b mut self, name: &str, names: &[&str], values: &[&dyn Debug]) -> Result {
+        attempt!(self.write_str(name));
+        attempt!(self.write_str(" { "));
+        let mut i = 0;
+        while i < names.len() && i < values.len() {
+            if i != 0 { attempt!(self.write_str(", ")); }
+            attempt!(self.write_str(names[i]));
+            attempt!(self.write_str(": "));
+            attempt!(values[i].fmt(self));
+            i += 1;
+        }
+        self.write_str(" }")
+    }
+}
+pub struct DebugList<'b, 'a: 'b> { fmt: &'b mut Formatter<'a> }
+impl<'b, 'a: 'b> DebugList<'b, 'a> {
+    pub fn entries<I>(&mut self, _entries: I) -> &mut Self { self }
+    pub fn finish(&mut self) -> Result { self.fmt.write_str("{..}") }
 }
 #[rustc_diagnostic_item = "Display"]
 pub trait Display { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
-#[lang = "debug_trait"]
 #[rustc_diagnostic_item = "Debug"]
 pub trait Debug { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait LowerHex { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait UpperHex { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait Pointer { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
+
+impl Debug for () {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("()") }
+}
+impl<T: Debug> Debug for [T] {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        attempt!(f.write_str("["));
+        let mut i = 0;
+        while i < self.len() {
+            if i != 0 { attempt!(f.write_str(", ")); }
+            attempt!(Debug::fmt(&self[i], f));
+            i += 1;
+        }
+        f.write_str("]")
+    }
+}
+impl<T: Debug, const N: usize> Debug for [T; N] {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        Debug::fmt(&self[..], f)
+    }
+}
+impl<T: Debug> Debug for Option<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            None => f.write_str("None"),
+            Some(value) => {
+                attempt!(f.write_str("Some("));
+                attempt!(Debug::fmt(value, f));
+                f.write_str(")")
+            }
+        }
+    }
+}
+impl<T: Debug, E: Debug> Debug for crate::result::Result<T, E> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        match self {
+            Ok(value) => {
+                attempt!(f.write_str("Ok("));
+                attempt!(Debug::fmt(value, f));
+            }
+            Err(error) => {
+                attempt!(f.write_str("Err("));
+                attempt!(Debug::fmt(error, f));
+            }
+        }
+        f.write_str(")")
+    }
+}
 
 pub mod rt {
     use super::*;
@@ -253,6 +362,4 @@ impl<T: ?Sized> Display for *mut T {
 impl<T: ?Sized> Pointer for &T {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { Pointer::fmt(&(*self as *const T), f) }
 }
-#[macro_export]
-#[rustc_builtin_macro]
-macro_rules! format_args { ($($tokens:tt)*) => {}; }
+

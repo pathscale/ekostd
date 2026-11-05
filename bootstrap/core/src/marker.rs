@@ -1,5 +1,21 @@
 use crate::clone::Clone;
 
+#[lang = "structural_peq"]
+pub trait StructuralPartialEq {}
+
+#[lang = "const_param_ty"]
+pub trait ConstParamTy_: StructuralPartialEq + crate::cmp::Eq {}
+
+macro_rules! impl_const_param_ty {
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl StructuralPartialEq for $ty {}
+            impl ConstParamTy_ for $ty {}
+        )*
+    };
+}
+impl_const_param_ty!(bool, char, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+
 #[lang = "pointee_sized"]
 #[fundamental]
 #[rustc_deny_explicit_impl]

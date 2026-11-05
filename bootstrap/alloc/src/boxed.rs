@@ -3,9 +3,12 @@ use core::alloc::Layout;
 use core::mem::{self, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
+#[fundamental]
 pub struct Box<T: ?Sized> {
     pointer: NonNull<T>,
 }
+
+impl<T: ?Sized> core::ops::LegacyReceiver for Box<T> {}
 
 impl<T> Box<T> {
     pub fn new(value: T) -> Self {
@@ -85,6 +88,17 @@ impl<T: ?Sized + PartialEq> PartialEq for Box<T> {
 }
 
 impl<T: ?Sized + Eq> Eq for Box<T> {}
+
+impl<T: ?Sized + PartialOrd> PartialOrd for Box<T> { fn partial_cmp(&self,other:&Self)->Option<core::cmp::Ordering>{(**self).partial_cmp(&**other)} }
+impl<T: ?Sized + Ord> Ord for Box<T> { fn cmp(&self,other:&Self)->core::cmp::Ordering{(**self).cmp(&**other)} }
+impl<T: ?Sized + core::hash::Hash> core::hash::Hash for Box<T> { fn hash<H:core::hash::Hasher>(&self,state:&mut H){(**self).hash(state)} }
+impl<T: ?Sized + core::fmt::Display> core::fmt::Display for Box<T> { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result{core::fmt::Display::fmt(&**self,f)} }
+impl<T: Clone> Clone for Box<T> { fn clone(&self)->Self { Self::new((**self).clone()) } }
+impl<T: Clone> Clone for Box<[T]> { fn clone(&self)->Self { crate::vec::Vec::from(&**self).into_boxed_slice() } }
+impl Clone for Box<str> { fn clone(&self)->Self { crate::string::String::from(&**self).into_boxed_str() } }
+impl<T> Box<T> { pub fn pin(value:T)->core::pin::Pin<Self> { unsafe { core::pin::Pin::new_unchecked(Self::new(value)) } } }
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<Box<U>> for Box<T> {}
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::DispatchFromDyn<Box<U>> for Box<T> {}
 
 impl<T> From<T> for Box<T> {
     fn from(value: T) -> Self {
