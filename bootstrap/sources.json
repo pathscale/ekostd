@@ -1,0 +1,52 @@
+{
+  "schema": "ekostd.bootstrap/1",
+  "target": "aarch64-apple-darwin",
+  "panic": "abort",
+  "cfg": [],
+  "units": [
+    {
+      "key": "core",
+      "repository": "ekostd",
+      "root": "bootstrap/core/src/lib.rs",
+      "package": "core",
+      "version": "0.0.0",
+      "crate": "core",
+      "edition": "2024",
+      "language": true,
+      "dependencies": []
+    },
+    {
+      "key": "alloc",
+      "repository": "ekostd",
+      "root": "bootstrap/alloc/src/lib.rs",
+      "package": "alloc",
+      "version": "0.0.0",
+      "crate": "alloc",
+      "edition": "2024",
+      "language": true,
+      "dependencies": ["core"]
+    },
+    {
+      "key": "frontend_panic_runtime",
+      "repository": "ekostd",
+      "root": "crates/frontend-panic-runtime/src/lib.rs",
+      "package": "frontend_panic_runtime",
+      "version": "0.1.0",
+      "crate": "frontend_panic_runtime",
+      "edition": "2024",
+      "language": false,
+      "dependencies": ["core"]
+    },
+    {
+      "key": "eko_debug",
+      "repository": "ekopathrs",
+      "root": "crates/origin/src/lib.rs",
+      "package": "eko-debug",
+      "version": "0.0.0",
+      "crate": "eko_debug",
+      "edition": "2021",
+      "language": false,
+      "dependencies": ["core", "alloc"]
+    }
+  ]
+}

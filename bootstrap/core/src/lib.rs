@@ -10,6 +10,7 @@
 #![feature(const_trait_impl, const_destruct, unboxed_closures, prelude_import)]
 
 pub mod clone;
+pub mod cmp;
 pub mod convert;
 pub mod default;
 pub mod intrinsics;

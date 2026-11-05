@@ -1,6 +1,8 @@
 use crate::marker::{PointeeSized, Tuple};
 
+mod bit;
 mod try_trait;
+pub use self::bit::{BitAnd, BitOr, BitXor, Not};
 pub use self::try_trait::{ControlFlow, FromResidual, Try};
 
 #[lang = "drop"]
