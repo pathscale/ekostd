@@ -85,6 +85,12 @@ pub auto trait Unpin {}
 impl<T: PointeeSized> Unpin for &T {}
 impl<T: PointeeSized> Unpin for &mut T {}
 
+#[lang = "unsafe_unpin"]
+pub unsafe auto trait UnsafeUnpin {}
+
+unsafe impl<T: PointeeSized> UnsafeUnpin for &T {}
+unsafe impl<T: PointeeSized> UnsafeUnpin for &mut T {}
+
 #[lang = "phantom_data"]
 pub struct PhantomData<T: PointeeSized>;
 
