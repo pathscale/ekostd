@@ -1,5 +1,8 @@
 #![no_std]
 
+#[macro_use]
+extern crate core;
+
 use core::fmt;
 use core::sync::atomic::{AtomicBool, Ordering};
 

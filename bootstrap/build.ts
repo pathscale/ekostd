@@ -193,7 +193,7 @@ for (const root of m.units.filter(u => !u.language)) {
   await run(a);
   if (a.status === "command-exited-zero") {
     try {
-      const emitted = (await readdir(objects)).filter(n => n.endsWith(".o"));
+      const emitted = (await readdir(objects, { recursive: true })).filter(n => n.endsWith(".o"));
       const nonempty = await Promise.all(emitted.map(n => Bun.file(join(objects, n)).size > 0));
       a.status = emitted.length > 0 && nonempty.every(Boolean) ? "source-objects-produced" : "request-or-object-failed";
     } catch (e) { a.status = "invalid-response"; a.reason = String(e); }

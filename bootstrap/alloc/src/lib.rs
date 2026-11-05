@@ -1,6 +1,9 @@
 #![no_std]
 #![feature(lang_items, rustc_attrs, fundamental)]
 
+#[macro_use]
+extern crate core;
+
 pub mod alloc;
 pub mod borrow;
 pub mod boxed;
