@@ -36,7 +36,7 @@ impl String {
         unsafe { str::from_utf8_unchecked(&self.vec) }
     }
 
-    pub fn as_mut_vec(&mut self) -> &mut Vec<u8> {
+    pub unsafe fn as_mut_vec(&mut self) -> &mut Vec<u8> {
         &mut self.vec
     }
 
@@ -55,11 +55,10 @@ impl String {
 
     pub fn truncate(&mut self, new_len: usize) {
         if new_len < self.len() {
-            let mut end = new_len;
-            while !self.as_str().is_char_boundary(end) {
-                end -= 1;
+            if !self.as_str().is_char_boundary(new_len) {
+                panic!("String::truncate: new_len does not lie on a char boundary");
             }
-            self.vec.truncate(end);
+            self.vec.truncate(new_len);
         }
     }
 
@@ -82,11 +81,11 @@ impl String {
         self.vec
     }
 
-    pub fn into_boxed_str(self) -> alloc::boxed::Box<str> {
+    pub fn into_boxed_str(self) -> crate::boxed::Box<str> {
         let boxed = self.vec.into_boxed_slice();
-        let raw = alloc::boxed::Box::into_raw(boxed);
+        let raw = crate::boxed::Box::into_raw(boxed);
         // The allocation is unchanged; String's invariant guarantees valid UTF-8 bytes.
-        unsafe { alloc::boxed::Box::from_raw(raw as *mut str) }
+        unsafe { crate::boxed::Box::from_raw(raw as *mut str) }
     }
 }
 

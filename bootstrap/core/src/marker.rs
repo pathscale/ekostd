@@ -33,6 +33,10 @@ pub trait Copy: Clone {}
 #[rustc_dyn_incompatible_trait]
 pub const trait Destruct: PointeeSized {}
 
+#[lang = "bikeshed_guaranteed_no_drop"]
+#[rustc_deny_explicit_impl]
+pub trait BikeshedGuaranteedNoDrop {}
+
 #[lang = "tuple_trait"]
 #[fundamental]
 #[rustc_deny_explicit_impl]

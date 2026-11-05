@@ -62,3 +62,16 @@ pub const trait FnMut<Args: Tuple>: FnOnce<Args> {
 pub const trait Fn<Args: Tuple>: [const] FnMut<Args> {
     extern "rust-call" fn call(&self, args: Args) -> Self::Output;
 }
+
+#[lang = "index"]
+pub trait Index<Idx: ?Sized>: PointeeSized {
+    type Output: ?Sized;
+    #[track_caller]
+    fn index(&self, index: Idx) -> &Self::Output;
+}
+
+#[lang = "index_mut"]
+pub trait IndexMut<Idx: ?Sized>: Index<Idx> + PointeeSized {
+    #[track_caller]
+    fn index_mut(&mut self, index: Idx) -> &mut Self::Output;
+}
