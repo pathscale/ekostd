@@ -9,7 +9,6 @@
 //! `poll`, which is a fix rather than a feature: draining stdout to end of file and then stderr
 //! deadlocks whenever the child fills the stderr buffer first, 16 KB on macOS.
 
-use alloc::vec;
 use alloc::vec::Vec;
 use core::time::Duration;
 
@@ -35,16 +34,18 @@ impl Output {
 /// A program to run.
 pub struct Command {
     program: Vec<u8>,
-    args: Vec<Vec<u8>>,
-    /// Overrides on top of this process's environment, as `KEY=VALUE`.
-    overrides: Vec<Vec<u8>>,
+    args_buf: Vec<u8>,
+    args_offsets: Vec<usize>,
+    /// Overrides on top of this process's environment, as NUL-terminated `KEY=VALUE\0`.
+    overrides_buf: Vec<u8>,
+    overrides_offsets: Vec<usize>,
+    overrides_key_lens: Vec<usize>,
 }
 
-fn nul_terminated(bytes: &[u8]) -> Vec<u8> {
-    let mut v = Vec::with_capacity(bytes.len() + 1);
-    v.extend_from_slice(bytes);
-    v.push(0);
-    v
+fn push_nul_entry(buf: &mut Vec<u8>, offsets: &mut Vec<usize>, bytes: &[u8]) {
+    offsets.push(buf.len());
+    buf.extend_from_slice(bytes);
+    buf.push(0);
 }
 
 /// A pipe, closed on drop so a failure part-way through leaks no descriptors.
@@ -91,28 +92,34 @@ impl Pipe {
         }
     }
 
+    fn step_take_ready(&mut self) -> bool {
+        let mut chunk = [0u8; 8192];
+        let n = unsafe { libc::read(self.read, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if n > 0 {
+            self.got.extend_from_slice(&chunk[..n as usize]);
+            return true;
+        }
+        if n == 0 {
+            self.done = true;
+            return false;
+        }
+        let e = crate::Errno::current().0;
+        if e == libc::EINTR {
+            return true;
+        }
+        // Nothing left for now, which is not end of file.
+        if e != libc::EAGAIN && e != libc::EWOULDBLOCK {
+            self.done = true;
+        }
+        false
+    }
+
     /// Read whatever is there now. Sets `done` at end of file.
     fn take_ready(&mut self) {
-        let mut chunk = [0u8; 8192];
         loop {
-            let n = unsafe { libc::read(self.read, chunk.as_mut_ptr().cast(), chunk.len()) };
-            if n > 0 {
-                self.got.extend_from_slice(&chunk[..n as usize]);
-                continue;
+            if !self.step_take_ready() {
+                break;
             }
-            if n == 0 {
-                self.done = true;
-                return;
-            }
-            let e = crate::Errno::current().0;
-            if e == libc::EINTR {
-                continue;
-            }
-            // Nothing left for now, which is not end of file.
-            if e != libc::EAGAIN && e != libc::EWOULDBLOCK {
-                self.done = true;
-            }
-            return;
         }
     }
 }
@@ -133,25 +140,152 @@ impl Drop for Pipe {
 /// Built in the parent: `execvp` has no variant taking an environment on macOS, and the
 /// alternative is `setenv` in the child, which allocates after a `fork` that may have left
 /// another thread's locks held. Candidates computed first make the child's half `execve` alone.
-fn candidates(program: &[u8]) -> Vec<Vec<u8>> {
-    if program.contains(&b'/') {
-        return vec![nul_terminated(program)];
-    }
-    let path = crate::env::var_os("PATH").unwrap_or_default();
-    let mut out = Vec::new();
-    for dir in crate::env::split_paths(&path) {
-        if dir.is_empty() {
-            continue;
+fn has_slash(bytes: &[u8]) -> bool {
+    let len = bytes.len();
+    let mut found = false;
+    let mut i = 0;
+    while i < len {
+        if bytes[i] == b'/' {
+            found = true;
         }
-        let mut candidate = Vec::with_capacity(dir.len() + program.len() + 2);
-        candidate.extend_from_slice(dir);
-        if !dir.ends_with(b"/") {
-            candidate.push(b'/');
-        }
-        candidate.extend_from_slice(program);
-        out.push(nul_terminated(&candidate));
+        i += 1;
     }
-    out
+    found
+}
+
+fn find_colon(bytes: &[u8], start: usize) -> usize {
+    let len = bytes.len();
+    let mut found = len;
+    let mut i = start;
+    while i < len {
+        if found == len && bytes[i] == b':' {
+            found = i;
+        }
+        i += 1;
+    }
+    found
+}
+
+fn step_path_candidate(
+    path: &[u8],
+    pos: usize,
+    program: &[u8],
+    buf: &mut Vec<u8>,
+    offsets: &mut Vec<usize>,
+) -> usize {
+    let end = find_colon(path, pos);
+    let dir = &path[pos..end];
+    if !dir.is_empty() {
+        offsets.push(buf.len());
+        buf.extend_from_slice(dir);
+        if dir[dir.len() - 1] != b'/' {
+            buf.push(b'/');
+        }
+        buf.extend_from_slice(program);
+        buf.push(0);
+    }
+    if end < path.len() {
+        end + 1
+    } else {
+        path.len()
+    }
+}
+
+fn candidates(program: &[u8], buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
+    if has_slash(program) {
+        push_nul_entry(buf, offsets, program);
+        return;
+    }
+    if let Some(path) = crate::env::var_os("PATH") {
+        let len = path.len();
+        let mut pos = 0usize;
+        while pos < len {
+            pos = step_path_candidate(&path, pos, program, buf, offsets);
+        }
+    }
+}
+
+fn build_ptr_table(buf: &[u8], offsets: &[usize], table: &mut Vec<usize>) {
+    let count = offsets.len();
+    let base = buf.as_ptr() as usize;
+    let mut i = 0usize;
+    while i < count {
+        table.push(base + offsets[i]);
+        i += 1;
+    }
+    table.push(0);
+}
+
+unsafe fn exec_one_candidate(
+    tries_buf: &[u8],
+    offset: usize,
+    argv: &[usize],
+    envp: &[usize],
+) {
+    let try_ptr: *const libc::c_char = unsafe { tries_buf.as_ptr().add(offset).cast() };
+    unsafe {
+        libc::execve(
+            try_ptr,
+            argv.as_ptr().cast(),
+            envp.as_ptr().cast(),
+        );
+    }
+}
+
+unsafe fn exec_child(
+    out_write: libc::c_int,
+    err_write: libc::c_int,
+    tries_buf: &[u8],
+    tries_offsets: &[usize],
+    argv: &[usize],
+    envp: &[usize],
+) -> libc::c_int {
+    unsafe {
+        // Its own process group, so that killing it kills what it started. A compiler
+        // driver spawns real work and a signal sent to the driver alone orphans that
+        // work, which keeps running against a deadline nobody is watching any more.
+        libc::setpgid(0, 0);
+
+        // **Move the pipe ends clear of 0, 1 and 2 before anything is dup2'd onto
+        // those.**
+        let out_w = above_stdio(out_write);
+        if out_w < 0 {
+            return 127;
+        }
+        let err_w = above_stdio(err_write);
+        if err_w < 0 {
+            return 127;
+        }
+
+        // No stdin, so a program that stops to ask a question does not wait forever on
+        // an answer nobody will see.
+        let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+        if null < 0 {
+            return 127;
+        }
+        let dup_in = libc::dup2(null, 0);
+        libc::close(null);
+        if dup_in < 0 {
+            return 127;
+        }
+
+        // Checked, because a child that execs with the wrong stdout reports its work to
+        // nowhere and the parent waits on a pipe nothing will ever write to.
+        if libc::dup2(out_w, 1) < 0 {
+            return 127;
+        }
+        if libc::dup2(err_w, 2) < 0 {
+            return 127;
+        }
+
+        let count = tries_offsets.len();
+        let mut i = 0usize;
+        while i < count {
+            exec_one_candidate(tries_buf, tries_offsets[i], argv, envp);
+            i += 1;
+        }
+        127
+    }
 }
 
 impl Command {
@@ -159,14 +293,17 @@ impl Command {
     pub fn new(program: impl AsRef<Path>) -> Command {
         Command {
             program: program.as_ref().as_bytes().to_vec(),
-            args: Vec::new(),
-            overrides: Vec::new(),
+            args_buf: Vec::new(),
+            args_offsets: Vec::new(),
+            overrides_buf: Vec::new(),
+            overrides_offsets: Vec::new(),
+            overrides_key_lens: Vec::new(),
         }
     }
 
     /// Add one argument.
     pub fn arg(mut self, arg: impl AsRef<[u8]>) -> Command {
-        self.args.push(arg.as_ref().to_vec());
+        push_nul_entry(&mut self.args_buf, &mut self.args_offsets, arg.as_ref());
         self
     }
 
@@ -177,7 +314,7 @@ impl Command {
         A: AsRef<[u8]>,
     {
         for arg in args {
-            self.args.push(arg.as_ref().to_vec());
+            push_nul_entry(&mut self.args_buf, &mut self.args_offsets, arg.as_ref());
         }
         self
     }
@@ -188,11 +325,26 @@ impl Command {
     /// one or two things for a toolchain that reads a dozen more. Setting the same key twice
     /// keeps the last, as a shell would.
     pub fn env(mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Command {
-        let mut entry = key.as_ref().to_vec();
-        entry.push(b'=');
-        entry.extend_from_slice(value.as_ref());
-        self.overrides.push(entry);
+        let key_bytes = key.as_ref();
+        self.overrides_offsets.push(self.overrides_buf.len());
+        self.overrides_key_lens.push(key_bytes.len() + 1);
+        self.overrides_buf.extend_from_slice(key_bytes);
+        self.overrides_buf.push(b'=');
+        self.overrides_buf.extend_from_slice(value.as_ref());
+        self.overrides_buf.push(0);
         self
+    }
+
+    fn build_argv_buf(&self, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
+        push_nul_entry(buf, offsets, &self.program);
+        let base = buf.len();
+        buf.extend_from_slice(&self.args_buf);
+        let count = self.args_offsets.len();
+        let mut i = 0usize;
+        while i < count {
+            offsets.push(base + self.args_offsets[i]);
+            i += 1;
+        }
     }
 
     /// Start it, with both output pipes open, and hand back the running child.
@@ -203,23 +355,24 @@ impl Command {
         let mut out = Pipe::new()?;
         let mut err = Pipe::new()?;
 
-        let tries = candidates(&self.program);
-        if tries.is_empty() {
+        let mut tries_buf = Vec::new();
+        let mut tries_offsets = Vec::new();
+        candidates(&self.program, &mut tries_buf, &mut tries_offsets);
+        if tries_offsets.is_empty() {
             return None;
         }
         // argv[0] is the program name by convention.
-        let mut owned: Vec<Vec<u8>> = vec![nul_terminated(&self.program)];
-        for a in &self.args {
-            owned.push(nul_terminated(a));
-        }
-        let mut argv: Vec<*const libc::c_char> =
-            owned.iter().map(|a| a.as_ptr() as *const libc::c_char).collect();
-        argv.push(core::ptr::null());
+        let mut argv_buf = Vec::new();
+        let mut argv_offsets = Vec::new();
+        self.build_argv_buf(&mut argv_buf, &mut argv_offsets);
+        let mut argv = Vec::new();
+        build_ptr_table(&argv_buf, &argv_offsets, &mut argv);
 
-        let envp_owned = self.environment();
-        let mut envp: Vec<*const libc::c_char> =
-            envp_owned.iter().map(|e| e.as_ptr() as *const libc::c_char).collect();
-        envp.push(core::ptr::null());
+        let mut envp_buf = Vec::new();
+        let mut envp_offsets = Vec::new();
+        self.environment(&mut envp_buf, &mut envp_offsets);
+        let mut envp = Vec::new();
+        build_ptr_table(&envp_buf, &envp_offsets, &mut envp);
 
         let pid = unsafe { libc::fork() };
         if pid < 0 {
@@ -230,48 +383,8 @@ impl Command {
             // have had threads, only async-signal-safe calls are defined. Every buffer this
             // touches was built above, before the fork.
             unsafe {
-                // Its own process group, so that killing it kills what it started. A compiler
-                // driver spawns real work and a signal sent to the driver alone orphans that
-                // work, which keeps running against a deadline nobody is watching any more.
-                libc::setpgid(0, 0);
-
-                // **Move the pipe ends clear of 0, 1 and 2 before anything is dup2'd onto
-                // those.** Otherwise the shuffle eats itself, in two ways that need only the
-                // parent to have closed its own stdout, which is what a daemon does: if
-                // `out.write` already is 1 then `dup2(1, 1)` is a no-op and closing the
-                // original afterwards closes the stdout just set up, and if the two ends come
-                // back crossed, `out.write` 2 and `err.write` 1, then the second `dup2` copies
-                // a descriptor the first one has already replaced.
-                let out_w = above_stdio(out.write);
-                let err_w = above_stdio(err.write);
-                if out_w < 0 || err_w < 0 {
-                    libc::_exit(127);
-                }
-
-                // No stdin, so a program that stops to ask a question does not wait forever on
-                // an answer nobody will see.
-                let null = libc::open(c_dev_null().as_ptr().cast(), libc::O_RDONLY);
-                if null < 0 || libc::dup2(null, 0) < 0 {
-                    libc::_exit(127);
-                }
-                libc::close(null);
-
-                // Checked, because a child that execs with the wrong stdout reports its work to
-                // nowhere and the parent waits on a pipe nothing will ever write to.
-                if libc::dup2(out_w, 1) < 0 || libc::dup2(err_w, 2) < 0 {
-                    libc::_exit(127);
-                }
-
-                // Nothing is closed by hand. Every descriptor this child holds carries
-                // close-on-exec, so the four pipe ends and the two relocations go by
-                // themselves, and `dup2` clears the flag on what it creates, so 1 and 2 are
-                // exactly what survives.
-                for try_path in &tries {
-                    libc::execve(try_path.as_ptr().cast(), argv.as_ptr(), envp.as_ptr());
-                }
-                // Only reached if every candidate failed. `_exit`, not `exit`: atexit handlers
-                // belong to the parent and running them here would flush its buffers twice.
-                libc::_exit(127);
+                let code = exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp);
+                libc::_exit(code);
             }
         }
 
@@ -297,16 +410,75 @@ impl Command {
         Some(child.into_output(code))
     }
 
-    fn environment(&self) -> Vec<Vec<u8>> {
-        let mut entries = crate::env::environ();
-        for entry in &self.overrides {
-            // The key including its `=`, so `CARGO` does not match `CARGO_TARGET_DIR`.
-            let key_end = entry.iter().position(|b| *b == b'=').map_or(entry.len(), |i| i + 1);
-            let key = &entry[..key_end];
-            entries.retain(|e| !e.starts_with(key));
-            entries.push(entry.clone());
+    fn key_matches_at(&self, entry: &[u8], idx: usize) -> bool {
+        let start = self.overrides_offsets[idx];
+        let key_len = self.overrides_key_lens[idx];
+        let key = &self.overrides_buf[start..start + key_len];
+        entry.len() >= key_len && crate::path::bytes_equal(&entry[..key_len], key)
+    }
+
+    fn is_key_overridden(&self, entry: &[u8], from_idx: usize) -> bool {
+        let count = self.overrides_offsets.len();
+        let mut matched = false;
+        let mut idx = from_idx;
+        while idx < count {
+            if self.key_matches_at(entry, idx) {
+                matched = true;
+            }
+            idx += 1;
         }
-        entries.iter().map(|e| nul_terminated(e)).collect()
+        matched
+    }
+
+    unsafe fn step_base_env(
+        &self,
+        envp: *const *const libc::c_char,
+        index: usize,
+        buf: &mut Vec<u8>,
+        offsets: &mut Vec<usize>,
+    ) -> bool {
+        let p = unsafe { crate::env::cstr_table_at(envp, index) };
+        if p.is_null() {
+            return false;
+        }
+        let existing = unsafe { crate::env::cstr_to_vec(p) };
+        if !self.is_key_overridden(&existing, 0) {
+            push_nul_entry(buf, offsets, &existing);
+        }
+        true
+    }
+
+    fn append_override_if_active(&self, idx: usize, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
+        let start = self.overrides_offsets[idx];
+        let end = if idx + 1 < self.overrides_offsets.len() {
+            self.overrides_offsets[idx + 1]
+        } else {
+            self.overrides_buf.len()
+        };
+        let entry_with_nul = &self.overrides_buf[start..end];
+        if !self.is_key_overridden(entry_with_nul, idx + 1) {
+            offsets.push(buf.len());
+            buf.extend_from_slice(entry_with_nul);
+        }
+    }
+
+    fn environment(&self, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
+        let envp = unsafe { crate::env::raw_environ_ptr() };
+        if !envp.is_null() {
+            let mut i = 0usize;
+            loop {
+                if !unsafe { self.step_base_env(envp, i, buf, offsets) } {
+                    break;
+                }
+                i += 1;
+            }
+        }
+        let count = self.overrides_offsets.len();
+        let mut idx = 0usize;
+        while idx < count {
+            self.append_override_if_active(idx, buf, offsets);
+            idx += 1;
+        }
     }
 }
 
@@ -360,14 +532,25 @@ impl Child {
 
         // Rounded up, never down: `as_millis` of anything under a millisecond is zero, and a
         // zero timeout is a busy wait rather than a short one.
-        let ms = timeout.map_or(-1, |t| {
-            let whole = t.as_millis().min(i32::MAX as u128) as libc::c_int;
-            if whole == 0 && !t.is_zero() {
-                1
-            } else {
-                whole
+        let ms = match timeout {
+            None => -1,
+            Some(t) => {
+                let total_ms = t
+                    .as_secs()
+                    .saturating_mul(1000)
+                    .saturating_add(t.subsec_millis() as u64);
+                let whole = if total_ms > i32::MAX as u64 {
+                    i32::MAX
+                } else {
+                    total_ms as libc::c_int
+                };
+                if whole == 0 && !t.is_zero() {
+                    1
+                } else {
+                    whole
+                }
             }
-        });
+        };
         let ready = unsafe { libc::poll(fds.as_mut_ptr(), n as libc::nfds_t, ms) };
         if ready == 0 {
             return;
@@ -471,7 +654,7 @@ impl Child {
     }
 
     /// What it said, with the code the caller got from `wait`.
-    pub fn into_output(self, code: i32) -> Output {
+    pub fn into_output(&self, code: i32) -> Output {
         Output { code, stdout: self.out.got.clone(), stderr: self.err.got.clone() }
     }
 }
@@ -494,11 +677,7 @@ fn exit_code(status: libc::c_int) -> i32 {
 /// Returns negative if the duplication failed, which the caller treats as fatal.
 unsafe fn above_stdio(fd: libc::c_int) -> libc::c_int {
     if fd > 2 {
-        return fd;
+        return fd.wrapping_add(0);
     }
     unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) }
-}
-
-fn c_dev_null() -> [u8; 10] {
-    *b"/dev/null\0"
 }

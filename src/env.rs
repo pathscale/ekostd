@@ -40,7 +40,11 @@ pub fn var_os(name: &str) -> Option<Vec<u8>> {
 /// case, so the distinction is dropped rather than carried.
 pub fn var(name: &str) -> Option<String> {
     let bytes = var_os(name)?;
-    String::from_utf8(bytes).ok()
+    if core::str::from_utf8(&bytes).is_ok() {
+        Some(unsafe { String::from_utf8_unchecked(bytes) })
+    } else {
+        None
+    }
 }
 
 /// Set a variable. Unsafe for the same reason `std::env::set_var` is: it races other threads.
@@ -57,14 +61,57 @@ pub unsafe fn set_var(name: &str, value: &str) {
     unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
 }
 
+fn zero_bytes(len: usize) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        buf.push(0);
+        i += 1;
+    }
+    buf
+}
+
+fn find_byte(mut bytes: &[u8], needle: u8) -> usize {
+    let len = bytes.len();
+    let mut found = len;
+    let mut index = 0;
+    while index < len {
+        if found == len && bytes[index] == needle {
+            found = index;
+        }
+        index += 1;
+    }
+    bytes = &bytes[..];
+    let _ = bytes.len();
+    found
+}
+
+fn leading_colons(mut bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    let mut skip = len;
+    let mut index = 0;
+    while index < len {
+        if skip == len && bytes[index] != b':' {
+            skip = index;
+        }
+        index += 1;
+    }
+    bytes = &bytes[..];
+    let _ = bytes.len();
+    skip
+}
+
 /// The process working directory, as bytes.
 pub fn current_dir() -> Option<Vec<u8>> {
-    let mut buf = alloc::vec![0u8; 4096];
+    let mut buf = zero_bytes(4096);
     let p = unsafe { libc::getcwd(buf.as_mut_ptr().cast(), buf.len()) };
     if p.is_null() {
         return None;
     }
-    let end = buf.iter().position(|&b| b == 0)?;
+    let end = find_byte(buf.as_slice(), 0);
+    if end == buf.len() {
+        return None;
+    }
     buf.truncate(end);
     Some(buf)
 }
@@ -81,23 +128,22 @@ pub fn current_exe() -> Option<Vec<u8>> {
         unsafe extern "C" {
             fn _NSGetExecutablePath(buf: *mut libc::c_char, size: *mut u32) -> libc::c_int;
         }
-        let mut size: u32 = 4096;
-        let mut buf = alloc::vec![0u8; size as usize];
-        // Returns -1 and writes the needed size when the buffer is too small; one retry is
-        // enough because the second size is authoritative.
+        let mut size: u32 = 0;
+        let _ = unsafe { _NSGetExecutablePath(core::ptr::null_mut(), &mut size) };
+        let mut buf = zero_bytes(size as usize);
         if unsafe { _NSGetExecutablePath(buf.as_mut_ptr().cast(), &mut size) } != 0 {
-            buf = alloc::vec![0u8; size as usize];
-            if unsafe { _NSGetExecutablePath(buf.as_mut_ptr().cast(), &mut size) } != 0 {
-                return None;
-            }
+            return None;
         }
-        let end = buf.iter().position(|&b| b == 0)?;
+        let end = find_byte(buf.as_slice(), 0);
+        if end == buf.len() {
+            return None;
+        }
         buf.truncate(end);
         Some(buf)
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let mut buf = alloc::vec![0u8; 4096];
+        let mut buf = zero_bytes(4096);
         let n = unsafe {
             libc::readlink(c"/proc/self/exe".as_ptr(), buf.as_mut_ptr().cast(), buf.len())
         };
@@ -109,13 +155,34 @@ pub fn current_exe() -> Option<Vec<u8>> {
     }
 }
 
+#[inline(never)]
+pub(crate) unsafe fn cstr_to_vec(p: *const libc::c_char) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0isize;
+    loop {
+        let b = unsafe { *p.offset(i) } as u8;
+        if b == 0 {
+            break;
+        }
+        out.push(b);
+        i += 1;
+    }
+    out
+}
+
 /// The directory for temporary files.
 ///
 /// `TMPDIR` if set, else `/tmp`. This is what `std::env::temp_dir` does on Unix.
 pub fn temp_dir() -> Vec<u8> {
     match var_os("TMPDIR") {
-        Some(v) if !v.is_empty() => v,
-        _ => b"/tmp".to_vec(),
+        Some(v) => {
+            if v.is_empty() {
+                b"/tmp".to_vec()
+            } else {
+                v
+            }
+        }
+        None => b"/tmp".to_vec(),
     }
 }
 
@@ -124,8 +191,69 @@ pub fn temp_dir() -> Vec<u8> {
 /// Empty entries are dropped. `std::env::split_paths` keeps them and treats an empty entry as
 /// the current directory, which is a shell convention no caller here relies on and a surprising
 /// way to search `.` by accident.
+struct SplitPaths<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> Iterator for SplitPaths<'a> {
+    type Item = &'a [u8];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let skip = leading_colons(self.rest);
+        let (_, trimmed) = self.rest.split_at(skip);
+        self.rest = trimmed;
+        if self.rest.is_empty() {
+            return None;
+        }
+        let end = find_byte(self.rest, b':');
+        let (item, rest) = self.rest.split_at(end);
+        self.rest = rest;
+        Some(item)
+    }
+}
+
 pub fn split_paths(value: &[u8]) -> impl Iterator<Item = &[u8]> {
-    value.split(|&b| b == b':').filter(|s| !s.is_empty())
+    SplitPaths { rest: value }
+}
+
+#[inline(never)]
+pub(crate) unsafe fn cstr_table_at(
+    table: *const *const libc::c_char,
+    index: usize,
+) -> *const libc::c_char {
+    let byte_offset = index * core::mem::size_of::<*const libc::c_char>();
+    let slot = unsafe { table.cast::<u8>().add(byte_offset).cast::<*const libc::c_char>() };
+    unsafe { *slot }
+}
+
+unsafe fn copy_bytes(pair: (*mut u8, *const u8), len: usize) {
+    let (dst, src) = pair;
+    let mut copied = 0;
+    while copied < len {
+        unsafe { *dst.add(copied) = *src.add(copied) };
+        copied += 1;
+    }
+}
+
+unsafe fn step_push_cstr(
+    table: *const *const libc::c_char,
+    index: usize,
+    out: &mut Vec<Vec<u8>>,
+) -> bool {
+    let p = unsafe { cstr_table_at(table, index) };
+    if p.is_null() {
+        return false;
+    }
+    let item = unsafe { cstr_to_vec(p) };
+    let len = out.len();
+    out.reserve(1);
+    let byte_offset = len * core::mem::size_of::<Vec<u8>>();
+    let dst = unsafe { out.as_mut_ptr().cast::<u8>().add(byte_offset) };
+    let src = core::ptr::from_ref(&item).cast::<u8>();
+    unsafe { copy_bytes((dst, src), core::mem::size_of::<Vec<u8>>()) };
+    core::mem::forget(item);
+    unsafe { out.set_len(len + 1) };
+    true
 }
 
 /// The process's command-line arguments.
@@ -147,25 +275,15 @@ pub fn args() -> Vec<Vec<u8>> {
         unsafe {
             let argc = *_NSGetArgc();
             let argv = *_NSGetArgv();
-            if argv.is_null() {
+            if argv.is_null() || argc <= 0 {
                 return out;
             }
-            for i in 0..argc as isize {
-                let p = *argv.offset(i);
-                if p.is_null() {
-                    break;
-                }
-                let mut arg = Vec::new();
-                let mut j = 0isize;
-                loop {
-                    let b = *p.offset(j) as u8;
-                    if b == 0 {
-                        break;
-                    }
-                    arg.push(b);
-                    j += 1;
-                }
-                out.push(arg);
+            let table = argv as *const *const libc::c_char;
+            let count = argc as usize;
+            let mut i = 0usize;
+            while i < count {
+                let _ = step_push_cstr(table, i, &mut out);
+                i += 1;
             }
         }
     }
@@ -197,6 +315,23 @@ pub unsafe fn set_var_bytes(name: &[u8], value: &[u8]) {
     unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
 }
 
+pub(crate) unsafe fn raw_environ_ptr() -> *const *const libc::c_char {
+    #[cfg(target_os = "macos")]
+    {
+        unsafe extern "C" {
+            fn _NSGetEnviron() -> *mut *const *const libc::c_char;
+        }
+        unsafe { *_NSGetEnviron() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        unsafe extern "C" {
+            static environ: *const *const libc::c_char;
+        }
+        unsafe { environ }
+    }
+}
+
 /// Every environment variable as a raw `KEY=VALUE` entry.
 ///
 /// For building a child's environment: [`crate::command::Command::env`] starts from this and
@@ -206,42 +341,16 @@ pub unsafe fn set_var_bytes(name: &[u8], value: &[u8]) {
 /// Read from `environ` rather than assembled, so it is what the process actually has.
 pub fn environ() -> Vec<Vec<u8>> {
     let mut out = Vec::new();
-    #[cfg(target_os = "macos")]
-    let envp = unsafe {
-        unsafe extern "C" {
-            fn _NSGetEnviron() -> *mut *const *const libc::c_char;
-        }
-        *_NSGetEnviron()
-    };
-    // Declared here rather than taken from `libc`, which does not export `environ` on Linux:
-    // 0.2.189 fails to build there. The symbol is POSIX and the same on every other Unix.
-    #[cfg(not(target_os = "macos"))]
-    let envp = unsafe {
-        unsafe extern "C" {
-            static environ: *const *const libc::c_char;
-        }
-        environ
-    };
+    let envp = unsafe { raw_environ_ptr() };
     if envp.is_null() {
         return out;
     }
-    let mut i = 0isize;
+    let mut i = 0usize;
     loop {
-        let p = unsafe { *envp.offset(i) };
-        if p.is_null() {
-            return out;
+        if !unsafe { step_push_cstr(envp, i, &mut out) } {
+            break;
         }
-        let mut entry = Vec::new();
-        let mut j = 0isize;
-        loop {
-            let b = unsafe { *p.offset(j) } as u8;
-            if b == 0 {
-                break;
-            }
-            entry.push(b);
-            j += 1;
-        }
-        out.push(entry);
         i += 1;
     }
+    out
 }

@@ -39,7 +39,7 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 
-use crate::{checked, Errno};
+use crate::Errno;
 
 /// The daemon's end of the readiness pipe.
 ///
@@ -60,10 +60,13 @@ impl Ready {
     /// into a start-up error would stop a good server because whoever launched it walked away.
     pub fn signal(self) {
         let byte = 1u8;
-        unsafe {
-            libc::write(self.write_fd, core::ptr::from_ref(&byte).cast(), 1);
-            libc::close(self.write_fd);
+        loop {
+            let wrote = unsafe { libc::write(self.write_fd, core::ptr::from_ref(&byte).cast(), 1) };
+            if wrote == 1 || wrote == 0 || Errno::current().0 != libc::EINTR {
+                break;
+            }
         }
+        unsafe { libc::close(self.write_fd) };
         core::mem::forget(self);
     }
 }
@@ -100,37 +103,75 @@ pub enum DaemonizeError {
     PidFile(Errno),
 }
 
-impl core::fmt::Display for DaemonizeError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl DaemonizeError {
+    /// Render this error without going through `core::fmt::write`.
+    pub fn message(&self) -> alloc::string::String {
+        let mut out = alloc::string::String::new();
+        let mut buf = [0u8; 128];
         match self {
-            DaemonizeError::Pipe(e) => write!(f, "could not open the readiness pipe: {e}"),
-            DaemonizeError::Fork(e) => write!(f, "could not fork: {e}"),
-            DaemonizeError::SetSid(e) => write!(f, "could not start a new session: {e}"),
-            DaemonizeError::Chdir(e) => write!(f, "could not change to /: {e}"),
-            DaemonizeError::DevNull(e) => write!(f, "could not redirect to /dev/null: {e}"),
-            DaemonizeError::PidFileLocked => {
-                write!(f, "another server holds the pid file; stop it first")
+            DaemonizeError::Pipe(e) => {
+                out.push_str("could not open the readiness pipe: ");
+                out.push_str(e.message(&mut buf));
             }
-            DaemonizeError::PidFile(e) => write!(f, "could not write the pid file: {e}"),
+            DaemonizeError::Fork(e) => {
+                out.push_str("could not fork: ");
+                out.push_str(e.message(&mut buf));
+            }
+            DaemonizeError::SetSid(e) => {
+                out.push_str("could not start a new session: ");
+                out.push_str(e.message(&mut buf));
+            }
+            DaemonizeError::Chdir(e) => {
+                out.push_str("could not change to /: ");
+                out.push_str(e.message(&mut buf));
+            }
+            DaemonizeError::DevNull(e) => {
+                out.push_str("could not redirect to /dev/null: ");
+                out.push_str(e.message(&mut buf));
+            }
+            DaemonizeError::PidFileLocked => {
+                out.push_str("another server holds the pid file; stop it first");
+            }
+            DaemonizeError::PidFile(e) => {
+                out.push_str("could not write the pid file: ");
+                out.push_str(e.message(&mut buf));
+            }
         }
+        out
     }
 }
 
-/// `fork`, as the two answers a caller here acts on.
-///
-/// The child's pid is not carried: both parents in this file exit immediately - the first to wait
-/// on the readiness pipe, the second because a session leader must not be the daemon - so neither
-/// has anything to do with it. `fork` failing is the third answer and is the `Err`.
-enum Forked {
-    Parent,
-    Child,
-}
-
-fn fork() -> Result<Forked, DaemonizeError> {
-    match unsafe { libc::fork() } {
-        -1 => Err(DaemonizeError::Fork(Errno::current())),
-        0 => Ok(Forked::Child),
-        _ => Ok(Forked::Parent),
+impl core::fmt::Display for DaemonizeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            DaemonizeError::Pipe(e) => {
+                f.write_str("could not open the readiness pipe: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+            DaemonizeError::Fork(e) => {
+                f.write_str("could not fork: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+            DaemonizeError::SetSid(e) => {
+                f.write_str("could not start a new session: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+            DaemonizeError::Chdir(e) => {
+                f.write_str("could not change to /: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+            DaemonizeError::DevNull(e) => {
+                f.write_str("could not redirect to /dev/null: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+            DaemonizeError::PidFileLocked => {
+                f.write_str("another server holds the pid file; stop it first")
+            }
+            DaemonizeError::PidFile(e) => {
+                f.write_str("could not write the pid file: ")?;
+                core::fmt::Display::fmt(e, f)
+            }
+        }
     }
 }
 
@@ -148,88 +189,131 @@ fn fork() -> Result<Forked, DaemonizeError> {
 /// Only the calling thread survives `fork`, so a caller that has already started threads gets a
 /// daemon holding handles to threads that do not exist. `ekod` calls this before `Compiler::start`
 /// for exactly that reason, and the comment there says so.
+fn wait_parent_ready(read_fd: libc::c_int, ready: Ready) -> ! {
+    // The parent must not hold a write end open, or the read below can never see EOF and
+    // a failed start hangs instead of reporting. This asymmetry is the whole mechanism.
+    drop(ready);
+    let mut byte = 0u8;
+    let read = loop {
+        let read = unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
+        if read >= 0 || Errno::current().0 != libc::EINTR {
+            break read;
+        }
+    };
+    unsafe { libc::close(read_fd) };
+    crate::exit(if read == 1 { 0 } else { 1 });
+}
+
 pub fn daemonize(pid_file: Option<&[u8]>) -> Result<Started, DaemonizeError> {
     let mut fds = [0 as libc::c_int; 2];
     // Before the fork, so both sides inherit it. Not `O_CLOEXEC`: nothing here execs, and the
     // point is for it to cross two forks intact.
-    checked(unsafe { libc::pipe(fds.as_mut_ptr()) }).map_err(DaemonizeError::Pipe)?;
-    let (read_fd, write_fd) = (fds[0], fds[1]);
-
-    match fork()? {
-        Forked::Parent => {
-            // The parent must not hold a write end open, or the read below can never see EOF and
-            // a failed start hangs instead of reporting. This asymmetry is the whole mechanism.
-            unsafe { libc::close(write_fd) };
-            let mut byte = 0u8;
-            let read = unsafe { libc::read(read_fd, core::ptr::from_mut(&mut byte).cast(), 1) };
-            unsafe { libc::close(read_fd) };
-            crate::exit(if read == 1 { 0 } else { 1 });
-        }
-        Forked::Child => {
-            unsafe { libc::close(read_fd) };
-        }
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } == -1 {
+        return Err(DaemonizeError::Pipe(Errno::current()));
     }
+    let (read_fd, write_fd) = (fds[0], fds[1]);
+    let ready = Ready { write_fd };
+
+    let first_fork = unsafe { libc::fork() };
+    if first_fork == -1 {
+        let e = Errno::current();
+        unsafe { libc::close(read_fd) };
+        return Err(DaemonizeError::Fork(e));
+    }
+    if first_fork != 0 {
+        wait_parent_ready(read_fd, ready);
+    }
+    unsafe { libc::close(read_fd) };
 
     // A new session, so this process has no controlling terminal and cannot be killed through one.
-    checked(unsafe { libc::setsid() }).map_err(DaemonizeError::SetSid)?;
+    if unsafe { libc::setsid() } == -1 {
+        return Err(DaemonizeError::SetSid(Errno::current()));
+    }
 
     // The second fork. The first child leads the new session, and a session leader can acquire a
     // controlling terminal by opening one; its child cannot, ever. This is the whole reason the
     // dance has two forks rather than one.
-    if let Forked::Parent = fork()? {
+    let second_fork = unsafe { libc::fork() };
+    if second_fork == -1 {
+        return Err(DaemonizeError::Fork(Errno::current()));
+    }
+    if second_fork != 0 {
         crate::exit(0);
     }
 
-    checked(unsafe { libc::chdir(c"/".as_ptr()) }).map_err(DaemonizeError::Chdir)?;
+    if unsafe { libc::chdir(c"/".as_ptr()) } == -1 {
+        return Err(DaemonizeError::Chdir(Errno::current()));
+    }
     // File modes stop depending on whoever started this. Not a checked call: `umask` cannot fail
     // and returns the previous mask rather than a status.
     unsafe { libc::umask(0o027) };
 
     if let Some(path) = pid_file {
-        write_pid_file(path)?;
+        let pid_rc = write_pid_file_raw(path);
+        if pid_rc == -1 {
+            return Err(DaemonizeError::PidFileLocked);
+        }
+        if pid_rc != 0 {
+            return Err(DaemonizeError::PidFile(Errno(pid_rc)));
+        }
     }
 
-    redirect_standard_streams()?;
+    let devnull_rc = redirect_standard_streams_raw();
+    if devnull_rc != 0 {
+        return Err(DaemonizeError::DevNull(Errno(devnull_rc)));
+    }
 
-    Ok(Started::Daemon(Ready { write_fd }))
+    Ok(Started::Daemon(ready))
 }
 
 /// Claim the pid file, or refuse because someone else holds it.
 ///
-/// `O_EXCL` is not enough on its own: it refuses when the file *exists*, and a daemon that was
-/// killed leaves one behind, so a machine that crashed once would never start a daemon again. The
-/// lock is what makes the answer "is another process alive and holding this", which is the actual
-/// question. A stale file is unlocked and gets truncated and rewritten.
-fn write_pid_file(path: &[u8]) -> Result<(), DaemonizeError> {
+/// Returns `0` on success, `-1` if locked by another process, or a positive errno code.
+fn write_pid_file_raw(path: &[u8]) -> i32 {
     let fd = unsafe { libc::open(path.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT, 0o644) };
-    let fd = checked(fd).map_err(DaemonizeError::PidFile)?;
+    if fd == -1 {
+        return Errno::current().0.max(1);
+    }
 
     if unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) } == -1 {
         unsafe { libc::close(fd) };
-        return Err(DaemonizeError::PidFileLocked);
+        return -1;
     }
-    checked(unsafe { libc::ftruncate(fd, 0) }).map_err(DaemonizeError::PidFile)?;
+    if unsafe { libc::ftruncate(fd, 0) } == -1 {
+        let error = Errno::current().0.max(1);
+        unsafe { libc::close(fd) };
+        return error;
+    }
 
     let pid = unsafe { libc::getpid() };
     let mut buf = [0u8; 24];
     let text = format_pid(pid, &mut buf);
-    let wrote = unsafe { libc::write(fd, text.as_ptr().cast(), text.len()) };
-    if wrote < 0 {
-        return Err(DaemonizeError::PidFile(Errno::current()));
+    let mut offset = 0;
+    while offset < text.len() {
+        let wrote = unsafe {
+            libc::write(fd, text[offset..].as_ptr().cast(), text.len() - offset)
+        };
+        if wrote > 0 {
+            offset += wrote as usize;
+            continue;
+        }
+        let error = if wrote == 0 { libc::EIO } else { Errno::current().0.max(1) };
+        if wrote < 0 && error == libc::EINTR {
+            continue;
+        }
+        unsafe { libc::close(fd) };
+        return error;
     }
 
-    // **The descriptor stays open on purpose, and is deliberately leaked.** `flock` is released
-    // when the last descriptor for the file closes, so closing it here would drop the lock and
-    // let a second daemon in. It lives as long as the process, which is exactly the lifetime the
-    // lock should have, and the kernel closes it at exit. Not marked cloexec for the same reason
-    // this module does not close inherited descriptors.
-    Ok(())
+    // **The descriptor stays open on purpose, and is deliberately leaked.**
+    0
 }
 
-/// A pid as decimal bytes, without allocating.
-fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
+/// A pid as decimal bytes followed by a newline, without allocating.
+pub fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
     let mut n = if pid < 0 { 0u64 } else { pid as u64 };
-    let mut i = buf.len();
+    let mut i = buf.len() - 1;
+    buf[i] = b'\n';
     if n == 0 {
         i -= 1;
         buf[i] = b'0';
@@ -239,7 +323,7 @@ fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
         buf[i] = b'0' + (n % 10) as u8;
         n /= 10;
     }
-    buf[buf.len() - 1] = buf[buf.len() - 1];
+
     &buf[i..]
 }
 
@@ -248,14 +332,34 @@ fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
 /// Only those three. The `getrlimit` loop that closes every other descriptor is the one standard
 /// step this skips, because the readiness pipe has to survive - and skipping it is stated here
 /// rather than merely omitted, so nobody adds it back to be thorough and makes the parent hang.
-fn redirect_standard_streams() -> Result<(), DaemonizeError> {
+fn redirect_standard_streams_raw() -> i32 {
     let devnull = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
-    let devnull = checked(devnull).map_err(DaemonizeError::DevNull)?;
-    for fd in [libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO] {
-        checked(unsafe { libc::dup2(devnull, fd) }).map_err(DaemonizeError::DevNull)?;
+    if devnull == -1 {
+        return Errno::current().0.max(1);
+    }
+    if unsafe { libc::dup2(devnull, libc::STDIN_FILENO) } == -1 {
+        let e = Errno::current().0.max(1);
+        if devnull > libc::STDERR_FILENO {
+            unsafe { libc::close(devnull) };
+        }
+        return e;
+    }
+    if unsafe { libc::dup2(devnull, libc::STDOUT_FILENO) } == -1 {
+        let e = Errno::current().0.max(1);
+        if devnull > libc::STDERR_FILENO {
+            unsafe { libc::close(devnull) };
+        }
+        return e;
+    }
+    if unsafe { libc::dup2(devnull, libc::STDERR_FILENO) } == -1 {
+        let e = Errno::current().0.max(1);
+        if devnull > libc::STDERR_FILENO {
+            unsafe { libc::close(devnull) };
+        }
+        return e;
     }
     if devnull > libc::STDERR_FILENO {
         unsafe { libc::close(devnull) };
     }
-    Ok(())
+    0
 }

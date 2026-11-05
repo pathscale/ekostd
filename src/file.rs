@@ -23,12 +23,22 @@ use crate::Errno;
 /// out of a value they were given (`format!("{why}")`), and a borrowed-only field cannot hold
 /// that. `std::io::Error` boxes a `dyn Error` for the same reason; this is the same need with
 /// two orders of magnitude less machinery.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Error {
     errno: Errno,
     kind: ErrorKind,
     what: alloc::borrow::Cow<'static, str>,
 }
+
+impl PartialEq for Error {
+    fn eq(&self, other: &Self) -> bool {
+        self.errno == other.errno
+            && self.kind == other.kind
+            && crate::path::bytes_equal(self.what.as_bytes(), other.what.as_bytes())
+    }
+}
+
+impl Eq for Error {}
 
 impl Error {
     /// Build one from an errno the caller obtained itself.
@@ -101,7 +111,9 @@ impl fmt::Display for Error {
             return f.write_str(&self.what);
         }
         let mut buf = [0u8; 128];
-        write!(f, "{}: {}", self.what, self.errno.message(&mut buf))
+        f.write_str(&self.what)?;
+        f.write_str(": ")?;
+        f.write_str(self.errno.message(&mut buf))
     }
 }
 
@@ -271,22 +283,35 @@ impl File {
         self.fd
     }
 
+    fn step_read_to_end(&mut self, out: &mut Vec<u8>) -> i32 {
+        let mut chunk = [0u8; 64 * 1024];
+        let n = unsafe { libc::read(self.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if n < 0 {
+            if Errno::current().0 == libc::EINTR {
+                return 1;
+            }
+            return -1;
+        }
+        if n == 0 {
+            return 0;
+        }
+        out.extend_from_slice(&chunk[..n as usize]);
+        1
+    }
+
     /// Read the rest of the file.
     pub fn read_to_end(&mut self, out: &mut Vec<u8>) -> Result<usize> {
         let start = out.len();
-        let mut chunk = [0u8; 64 * 1024];
-        loop {
-            let n = unsafe { libc::read(self.fd, chunk.as_mut_ptr().cast(), chunk.len()) };
-            if n < 0 {
-                if Errno::current().0 == libc::EINTR {
-                    continue;
-                }
-                return Err(err("read"));
+        let status = loop {
+            let s = self.step_read_to_end(out);
+            if s <= 0 {
+                break s;
             }
-            if n == 0 {
-                return Ok(out.len() - start);
-            }
-            out.extend_from_slice(&chunk[..n as usize]);
+        };
+        if status < 0 {
+            Err(err("read"))
+        } else {
+            Ok(out.len() - start)
         }
     }
 
@@ -338,7 +363,7 @@ impl fmt::Write for File {
 
 impl fmt::Debug for File {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "File({})", self.fd)
+        f.debug_tuple("File").field(&self.fd).finish()
     }
 }
 
@@ -361,7 +386,10 @@ pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
 /// Read a whole file as UTF-8.
 pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
     let bytes = read(path)?;
-    String::from_utf8(bytes).map_err(|_| Error::from_errno(Errno(libc::EILSEQ), "not utf-8"))
+    if core::str::from_utf8(&bytes).is_err() {
+        return Err(Error::from_errno(Errno(libc::EILSEQ), "not utf-8"));
+    }
+    Ok(unsafe { String::from_utf8_unchecked(bytes) })
 }
 
 /// Write a whole file, replacing it.
@@ -453,19 +481,35 @@ pub fn symlink_metadata(path: impl AsRef<Path>) -> Result<Metadata> {
     Ok(Metadata { st })
 }
 
+fn zero_path_buf() -> Vec<u8> {
+    let len = libc::PATH_MAX as usize;
+    let mut buf = Vec::with_capacity(len);
+    let mut i = 0;
+    while i < len {
+        buf.push(0);
+        i += 1;
+    }
+    buf
+}
+
 /// Resolve a path to an absolute one with symlinks followed.
 pub fn canonicalize(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
+    extern "C" {
+        fn realpath(
+            file_name: *const libc::c_char,
+            resolved_name: *mut libc::c_char,
+        ) -> *mut libc::c_char;
+    }
     let c = path.as_ref().as_c();
     // PATH_MAX is the contract of `realpath` with a null second argument on the platforms this
     // targets; the allocation is sized to it rather than guessed.
-    let mut buf = alloc::vec![0u8; libc::PATH_MAX as usize];
-    let p = unsafe { libc::realpath(c.as_ptr().cast(), buf.as_mut_ptr().cast()) };
+    let mut buf = zero_path_buf();
+    let p = unsafe { realpath(c.as_ptr().cast(), buf.as_mut_ptr().cast()) };
     if p.is_null() {
         return Err(err("realpath"));
     }
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-    buf.truncate(end);
-    Ok(crate::path::PathBuf::from_bytes(buf))
+    let out = unsafe { file_cstr_to_vec(p) };
+    Ok(crate::path::PathBuf::from_bytes(out))
 }
 
 /// Create a directory, succeeding if it is already there.
@@ -473,12 +517,11 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let p = path.as_ref();
     // Walk down from the root creating each prefix. `mkdir -p` semantics, and the reason this
     // is not one `mkdir` call.
-    let bytes = p.as_bytes();
     let mut at = Vec::new();
     if p.is_absolute() {
         at.push(b'/');
     }
-    for part in bytes.split(|&b| b == b'/').filter(|s| !s.is_empty()) {
+    for part in p.parts() {
         if at.len() > 1 || (at.len() == 1 && at[0] != b'/') {
             at.push(b'/');
         }
@@ -527,6 +570,38 @@ pub fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<u64> {
     Ok(n)
 }
 
+unsafe fn file_cstr_to_vec(p: *const libc::c_char) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0isize;
+    while unsafe { *p.offset(i) } != 0 {
+        out.push(unsafe { *p.offset(i) } as u8);
+        i += 1;
+    }
+    out
+}
+
+fn file_current_dir() -> Option<Vec<u8>> {
+    let mut buf = zero_path_buf();
+    let p = unsafe { libc::getcwd(buf.as_mut_ptr().cast(), buf.len()) };
+    if p.is_null() {
+        return None;
+    }
+    Some(unsafe { file_cstr_to_vec(p) })
+}
+
+fn file_temp_dir() -> Vec<u8> {
+    let p = unsafe { libc::getenv(c"TMPDIR".as_ptr()) };
+    if p.is_null() {
+        return b"/tmp".to_vec();
+    }
+    let v = unsafe { file_cstr_to_vec(p) };
+    if v.is_empty() {
+        b"/tmp".to_vec()
+    } else {
+        v
+    }
+}
+
 /// Make a path absolute without touching the filesystem.
 ///
 /// Unlike [`canonicalize`], this does not resolve symlinks and does not require the path to
@@ -538,7 +613,7 @@ pub fn absolute(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
     if p.is_absolute() {
         return Ok(p.to_path_buf());
     }
-    let cwd = crate::env::current_dir().ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
+    let cwd = file_current_dir().ok_or(Error::from_errno(Errno::current(), "getcwd"))?;
     let mut out = crate::path::PathBuf::from_bytes(cwd);
     out.push(p);
     Ok(out)
@@ -558,7 +633,47 @@ pub struct TempDir {
 impl TempDir {
     /// Create one under the system temporary directory.
     pub fn new(prefix: &str, suffix: &str) -> Result<TempDir> {
-        TempDir::new_in(crate::path::Path::new(&crate::env::temp_dir()), prefix, suffix)
+        TempDir::new_in(crate::path::Path::new(&file_temp_dir()), prefix, suffix)
+    }
+
+    fn push_u64_dec(out: &mut String, mut n: u64) {
+        let mut buf = [0u8; 20];
+        let mut i = buf.len();
+        if n == 0 {
+            i -= 1;
+            buf[i] = b'0';
+        }
+        while n > 0 {
+            i -= 1;
+            buf[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+        if let Ok(s) = core::str::from_utf8(&buf[i..]) {
+            out.push_str(s);
+        }
+    }
+
+    fn try_mkdir_temp(
+        base: &Path,
+        prefix: &str,
+        suffix: &str,
+        n: u64,
+        created: &mut crate::path::PathBuf,
+    ) -> i32 {
+        let pid = unsafe { libc::getpid() as u32 };
+        let mut name = String::new();
+        name.push_str(prefix);
+        Self::push_u64_dec(&mut name, pid as u64);
+        name.push_str("-");
+        Self::push_u64_dec(&mut name, n);
+        name.push_str(suffix);
+        let at = base.join(name.as_str());
+        let c = at.as_c();
+        if unsafe { libc::mkdir(c.as_ptr().cast(), 0o700) } == 0 {
+            *created = at;
+            return 0;
+        }
+        Errno::current().0
     }
 
     /// Create one under a directory of the caller's choosing.
@@ -570,20 +685,29 @@ impl TempDir {
         use core::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         let base = dir.to_path_buf();
-        for _ in 0..64 {
-            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let name = alloc::format!("{prefix}{}-{n}{suffix}", crate::proc::id());
-            let at = base.join(name.as_str());
-            let c = at.as_c();
-            if unsafe { libc::mkdir(c.as_ptr().cast(), 0o700) } == 0 {
-                return Ok(TempDir { path: at });
+        let mut created = crate::path::PathBuf::new();
+        let mut last_errno: i32 = libc::EEXIST;
+        let mut succeeded = false;
+        let mut attempt = 0usize;
+        while attempt < 64 {
+            if !succeeded && last_errno == libc::EEXIST {
+                let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+                let code = Self::try_mkdir_temp(base.as_path(), prefix, suffix, n, &mut created);
+                if code == 0 {
+                    succeeded = true;
+                } else {
+                    last_errno = code;
+                }
             }
-            let e = Errno::current();
-            if e.0 != libc::EEXIST {
-                return Err(Error::from_errno(e, "mkdir"));
-            }
+            attempt += 1;
         }
-        Err(Error::from_errno(Errno(libc::EEXIST), "tempdir"))
+        if succeeded {
+            Ok(TempDir { path: created })
+        } else if last_errno != libc::EEXIST {
+            Err(Error::from_errno(Errno(last_errno), "mkdir"))
+        } else {
+            Err(Error::from_errno(Errno(libc::EEXIST), "tempdir"))
+        }
     }
 
     /// Where it is.
@@ -598,6 +722,33 @@ impl Drop for TempDir {
     }
 }
 
+unsafe fn step_remove_dir(dir: *mut libc::DIR, path: &Path) -> bool {
+    let ent = unsafe { libc::readdir(dir) };
+    if ent.is_null() {
+        return false;
+    }
+    let name_ptr = unsafe { (*ent).d_name.as_ptr() };
+    let name = unsafe { file_cstr_to_vec(name_ptr) };
+    if (name.len() == 1 && name[0] == b'.')
+        || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
+    {
+        return true;
+    }
+    let child = path.join(&name[..]);
+    // Recurse into directories, unlink everything else. `lstat`, not `stat`: a symlink to a
+    // directory must be removed, not descended into.
+    let cc = child.as_c();
+    let mut st: libc::stat = unsafe { core::mem::zeroed() };
+    if unsafe { libc::lstat(cc.as_ptr().cast(), &mut st) } == 0
+        && st.st_mode & libc::S_IFMT == libc::S_IFDIR
+    {
+        remove_dir_all(child.as_path());
+    } else {
+        unsafe { libc::unlink(cc.as_ptr().cast()) };
+    }
+    true
+}
+
 /// Remove a directory and everything under it, ignoring failures.
 ///
 /// Ignoring them is deliberate: the caller is a `Drop`, which cannot report, and a scratch
@@ -609,35 +760,8 @@ pub fn remove_dir_all(path: &Path) {
         return;
     }
     loop {
-        let ent = unsafe { libc::readdir(dir) };
-        if ent.is_null() {
+        if !unsafe { step_remove_dir(dir, path) } {
             break;
-        }
-        let name_ptr = unsafe { (*ent).d_name.as_ptr() };
-        let mut name = Vec::new();
-        let mut i = 0isize;
-        loop {
-            let b = unsafe { *name_ptr.offset(i) } as u8;
-            if b == 0 {
-                break;
-            }
-            name.push(b);
-            i += 1;
-        }
-        if name == b"." || name == b".." {
-            continue;
-        }
-        let child = path.join(&name[..]);
-        // Recurse into directories, unlink everything else. `lstat`, not `stat`: a symlink to a
-        // directory must be removed, not descended into.
-        let cc = child.as_c();
-        let mut st: libc::stat = unsafe { core::mem::zeroed() };
-        if unsafe { libc::lstat(cc.as_ptr().cast(), &mut st) } == 0
-            && st.st_mode & libc::S_IFMT == libc::S_IFDIR
-        {
-            remove_dir_all(child.as_path());
-        } else {
-            unsafe { libc::unlink(cc.as_ptr().cast()) };
         }
     }
     unsafe { libc::closedir(dir) };
@@ -676,7 +800,9 @@ pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<crate::path::PathBuf>> {
             name.push(b);
             i += 1;
         }
-        if name == b"." || name == b".." {
+        if (name.len() == 1 && name[0] == b'.')
+            || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
+        {
             continue;
         }
         out.push(dir_path.join(&name[..]));
@@ -688,7 +814,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<crate::path::PathBuf>> {
 /// Where a symbolic link points.
 pub fn read_link(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
     let c = path.as_ref().as_c();
-    let mut buf = alloc::vec![0u8; libc::PATH_MAX as usize];
+    let mut buf = zero_path_buf();
     let n = unsafe { libc::readlink(c.as_ptr().cast(), buf.as_mut_ptr().cast(), buf.len()) };
     if n < 0 {
         return Err(err("readlink"));
@@ -727,9 +853,22 @@ pub struct Stream {
 }
 
 impl Stream {
+    fn write_fd_raw(fd: i32, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            let n = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+            if n <= 0 {
+                if n < 0 && crate::Errno::current().0 == libc::EINTR {
+                    continue;
+                }
+                return;
+            }
+            bytes = &bytes[n as usize..];
+        }
+    }
+
     /// Write all of `bytes`.
     pub fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-        crate::print::write_fd(self.fd, bytes);
+        Self::write_fd_raw(self.fd, bytes);
         Ok(())
     }
 
@@ -740,13 +879,13 @@ impl Stream {
 
     /// Whether this stream is a terminal.
     pub fn is_terminal(&self) -> bool {
-        crate::print::is_terminal(self.fd)
+        unsafe { libc::isatty(self.fd) == 1 }
     }
 }
 
 impl fmt::Write for Stream {
     fn write_str(&mut self, s: &str) -> fmt::Result {
-        crate::print::write_fd(self.fd, s.as_bytes());
+        Self::write_fd_raw(self.fd, s.as_bytes());
         Ok(())
     }
 }
@@ -768,43 +907,96 @@ pub struct Stdin {
 }
 
 impl Stdin {
+    #[inline(never)]
+    fn find_newline(buf: &Vec<u8>, start: usize) -> usize {
+        let bytes = buf.as_slice();
+        let len = bytes.len();
+        let mut found = len;
+        let mut index = start;
+        while index < len {
+            if found == len && bytes[index] == b'\n' {
+                found = index;
+            }
+            index += 1;
+        }
+        found
+    }
+
+    fn compact_consumed(&mut self) {
+        if self.at > 0 {
+            let remaining = self.buf.len() - self.at;
+            let mut index = 0;
+            while index < remaining {
+                self.buf[index] = self.buf[self.at + index];
+                index += 1;
+            }
+            self.buf.truncate(remaining);
+            self.at = 0;
+        }
+    }
+
+    fn step_read_line(&mut self) -> i32 {
+        let nl = Self::find_newline(&self.buf, self.at);
+        if nl < self.buf.len() {
+            return 1;
+        }
+        if self.eof {
+            return 0;
+        }
+        self.compact_consumed();
+        let mut chunk = [0u8; 8192];
+        let n = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), chunk.len()) };
+        if n < 0 {
+            if Errno::current().0 == libc::EINTR {
+                return 2;
+            }
+            return -1;
+        }
+        if n == 0 {
+            self.eof = true;
+            return 2;
+        }
+        self.buf.extend_from_slice(&chunk[..n as usize]);
+        2
+    }
+
+    #[inline(never)]
+    fn slice_to_string_lossy(buf: &Vec<u8>, start: usize, end: usize) -> String {
+        let bytes = unsafe { core::slice::from_raw_parts(buf.as_ptr().add(start), end - start) };
+        let mut out = String::new();
+        out.push_str(core::str::from_utf8(bytes).unwrap_or("\u{fffd}"));
+        out
+    }
+
+    fn take_buffered_line(&mut self) -> Option<String> {
+        let len = self.buf.len();
+        let start = self.at;
+        if start >= len {
+            return None;
+        }
+        let nl = Self::find_newline(&self.buf, start);
+        let end = if nl < len {
+            self.at = nl + 1;
+            nl
+        } else {
+            self.at = len;
+            len
+        };
+        Some(Self::slice_to_string_lossy(&self.buf, start, end))
+    }
+
     /// The next line, without its newline. `None` at end of input.
     pub fn read_line(&mut self) -> Result<Option<String>> {
-        loop {
-            if let Some(nl) = self.buf[self.at..].iter().position(|&b| b == b'\n') {
-                let line = self.buf[self.at..self.at + nl].to_vec();
-                self.at += nl + 1;
-                return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+        let status = loop {
+            let s = self.step_read_line();
+            if s != 2 {
+                break s;
             }
-            if self.eof {
-                // A final line with no trailing newline is still a line.
-                if self.at < self.buf.len() {
-                    let line = self.buf[self.at..].to_vec();
-                    self.at = self.buf.len();
-                    return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
-                }
-                return Ok(None);
-            }
-            // Compact what has been consumed before growing, so a long session does not hold
-            // every line it has already handed out.
-            if self.at > 0 {
-                self.buf.drain(..self.at);
-                self.at = 0;
-            }
-            let mut chunk = [0u8; 8192];
-            let n = unsafe { libc::read(0, chunk.as_mut_ptr().cast(), chunk.len()) };
-            if n < 0 {
-                if Errno::current().0 == libc::EINTR {
-                    continue;
-                }
-                return Err(err("read"));
-            }
-            if n == 0 {
-                self.eof = true;
-                continue;
-            }
-            self.buf.extend_from_slice(&chunk[..n as usize]);
+        };
+        if status < 0 {
+            return Err(err("read"));
         }
+        Ok(self.take_buffered_line())
     }
 
     /// The lines, as an iterator.

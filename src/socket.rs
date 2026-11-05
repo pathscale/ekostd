@@ -27,7 +27,6 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 use alloc::string::String;
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::{checked, Errno};
@@ -75,8 +74,10 @@ fn address(path: &[u8]) -> Result<libc::sockaddr_un, Errno> {
     if path.len() >= addr.sun_path.len() {
         return Err(Errno(libc::ENAMETOOLONG));
     }
-    for (slot, byte) in addr.sun_path.iter_mut().zip(path.iter()) {
-        *slot = *byte as _;
+    let mut index = 0;
+    while index < path.len() {
+        addr.sun_path[index] = path[index] as _;
+        index += 1;
     }
     Ok(addr)
 }
@@ -158,9 +159,15 @@ impl Listener {
 }
 
 /// One connection.
+#[derive(Debug)]
 pub struct Stream(Fd);
 
 impl Stream {
+    /// The underlying file descriptor, without transferring ownership.
+    pub fn raw(&self) -> libc::c_int {
+        self.0.raw()
+    }
+
     /// Connect to a listening socket.
     pub fn connect(path: &[u8]) -> Result<Stream, Errno> {
         let fd = socket_fd()?;
@@ -230,7 +237,13 @@ impl Stream {
     /// This connection as a line reader. Consumes the handle: the buffer it grows holds bytes
     /// already taken off the socket, so reading around it afterwards would lose them.
     pub fn lines(self) -> Lines {
-        Lines { stream: self, buf: vec![0u8; 8192], filled: 0, at: 0 }
+        let mut buf = Vec::with_capacity(8192);
+        let mut i = 0;
+        while i < 8192 {
+            buf.push(0);
+            i += 1;
+        }
+        Lines { stream: self, buf, filled: 0, at: 0 }
     }
 }
 
@@ -245,6 +258,57 @@ pub struct Lines {
 }
 
 impl Lines {
+    fn find_newline_in_range(buf: &[u8], start: usize, end: usize) -> usize {
+        let mut found = end;
+        let mut index = start;
+        while index < end {
+            if found == end && buf[index] == b'\n' {
+                found = index;
+            }
+            index += 1;
+        }
+        found
+    }
+
+    fn step_line(&mut self, line: &mut Vec<u8>) -> i32 {
+        let newline = Self::find_newline_in_range(&self.buf, self.at, self.filled);
+        if newline < self.filled {
+            line.extend_from_slice(&self.buf[self.at..newline]);
+            self.at = newline + 1;
+            return 1;
+        }
+        line.extend_from_slice(&self.buf[self.at..self.filled]);
+        self.at = 0;
+        self.filled = 0;
+
+        match self.stream.read(&mut self.buf) {
+            Ok(0) => 0,
+            Ok(got) => {
+                self.filled = got;
+                2
+            }
+            Err(e) => -e.0.abs().max(1),
+        }
+    }
+
+    fn bytes_to_string_lossy(bytes: &[u8]) -> String {
+        let mut out = String::new();
+        out.push_str(core::str::from_utf8(bytes).unwrap_or("\u{fffd}"));
+        out
+    }
+
+    fn finish_next_line(state: i32, line: &[u8]) -> Result<Option<String>, Errno> {
+        if state < 0 {
+            return Err(Errno(-state));
+        }
+        let has_line = if state == 1 { true } else { !line.is_empty() };
+        if has_line {
+            Ok(Some(Self::bytes_to_string_lossy(line)))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// The next line, without its newline, or `None` at a clean end of stream.
     ///
     /// A final line with no trailing newline is returned, because a peer that wrote one and
@@ -252,27 +316,13 @@ impl Lines {
     /// stream ended with nothing pending, which is the only unambiguous end.
     pub fn next_line(&mut self) -> Result<Option<String>, Errno> {
         let mut line: Vec<u8> = Vec::new();
-        loop {
-            // Anything already buffered, up to a newline.
-            if let Some(n) = self.buf[self.at..self.filled].iter().position(|b| *b == b'\n') {
-                line.extend_from_slice(&self.buf[self.at..self.at + n]);
-                self.at += n + 1;
-                return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
+        let state = loop {
+            let step = self.step_line(&mut line);
+            if step != 2 {
+                break step;
             }
-            line.extend_from_slice(&self.buf[self.at..self.filled]);
-            self.at = 0;
-            self.filled = 0;
-
-            let got = self.stream.read(&mut self.buf)?;
-            if got == 0 {
-                return Ok(if line.is_empty() {
-                    None
-                } else {
-                    Some(String::from_utf8_lossy(&line).into_owned())
-                });
-            }
-            self.filled = got;
-        }
+        };
+        Self::finish_next_line(state, &line)
     }
 
     /// The write half, for a reply on the same connection.

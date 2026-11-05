@@ -89,8 +89,15 @@ pub fn read_dir(path: impl AsRef<Path>) -> crate::file::Result<Vec<PathBuf>> {
             return Ok(out);
         }
         let name = unsafe { (*entry).d_name };
-        let bytes: Vec<u8> = name.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
-        if bytes == b"." || bytes == b".." {
+        let mut bytes = Vec::new();
+        let mut index = 0;
+        while index < name.len() && name[index] != 0 {
+            bytes.push(name[index] as u8);
+            index += 1;
+        }
+        if (bytes.len() == 1 && bytes[0] == b'.')
+            || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
+        {
             continue;
         }
         out.push(path.as_ref().join(Path::new(&bytes)));
@@ -128,7 +135,11 @@ pub fn create_dir_all(path: impl AsRef<Path>) -> crate::file::Result<()> {
 /// the name, and only a real directory is descended into.
 pub fn remove_dir_all(path: impl AsRef<Path>) -> crate::file::Result<()> {
     let path = path.as_ref();
-    for child in read_dir(path)? {
+    let children = read_dir(path)?;
+    let mut i = 0;
+    while i < children.len() {
+        let child = &children[i];
+        i += 1;
         // `symlink_metadata` rather than `metadata`: the question is what the *name* is, not
         // what it points at.
         let link = crate::file::symlink_metadata(child.as_path())?;

@@ -34,7 +34,7 @@ impl Mmap {
     /// by `MAP_PRIVATE`, but shrinking it leaves the mapping over pages that no longer exist and
     /// touching them raises `SIGBUS`.
     pub unsafe fn map(file: File) -> Result<Mmap> {
-        let len = file.metadata()?.len() as usize;
+        let len = file.len()? as usize;
         if len == 0 {
             // `mmap` rejects a zero length. An empty file maps to an empty slice, which is what
             // the caller means and what a zero-length `Vec` would give it.
@@ -62,16 +62,23 @@ impl Mmap {
 impl Deref for Mmap {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
-        if self.len == 0 {
-            return &[];
-        }
-        unsafe { core::slice::from_raw_parts(self.ptr.cast(), self.len) }
+        let ptr = if self.len == 0 {
+            core::ptr::NonNull::<u8>::dangling().as_ptr()
+        } else {
+            self.ptr.cast()
+        };
+        unsafe { core::slice::from_raw_parts(ptr, self.len) }
     }
 }
 
 impl AsRef<[u8]> for Mmap {
     fn as_ref(&self) -> &[u8] {
-        self
+        let ptr = if self.len == 0 {
+            core::ptr::NonNull::<u8>::dangling().as_ptr()
+        } else {
+            self.ptr.cast()
+        };
+        unsafe { core::slice::from_raw_parts(ptr, self.len) }
     }
 }
 
@@ -214,7 +221,7 @@ pub fn page_size() -> usize {
 
     // Relaxed on both sides: the value is a constant for the life of the process, so two threads
     // racing here compute the same number and neither publishes anything the other must see.
-    let cached = CACHED.load(Ordering::Relaxed);
+    let cached = CACHED.fetch_add(0, Ordering::Relaxed);
     if cached != 0 {
         return cached;
     }
@@ -222,7 +229,7 @@ pub fn page_size() -> usize {
     // `sysconf` returning -1 for `_SC_PAGESIZE` would mean a system with no page size, which no
     // caller here could do anything about. 4 KiB is the answer everywhere it could happen.
     let size = if size > 0 { size as usize } else { 4096 };
-    CACHED.store(size, Ordering::Relaxed);
+    CACHED.swap(size, Ordering::Relaxed);
     size
 }
 

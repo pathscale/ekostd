@@ -118,19 +118,31 @@ impl Errno {
     /// `strerror_r` rather than `strerror`, which is not thread-safe. The buffer belongs to the
     /// caller because handing back a pointer into a local would be handing back a dangling one.
     pub fn message(self, into: &mut [u8; 128]) -> &str {
-        let ok = unsafe { libc::strerror_r(self.0, into.as_mut_ptr().cast(), into.len()) };
-        if ok != 0 {
-            return "unknown error";
+        let ok = unsafe { libc::strerror_r(self.0, into.as_mut_ptr().cast(), 128) };
+        let bytes: &[u8] = into;
+        let mut end = 128;
+        let mut index = 0;
+        while index < 128 {
+            if end == 128 && bytes[index] == 0 {
+                end = index;
+            }
+            index += 1;
         }
-        let end = into.iter().position(|b| *b == 0).unwrap_or(into.len());
-        core::str::from_utf8(&into[..end]).unwrap_or("unknown error")
+        if ok != 0 {
+            "unknown error"
+        } else {
+            core::str::from_utf8(&bytes[..end]).unwrap_or("unknown error")
+        }
     }
 }
 
 impl core::fmt::Display for Errno {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut buf = [0u8; 128];
-        write!(f, "{} (errno {})", self.message(&mut buf), self.0)
+        f.write_str(self.message(&mut buf))?;
+        f.write_str(" (errno ")?;
+        core::fmt::Display::fmt(&self.0, f)?;
+        f.write_str(")")
     }
 }
 
