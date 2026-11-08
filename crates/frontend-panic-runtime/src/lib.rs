@@ -3,11 +3,6 @@
 #[macro_use]
 extern crate core;
 
-use core::fmt;
-use core::sync::atomic::{AtomicBool, Ordering};
-
-static PANICKING: AtomicBool = AtomicBool::new(false);
-
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
     fn abort() -> !;
