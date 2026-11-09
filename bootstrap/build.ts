@@ -15,6 +15,8 @@ type Attempt = {
   stage: string; unit: string; argv: string[]; status: string;
   exitCode?: number; reason?: string; stdout?: string; stderr?: string;
   elapsedMs: number; timedOut?: boolean;
+  pass?: "initial" | "warmup" | "warm";
+  cacheState?: "cold" | "shared-warm" | "external-unknown";
 };
 const repo = await realpath(fileURLToPath(new URL("../", import.meta.url)));
 const options = new Map<string, string>();
@@ -22,7 +24,7 @@ let execute = false;
 for (let i = 2; i < process.argv.length; i++) {
   const name = process.argv[i];
   if (name === "--run") { execute = true; continue; }
-  if (["--per-unit-daemon", "--shared-socket"].includes(name)) {
+  if (["--per-unit-daemon", "--shared-socket", "--warmup"].includes(name)) {
     if (options.has(name)) throw new Error(`invalid or duplicate option: ${name}`);
     options.set(name, "true");
     continue;
@@ -125,20 +127,18 @@ await writeFile(join(out, "source-identities.json"), JSON.stringify(before, null
 const attempts: Attempt[] = [];
 let reportQueue = Promise.resolve();
 const report = () => {
-  const paired = new Map<string, { stage0?: Attempt; stage1?: Attempt }>();
-  for (const a of attempts) {
-    if (a.stage !== "stage0" && a.stage !== "stage1") continue;
-    const row = paired.get(a.unit) ?? {};
-    row[a.stage] = a;
-    paired.set(a.unit, row);
-  }
-  const benchmarks = [...paired].map(([unit, row]) => ({
-    unit, stage0RustcMs: row.stage0?.elapsedMs ?? null,
-    stage1EkodMs: row.stage1?.elapsedMs ?? null,
-    stage0Status: row.stage0?.status ?? null, stage1Status: row.stage1?.status ?? null,
-    speedupRatio: row.stage0 && row.stage1 && row.stage1.elapsedMs > 0
-      ? row.stage0.elapsedMs / row.stage1.elapsedMs : null,
-  }));
+  const benchmarks = attempts.filter(a => a.stage === "stage1").map(a => {
+    const baseline = attempts.find(b => b.stage === "stage0" && b.unit === a.unit);
+    return {
+      unit: a.unit, pass: a.pass, cacheState: a.cacheState,
+      measured: a.pass !== "warmup",
+      stage0RustcMs: baseline?.elapsedMs ?? null, stage1EkodMs: a.elapsedMs,
+      stage0Status: baseline?.status ?? null, stage1Status: a.status,
+      speedupRatio: a.pass !== "warmup" && baseline?.status === "rlib-produced"
+        && a.status === "source-objects-produced" && a.elapsedMs > 0
+        ? baseline.elapsedMs / a.elapsedMs : null,
+    };
+  });
   const body = JSON.stringify({
     mode: execute ? "run" : "plan", target: m.target, cfg: m.cfg, panic: m.panic,
     cwd: repo, environment: { RUSTC_BOOTSTRAP: "1", inherited: false },
@@ -153,15 +153,26 @@ const socket = options.get("--socket");
 const defaultEkod = join(compilerRepo, "ekod/target/release/ekod");
 const defaultEkodExists = await access(defaultEkod).then(() => true, () => false);
 const ekodBin = options.get("--ekod-bin") ?? (defaultEkodExists ? defaultEkod : undefined);
-const dedicatedDaemons = !options.has("--shared-socket") && Boolean(ekodBin)
-  && (options.has("--per-unit-daemon") || options.has("--ekod-bin") || Boolean(socket && defaultEkodExists));
+if (options.has("--per-unit-daemon") && options.has("--shared-socket")) {
+  throw new Error("--per-unit-daemon conflicts with --shared-socket");
+}
+if (options.has("--warmup") && options.has("--per-unit-daemon")) {
+  throw new Error("--warmup requires a daemon shared across roots");
+}
+const dedicatedDaemons = !options.has("--shared-socket") && Boolean(ekodBin);
+const perUnitDaemon = options.has("--per-unit-daemon");
+let sharedDaemon: ReturnType<typeof Bun.spawn> | undefined;
+let sharedDaemonFailure: string | undefined;
+let sharedRequests = 0;
+const sharedSocket = `/tmp/ekod-bootstrap-${process.pid}.sock`;
 async function run(a: Attempt): Promise<void> {
   attempts.push(a);
   await report();
   console.log(JSON.stringify({ stage: a.stage, unit: a.unit, argv: a.argv, status: a.status }));
   if (a.status !== "ready") return;
-  a.stdout = join(out, `${a.stage}-${a.unit}.stdout`);
-  a.stderr = join(out, `${a.stage}-${a.unit}.stderr`);
+  const logKey = `${a.stage}-${a.pass ? `${a.pass}-` : ""}${a.unit}`;
+  a.stdout = join(out, `${logKey}.stdout`);
+  a.stderr = join(out, `${logKey}.stderr`);
   const started = performance.now();
   try {
     const child = Bun.spawn(a.argv, {
@@ -221,8 +232,13 @@ function closure(u: Unit, result = new Set<string>()): Set<string> {
   result.add(u.key);
   return result;
 }
+await stage0Done;
 const stage1Roots = m.units.filter(u => !u.language);
-await Promise.all(stage1Roots.map(async root => {
+const passes: Array<NonNullable<Attempt["pass"]>> = options.has("--warmup")
+  ? ["warmup", "warm"] : ["initial"];
+try {
+for (const pass of passes) {
+for (const root of stage1Roots) {
   const selected = m.units.filter(u => closure(root).has(u.key));
   const language = selected.filter(u => u.language);
   const graph = {
@@ -241,29 +257,45 @@ await Promise.all(stage1Roots.map(async root => {
   };
   const graphPath = join(out, `${root.key}.source-graph.json`);
   await writeFile(graphPath, JSON.stringify(graph, null, 2) + "\n");
-  const objects = join(out, `stage1-${root.key}`);
+  const objects = join(out, `stage1-${pass}-${root.key}`);
   await mkdir(objects);
   const absent = selected.filter(u => missing.has(u.key)).map(u => u.key);
   const shortKey = root.key.slice(0, 8);
-  const dedicatedSocket = dedicatedDaemons ? `/tmp/ekod-${shortKey}-${process.pid}.sock` : socket;
+  const dedicatedSocket = dedicatedDaemons
+    ? perUnitDaemon ? `/tmp/ekod-${shortKey}-${process.pid}.sock` : sharedSocket : socket;
   let daemon: ReturnType<typeof Bun.spawn> | undefined;
-  const a: Attempt = { stage: "stage1", unit: root.key,
-    argv: ekors && dedicatedSocket ? [ekors, "--socket", dedicatedSocket, "compile",
+  const a: Attempt = { stage: "stage1", unit: root.key, pass,
+    cacheState: !dedicatedDaemons ? "external-unknown"
+      : perUnitDaemon || sharedRequests === 0 ? "cold" : "shared-warm",
+    argv: ekors && dedicatedSocket ? [ekors, "--socket", dedicatedSocket, "compile", "--timing",
       `--source-graph=${graphPath}`, "--target", `dir=${objects}`] : [],
     status: !execute ? "not-run" : absent.length ? "missing-source" : !ekors || !dedicatedSocket ? "missing-eko-endpoint" : "ready",
     reason: absent.length ? `sources: ${absent.join(",")}` : undefined, elapsedMs: 0 };
   try {
-    if (a.status === "ready" && dedicatedDaemons) {
-      await Promise.all([unlink(dedicatedSocket!).catch(() => {}), unlink(`${dedicatedSocket}.control`).catch(() => {})]);
-      const daemonHome = join(out, `home-${root.key}`);
-      await mkdir(daemonHome, { recursive: true });
-      const daemonLog = join(out, `ekod-${root.key}.stderr`);
-      daemon = Bun.spawn([ekodBin!, "--socket", dedicatedSocket!], {
-        cwd: repo, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: daemonHome }, stdin: "ignore", stdout: Bun.file(daemonLog), stderr: Bun.file(daemonLog),
-      });
-      try { await waitForSocket(dedicatedSocket!); }
-      catch (e) { daemon.kill("SIGKILL"); a.status = "daemon-start-failed"; a.reason = `${String(e)} (log: ${await readFile(daemonLog, "utf8").catch(() => "")})`; }
+    if (a.status === "ready" && sharedDaemonFailure && !perUnitDaemon) {
+      a.status = "daemon-start-failed"; a.reason = sharedDaemonFailure;
     }
+    if (a.status === "ready" && dedicatedDaemons && (perUnitDaemon || !sharedDaemon)) {
+      await Promise.all([unlink(dedicatedSocket!).catch(() => {}), unlink(`${dedicatedSocket}.control`).catch(() => {})]);
+      const daemonHome = join(out, perUnitDaemon ? `home-${root.key}` : "home-shared");
+      await mkdir(daemonHome, { recursive: true });
+      const daemonLog = join(out, perUnitDaemon ? `ekod-${root.key}.stderr` : "ekod-shared.stderr");
+      // Keep relative diagnostic files, including ekod-stage-progress.tsv, in out.
+      daemon = Bun.spawn([ekodBin!, "--socket", dedicatedSocket!], {
+        cwd: out, env: { ...process.env, HOME: daemonHome,
+          EKOD_SOURCE_MEMORY_TRACE: process.env.EKOD_SOURCE_MEMORY_TRACE ?? '1' },
+        stdin: "ignore", stdout: Bun.file(daemonLog), stderr: Bun.file(daemonLog),
+      });
+      if (!perUnitDaemon) sharedDaemon = daemon;
+      try { await waitForSocket(dedicatedSocket!); }
+      catch (e) {
+        daemon.kill("SIGKILL"); await daemon.exited;
+        a.status = "daemon-start-failed";
+        a.reason = `${String(e)} (log: ${await readFile(daemonLog, "utf8").catch(() => "")})`;
+        if (!perUnitDaemon) sharedDaemonFailure = a.reason;
+      }
+    }
+    if (a.status === "ready") sharedRequests++;
     await run(a);
     if (a.status === "command-exited-zero") {
       try {
@@ -274,13 +306,25 @@ await Promise.all(stage1Roots.map(async root => {
     }
     await report();
   } finally {
-    if (daemon) {
+    if (daemon && perUnitDaemon) {
       daemon.kill("SIGKILL");
+      await daemon.exited;
+      // Archive progress before another isolated daemon can overwrite it.
+      const progress = join(out, "ekod-stage-progress.tsv");
+      const bytes = await readFile(progress).catch(() => undefined);
+      if (bytes) await writeFile(join(out, `ekod-stage-progress-${pass}-${root.key}.tsv`), bytes);
       if (dedicatedSocket) await Promise.all([unlink(dedicatedSocket).catch(() => {}), unlink(`${dedicatedSocket}.control`).catch(() => {})]);
     }
   }
-}));
-await stage0Done;
+}
+}
+} finally {
+  if (sharedDaemon) {
+    sharedDaemon.kill("SIGKILL");
+    await sharedDaemon.exited;
+    await Promise.all([unlink(sharedSocket).catch(() => {}), unlink(`${sharedSocket}.control`).catch(() => {})]);
+  }
+}
 try {
   const after = await snapshot();
   await writeFile(join(out, "source-identities-after.json"), JSON.stringify(after, null, 2) + "\n");
