@@ -36,14 +36,6 @@
 // to find them at all.
 
 #![no_std]
-// The eyepatch on `thread::Mutex`'s destructor, behind a feature because it is a nightly one.
-//
-// See the `Drop` impl for why it is load-bearing: without it a `Mutex` anywhere inside a type
-// makes that type drop-significant, and rustc's `'tcx` origin-point pattern in
-// `rustc_interface::passes` stops compiling. A consumer that is not rustc does not need it, and
-// making it unconditional would put every consumer of this crate on nightly for a guarantee only
-// one of them uses. `hashbrown` gates its nightly pieces the same way.
-#![cfg_attr(feature = "nightly", feature(dropck_eyepatch))]
 
 // ---------------------------------------------------------------------------------------------
 // STD IS BANNED IN THIS CRATE.

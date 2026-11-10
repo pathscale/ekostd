@@ -24,7 +24,7 @@ let execute = false;
 for (let i = 2; i < process.argv.length; i++) {
   const name = process.argv[i];
   if (name === "--run") { execute = true; continue; }
-  if (["--per-unit-daemon", "--shared-socket", "--warmup"].includes(name)) {
+  if (["--per-unit-daemon", "--shared-socket", "--warmup", "--bench-stage0-vs-stage1"].includes(name)) {
     if (options.has(name)) throw new Error(`invalid or duplicate option: ${name}`);
     options.set(name, "true");
     continue;
@@ -139,12 +139,27 @@ const report = () => {
         ? baseline.elapsedMs / a.elapsedMs : null,
     };
   });
+  const stage0VsStage1Perf = options.has("--bench-stage0-vs-stage1")
+    ? attempts.filter(a => a.stage === "stage1").flatMap(a => {
+      const baseline = attempts.find(b => b.stage === "stage0" && b.unit === a.unit);
+      return baseline ? [{
+        unit: a.unit, stage0CompileMs: baseline.elapsedMs, stage1CompileMs: a.elapsedMs,
+        ratio: a.elapsedMs > 0 ? baseline.elapsedMs / a.elapsedMs : null,
+      }] : [];
+    })
+    : undefined;
   const body = JSON.stringify({
     mode: execute ? "run" : "plan", target: m.target, cfg: m.cfg, panic: m.panic,
     cwd: repo, environment: { RUSTC_BOOTSTRAP: "1", inherited: false },
     bootstrapAccepted: false, attempts, benchmarks,
+    ...(stage0VsStage1Perf ? { stage0VsStage1Perf } : {}),
   }, null, 2) + "\n";
-  reportQueue = reportQueue.then(() => writeFile(join(out, "outcomes.json"), body));
+  reportQueue = reportQueue.then(async () => {
+    await writeFile(join(out, "outcomes.json"), body);
+    if (options.has("--bench-stage0-vs-stage1")) {
+      await writeFile(join(out, "bootstrap-report.json"), body);
+    }
+  });
   return reportQueue;
 };
 const rustc = options.get("--rustc") ?? "rustc";
@@ -214,202 +229,7 @@ function toonRows(text: string, name: string): Map<string, string[][]> {
   const rows = new Map<string, string[][]>();
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    const match = lines[i].match(new RegExp(`^${name}\\[(\\d+)\\]\\{([^}]*)\\}:import { createHash } from "node:crypto";
-import { access, mkdir, readFile, readdir, realpath, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
-
-type Unit = {
-  key: string; repository: "ekostd" | "ekopathrs"; root: string;
-  package: string; version: string; crate: string; edition: string;
-  language: boolean; dependencies: string[];
-};
-type Manifest = {
-  schema: string; target: string; panic: string; cfg: string[]; units: Unit[];
-};
-type Attempt = {
-  stage: string; unit: string; argv: string[]; status: string;
-  exitCode?: number; reason?: string; stdout?: string; stderr?: string;
-  elapsedMs: number; timedOut?: boolean;
-  pass?: "initial" | "warmup" | "warm";
-  cacheState?: "cold" | "shared-warm" | "external-unknown";
-};
-const repo = await realpath(fileURLToPath(new URL("../", import.meta.url)));
-const options = new Map<string, string>();
-let execute = false;
-for (let i = 2; i < process.argv.length; i++) {
-  const name = process.argv[i];
-  if (name === "--run") { execute = true; continue; }
-  if (["--per-unit-daemon", "--shared-socket", "--warmup"].includes(name)) {
-    if (options.has(name)) throw new Error(`invalid or duplicate option: ${name}`);
-    options.set(name, "true");
-    continue;
-  }
-  if (!["--out", "--rustc", "--ekopathrs", "--ekors", "--socket", "--ekod-bin", "--timeout-ms"].includes(name)
-      || options.has(name) || !process.argv[i + 1] || process.argv[i + 1].startsWith("--")) {
-    throw new Error(`invalid or duplicate option: ${name}`);
-  }
-  options.set(name, process.argv[++i]);
-}
-const timeoutMs = Number(options.get("--timeout-ms") ?? "15000");
-if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new Error("--timeout-ms must be a positive integer");
-const outOption = options.get("--out");
-if (!outOption || !isAbsolute(outOption)) throw new Error("--out requires a fresh absolute directory");
-const out = resolve(outOption);
-if (out === repo || out.startsWith(repo + sep)) throw new Error("--out must be outside the source repository");
-const compilerRepo = await realpath(options.get("--ekopathrs") ?? resolve(repo, "../ekopathrs"));
-if (out === compilerRepo || out.startsWith(compilerRepo + sep)) throw new Error("--out must be outside ekopathrs");
-const manifestPath = join(repo, "bootstrap/sources.json");
-const manifestBytes = await readFile(manifestPath);
-const m: Manifest = JSON.parse(manifestBytes.toString("utf8"));
-if (m.schema !== "ekostd.bootstrap/1" || m.panic !== "abort"
-    || typeof m.target !== "string" || !m.target || !Array.isArray(m.cfg)
-    || m.cfg.some(c => typeof c !== "string") || !Array.isArray(m.units)) {
-  throw new Error("invalid bootstrap configuration");
-}
-const units = new Map<string, Unit>();
-for (const u of m.units) {
-  if (!u || typeof u.key !== "string" || !/^[a-z_][a-z0-9_]*$/.test(u.key)
-      || units.has(u.key) || !["ekostd", "ekopathrs"].includes(u.repository)
-      || typeof u.root !== "string" || isAbsolute(u.root) || u.root.split(/[\\/]/).includes("..")
-      || !u.root.endsWith("/lib.rs") || !/^[a-z_][a-z0-9_]*$/.test(u.crate)
-      || typeof u.package !== "string" || typeof u.version !== "string"
-      || !["2021", "2024"].includes(u.edition) || typeof u.language !== "boolean"
-      || !Array.isArray(u.dependencies) || new Set(u.dependencies).size !== u.dependencies.length
-      || u.dependencies.some(d => !units.has(d))) throw new Error(`invalid dependency-first unit: ${u?.key}`);
-  units.set(u.key, u);
-}
-for (const [key, root] of [["core", "bootstrap/core/src/lib.rs"], ["alloc", "bootstrap/alloc/src/lib.rs"]]) {
-  const u = units.get(key);
-  if (!u || !u.language || u.crate !== key || u.repository !== "ekostd" || u.root !== root) {
-    throw new Error(`candidate ${key} must use ${root}`);
-  }
-}
-const builtins = units.get("compiler_builtins");
-if (!builtins || builtins.language || builtins.repository !== "ekostd"
-    || builtins.crate !== "compiler_builtins"
-    || builtins.root !== "bootstrap/compiler_builtins/src/lib.rs"
-    || m.units[0]?.key !== "core" || m.units[1]?.key !== "compiler_builtins"
-    || JSON.stringify(builtins.dependencies) !== '["core"]') {
-  throw new Error("compiler_builtins must follow core and use bootstrap/compiler_builtins/src/lib.rs");
-}
-if (m.units.some(u => u.language && u.key !== "core" && u.key !== "alloc")
-    || units.get("core")!.dependencies.length !== 0
-    || JSON.stringify(units.get("alloc")!.dependencies) !== '["core","compiler_builtins"]'
-    || m.units.some(u => u.key !== "core" && u.key !== "compiler_builtins"
-      && !u.dependencies.includes("compiler_builtins"))
-    || m.units.filter(u => !u.language && u.key !== "compiler_builtins").length < 2) {
-  throw new Error("invalid language roots, runtime dependencies or missing consumers");
-}
-await mkdir(out, { recursive: false });
-const stage0 = join(out, "stage0");
-const sysroot = join(out, "empty-sysroot");
-await mkdir(stage0);
-await mkdir(sysroot);
-await writeFile(join(out, "sources.json"), manifestBytes);
-const roots = new Map<string, string>();
-const missing = new Map<string, string>();
-for (const u of m.units) {
-  const owner = u.repository === "ekostd" ? repo : compilerRepo;
-  const path = resolve(owner, u.root);
-  try {
-    const canonical = await realpath(path);
-    if (canonical !== path) throw new Error("source aliases are not admitted");
-    roots.set(u.key, canonical);
-  } catch (e) { roots.set(u.key, path); missing.set(u.key, String(e)); }
-}
-function hash(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
-async function snapshot(): Promise<Record<string, string>> {
-  const files: Record<string, string> = {};
-  async function walk(path: string): Promise<void> {
-    for (const entry of (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
-      const child = join(path, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`source symlink: ${child}`);
-      if (entry.isDirectory()) await walk(child);
-      else if (entry.isFile()) files[child] = hash(await readFile(child));
-      else throw new Error(`non-file source input: ${child}`);
-    }
-  }
-  files[manifestPath] = hash(await readFile(manifestPath));
-  files[fileURLToPath(import.meta.url)] = hash(await readFile(fileURLToPath(import.meta.url)));
-  for (const u of m.units) {
-    if (missing.has(u.key)) files[roots.get(u.key)!] = `missing: ${missing.get(u.key)}`;
-    else await walk(dirname(roots.get(u.key)!));
-  }
-  return Object.fromEntries(Object.entries(files).sort(([a], [b]) => a.localeCompare(b)));
-}
-const before = await snapshot();
-await writeFile(join(out, "source-identities.json"), JSON.stringify(before, null, 2) + "\n");
-const attempts: Attempt[] = [];
-let reportQueue = Promise.resolve();
-const report = () => {
-  const benchmarks = attempts.filter(a => a.stage === "stage1").map(a => {
-    const baseline = attempts.find(b => b.stage === "stage0" && b.unit === a.unit);
-    return {
-      unit: a.unit, pass: a.pass, cacheState: a.cacheState,
-      measured: a.pass !== "warmup",
-      stage0RustcMs: baseline?.elapsedMs ?? null, stage1EkodMs: a.elapsedMs,
-      stage0Status: baseline?.status ?? null, stage1Status: a.status,
-      speedupRatio: a.pass !== "warmup" && baseline?.status === "rlib-produced"
-        && a.status === "source-objects-produced" && a.elapsedMs > 0
-        ? baseline.elapsedMs / a.elapsedMs : null,
-    };
-  });
-  const body = JSON.stringify({
-    mode: execute ? "run" : "plan", target: m.target, cfg: m.cfg, panic: m.panic,
-    cwd: repo, environment: { RUSTC_BOOTSTRAP: "1", inherited: false },
-    bootstrapAccepted: false, attempts, benchmarks,
-  }, null, 2) + "\n";
-  reportQueue = reportQueue.then(() => writeFile(join(out, "outcomes.json"), body));
-  return reportQueue;
-};
-const rustc = options.get("--rustc") ?? "rustc";
-const ekors = options.get("--ekors");
-const socket = options.get("--socket");
-const defaultEkod = join(compilerRepo, "ekod/target/release/ekod");
-const defaultEkodExists = await access(defaultEkod).then(() => true, () => false);
-const ekodBin = options.get("--ekod-bin") ?? (defaultEkodExists ? defaultEkod : undefined);
-if (options.has("--per-unit-daemon") && options.has("--shared-socket")) {
-  throw new Error("--per-unit-daemon conflicts with --shared-socket");
-}
-if (options.has("--warmup") && options.has("--per-unit-daemon")) {
-  throw new Error("--warmup requires a daemon shared across roots");
-}
-const dedicatedDaemons = !options.has("--shared-socket") && Boolean(ekodBin);
-const perUnitDaemon = options.has("--per-unit-daemon");
-let sharedDaemon: ReturnType<typeof Bun.spawn> | undefined;
-let sharedDaemonFailure: string | undefined;
-let sharedRequests = 0;
-const sharedSocket = `/tmp/ekod-bootstrap-${process.pid}.sock`;
-async function run(a: Attempt): Promise<void> {
-  attempts.push(a);
-  await report();
-  console.log(JSON.stringify({ stage: a.stage, unit: a.unit, argv: a.argv, status: a.status }));
-  if (a.status !== "ready") return;
-  const logKey = `${a.stage}-${a.pass ? `${a.pass}-` : ""}${a.unit}`;
-  a.stdout = join(out, `${logKey}.stdout`);
-  a.stderr = join(out, `${logKey}.stderr`);
-  const started = performance.now();
-  try {
-    const child = Bun.spawn(a.argv, {
-      cwd: repo, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", RUSTC_BOOTSTRAP: "1" },
-      stdin: "ignore", stdout: Bun.file(a.stdout), stderr: Bun.file(a.stderr),
-    });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const outcome = await Promise.race([
-      child.exited.then(code => ({ code })),
-      new Promise<{ timeout: true }>(resolveTimeout => {
-        timer = setTimeout(() => { a.timedOut = true; child.kill("SIGKILL"); resolveTimeout({ timeout: true }); }, timeoutMs);
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    if ("timeout" in outcome) a.status = "timed-out";
-    else { a.exitCode = outcome.code; a.status = a.exitCode === 0 ? "command-exited-zero" : "failed"; }
-  } catch (e) { a.status = "spawn-failed"; a.reason = String(e); }
-  a.elapsedMs = performance.now() - started;
-  await report();
-}
-));
+    const match = lines[i].match(new RegExp(`^${name}\\[(\\d+)\\]\\{([^}]*)\\}:`));
     if (!match) continue;
     const fields = match[2].split(",");
     const table: string[][] = [];

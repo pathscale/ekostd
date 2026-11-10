@@ -216,19 +216,10 @@ fn build_ptr_table(buf: &[u8], offsets: &[usize], table: &mut Vec<usize>) {
     table.push(0);
 }
 
-unsafe fn exec_one_candidate(
-    tries_buf: &[u8],
-    offset: usize,
-    argv: &[usize],
-    envp: &[usize],
-) {
+unsafe fn exec_one_candidate(tries_buf: &[u8], offset: usize, argv: &[usize], envp: &[usize]) {
     let try_ptr: *const libc::c_char = unsafe { tries_buf.as_ptr().add(offset).cast() };
     unsafe {
-        libc::execve(
-            try_ptr,
-            argv.as_ptr().cast(),
-            envp.as_ptr().cast(),
-        );
+        libc::execve(try_ptr, argv.as_ptr().cast(), envp.as_ptr().cast());
     }
 }
 
@@ -383,7 +374,8 @@ impl Command {
             // have had threads, only async-signal-safe calls are defined. Every buffer this
             // touches was built above, before the fork.
             unsafe {
-                let code = exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp);
+                let code =
+                    exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp);
                 libc::_exit(code);
             }
         }
@@ -535,15 +527,10 @@ impl Child {
         let ms = match timeout {
             None => -1,
             Some(t) => {
-                let total_ms = t
-                    .as_secs()
-                    .saturating_mul(1000)
-                    .saturating_add(t.subsec_millis() as u64);
-                let whole = if total_ms > i32::MAX as u64 {
-                    i32::MAX
-                } else {
-                    total_ms as libc::c_int
-                };
+                let total_ms =
+                    t.as_secs().saturating_mul(1000).saturating_add(t.subsec_millis() as u64);
+                let whole =
+                    if total_ms > i32::MAX as u64 { i32::MAX } else { total_ms as libc::c_int };
                 if whole == 0 && !t.is_zero() {
                     1
                 } else {

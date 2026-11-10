@@ -37,8 +37,35 @@ fn write_str(text: &str) {
     }
 }
 
+fn write_u32(mut value: u32) {
+    let mut buf = [0u8; 10];
+    let mut idx = buf.len();
+    if value == 0 {
+        write_str("0");
+        return;
+    }
+    while value > 0 {
+        idx -= 1;
+        buf[idx] = b'0' + (value % 10) as u8;
+        value /= 10;
+    }
+    if let Ok(text) = core::str::from_utf8(&buf[idx..]) {
+        write_str(text);
+    }
+}
+
 #[panic_handler]
-fn panic_handler(_info: &core::panic::PanicInfo<'_>) -> ! {
-    write_str("panicked\n");
+fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
+    if let Some(loc) = info.location() {
+        write_str("panicked at ");
+        write_str(loc.file());
+        write_str(":");
+        write_u32(loc.line());
+        write_str(":");
+        write_u32(loc.column());
+        write_str("\n");
+    } else {
+        write_str("panicked\n");
+    }
     unsafe { abort() }
 }

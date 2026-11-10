@@ -159,12 +159,7 @@ impl<T> Drop for SyncSender<T> {
         }
         if dead {
             let boxed = unsafe { Box::from_raw(self.shared) };
-            let Shared {
-                state,
-                on_send,
-                on_recv,
-                ..
-            } = *boxed;
+            let Shared { state, on_send, on_recv, .. } = *boxed;
             drop(state);
             drop(on_send);
             drop(on_recv);
@@ -230,12 +225,7 @@ impl<T> Drop for Receiver<T> {
         shared.on_recv.notify_all();
         if dead {
             let boxed = unsafe { Box::from_raw(self.shared) };
-            let Shared {
-                state,
-                on_send,
-                on_recv,
-                ..
-            } = *boxed;
+            let Shared { state, on_send, on_recv, .. } = *boxed;
             drop(state);
             drop(on_send);
             drop(on_recv);

@@ -46,9 +46,8 @@ where
         }
         return Err(Errno(stack_rc));
     }
-    let detach_rc = unsafe {
-        libc::pthread_attr_setdetachstate(&mut attr, libc::PTHREAD_CREATE_DETACHED)
-    };
+    let detach_rc =
+        unsafe { libc::pthread_attr_setdetachstate(&mut attr, libc::PTHREAD_CREATE_DETACHED) };
     if detach_rc != 0 {
         unsafe {
             libc::pthread_attr_destroy(&mut attr);
@@ -79,6 +78,24 @@ extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
     core::ptr::null_mut()
 }
 
+pub(crate) struct RawMutex(core::cell::UnsafeCell<libc::pthread_mutex_t>);
+
+impl RawMutex {
+    const fn new() -> Self {
+        Self(core::cell::UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER))
+    }
+
+    pub(crate) fn get(&self) -> *mut libc::pthread_mutex_t {
+        self.0.get()
+    }
+}
+
+impl Drop for RawMutex {
+    fn drop(&mut self) {
+        unsafe { libc::pthread_mutex_destroy(self.0.get()) };
+    }
+}
+
 /// A mutex that blocks in the kernel.
 ///
 /// `std::sync::Mutex` without the poisoning. Poisoning existed to say "a thread panicked while
@@ -86,7 +103,7 @@ extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
 /// ignore it - which is the right answer for a compiler session: a request that panicked left the
 /// session as it was, because the panic containment is what decides that, not the lock.
 pub struct Mutex<T: ?Sized> {
-    pub(crate) inner: core::cell::UnsafeCell<libc::pthread_mutex_t>,
+    pub(crate) inner: RawMutex,
     value: core::cell::UnsafeCell<T>,
 }
 
@@ -115,7 +132,7 @@ impl<T> Mutex<T> {
     // why the two are separate blocks - `std::sync::Mutex` splits them the same way.
     pub const fn new(value: T) -> Mutex<T> {
         Mutex {
-            inner: core::cell::UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER),
+            inner: RawMutex::new(),
             value: core::cell::UnsafeCell::new(value),
         }
     }
@@ -144,36 +161,6 @@ impl<T: ?Sized> Mutex<T> {
     pub fn lock(&self) -> Guard<'_, T> {
         unsafe { libc::pthread_mutex_lock(self.inner.get()) };
         Guard { mutex: self }
-    }
-}
-
-// **The eyepatch is load-bearing, not decoration.** This destructor calls
-// `pthread_mutex_destroy` and touches nothing inside `T`, and `#[may_dangle]` is how that gets
-// said to dropck. Without it, every type containing a `Mutex<T>` becomes drop-significant in a
-// way that requires `T` to strictly outlive the lock, which breaks the pattern rustc's `'tcx`
-// lifetime is built on: `rustc_interface::passes` creates a `OnceLock<GlobalCtxt<'tcx>>` and
-// hands out `&'tcx` references to arenas declared beside it, and dropck then reports the arenas
-// as dropped while still borrowed. `parking_lot::Mutex`, which this replaced, has no `Drop` at
-// all and so never posed the question.
-//
-// Soundness: the promise `may_dangle` makes is that this destructor does not *inspect* `T`. It
-// does not - `self.inner` is the `pthread_mutex_t`, a sibling field. The `UnsafeCell<T>` is still
-// an owned field the compiler can see, so `T`'s own drop glue still runs and is still checked;
-// the eyepatch relaxes only what *this* impl is assumed to do.
-#[cfg(feature = "nightly")]
-unsafe impl<#[may_dangle] T: ?Sized> Drop for Mutex<T> {
-    fn drop(&mut self) {
-        unsafe { libc::pthread_mutex_destroy(self.inner.get()) };
-    }
-}
-
-// The same destructor without the eyepatch, for a consumer on stable. It has to exist: without
-// it the `pthread_mutex_t` is never destroyed. What it costs is the dropck relaxation, which
-// only rustc's `'tcx` pattern needs.
-#[cfg(not(feature = "nightly"))]
-impl<T: ?Sized> Drop for Mutex<T> {
-    fn drop(&mut self) {
-        unsafe { libc::pthread_mutex_destroy(self.inner.get()) };
     }
 }
 
@@ -1002,10 +989,8 @@ where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
 {
     let mut handles: Vec<libc::pthread_t> = Vec::new();
-    let sc = Scope {
-        handles: core::ptr::from_mut(&mut handles),
-        _marker: core::marker::PhantomData,
-    };
+    let sc =
+        Scope { handles: core::ptr::from_mut(&mut handles), _marker: core::marker::PhantomData };
     let out = f(&sc);
     let slice = handles.as_slice();
     let len = slice.len();
@@ -1065,10 +1050,7 @@ impl<T: 'static> Default for ScopedKey<T> {
 impl<T: 'static> ScopedKey<T> {
     /// Not called directly; [`scoped_thread_local!`] builds these.
     pub const fn new() -> ScopedKey<T> {
-        ScopedKey {
-            slot: ThreadLocal::new(),
-            _marker: core::marker::PhantomData,
-        }
+        ScopedKey { slot: ThreadLocal::new(), _marker: core::marker::PhantomData }
     }
 
     /// Install `value` for the duration of `f`.
