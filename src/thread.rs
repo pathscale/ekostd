@@ -330,6 +330,29 @@ impl<T: 'static> ThreadLocal<T> {
             Some(f(&mut *ptr))
         }
     }
+
+    /// This thread's value by shared reference, creating it from `init` on first use.
+    ///
+    /// The form to use whenever `f` can reach the same thread-local again, directly or through
+    /// anything it calls. [`ThreadLocal::with`] hands out `&mut T`; a second `with` on the same
+    /// thread while the first is still running makes two exclusive references to one value. That
+    /// is undefined behaviour, and it is not theoretical: the optimiser may treat a store made
+    /// through the outer reference as unobservable by the calls inside it and remove the store.
+    /// A value reached this way is changed through `Cell` or `RefCell`, as with `std`'s keys.
+    pub fn with_ref<R>(&self, init: impl FnOnce() -> T, f: impl FnOnce(&T) -> R) -> Option<R> {
+        let key = self.key()?;
+        unsafe {
+            let existing = libc::pthread_getspecific(key);
+            let ptr = if existing.is_null() {
+                let boxed = Self::alloc_tls_box(init());
+                libc::pthread_setspecific(key, boxed.cast());
+                boxed
+            } else {
+                existing.cast::<T>()
+            };
+            Some(f(&*ptr))
+        }
+    }
 }
 
 /// A condition variable, paired with a [`Mutex`].
