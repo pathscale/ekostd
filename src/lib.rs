@@ -54,6 +54,7 @@ extern crate alloc;
 
 pub mod channel;
 pub mod command;
+pub mod compat;
 pub mod cpu;
 pub mod daemonize;
 pub mod env;
