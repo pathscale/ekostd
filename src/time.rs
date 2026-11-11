@@ -37,12 +37,55 @@ impl Instant {
     pub fn elapsed(&self) -> Duration {
         Instant::now().duration_since(*self)
     }
+
+    /// Time since an earlier reading, or `None` when `earlier` is the later of the two.
+    pub fn checked_duration_since(&self, earlier: Instant) -> Option<Duration> {
+        let d = self.nanos.checked_sub(earlier.nanos)?;
+        Some(Duration::new((d / 1_000_000_000) as u64, (d % 1_000_000_000) as u32))
+    }
+
+    /// Time since an earlier reading, zero when `earlier` is the later of the two.
+    pub fn saturating_duration_since(&self, earlier: Instant) -> Duration {
+        self.duration_since(earlier)
+    }
+
+    /// This reading moved later by `duration`, or `None` when the result does not fit.
+    pub fn checked_add(&self, duration: Duration) -> Option<Instant> {
+        self.nanos.checked_add(duration.as_nanos()).map(|nanos| Instant { nanos })
+    }
+
+    /// This reading moved earlier by `duration`, or `None` when that is before the origin of the clock.
+    pub fn checked_sub(&self, duration: Duration) -> Option<Instant> {
+        self.nanos.checked_sub(duration.as_nanos()).map(|nanos| Instant { nanos })
+    }
 }
 
 impl core::ops::Sub for Instant {
     type Output = Duration;
     fn sub(self, earlier: Instant) -> Duration {
         self.duration_since(earlier)
+    }
+}
+
+/// A reading moved later. Saturates rather than panicking, for the reason `duration_since` does.
+impl core::ops::Add<Duration> for Instant {
+    type Output = Instant;
+    fn add(self, duration: Duration) -> Instant {
+        Instant { nanos: self.nanos.saturating_add(duration.as_nanos()) }
+    }
+}
+
+impl core::ops::AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, duration: Duration) {
+        *self = *self + duration;
+    }
+}
+
+/// A reading moved earlier. Saturates at the origin of the clock.
+impl core::ops::Sub<Duration> for Instant {
+    type Output = Instant;
+    fn sub(self, duration: Duration) -> Instant {
+        Instant { nanos: self.nanos.saturating_sub(duration.as_nanos()) }
     }
 }
 
