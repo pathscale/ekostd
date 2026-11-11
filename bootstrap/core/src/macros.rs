@@ -96,6 +96,8 @@ pub macro include_str($($tokens:tt)*) {}
 pub macro include_bytes($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro derive($($tokens:tt)*) {}
+#[rustc_builtin_macro]
+pub macro compile_error($($tokens:tt)*) {}
 
 pub mod builtin {
     #[rustc_builtin_macro(Copy)]

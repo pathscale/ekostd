@@ -76,7 +76,7 @@ pub mod error {
 }
 
 pub use crate::panic::panicking;
-pub use crate::macros::{format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive};
+pub use crate::macros::{format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error};
 
 #[prelude_import]
 #[allow(unused_imports)]

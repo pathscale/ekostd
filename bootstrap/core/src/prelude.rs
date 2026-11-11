@@ -10,7 +10,7 @@ pub mod v1 {
     pub use crate::option::Option::{self, None, Some};
     pub use crate::result::Result::{self, Err, Ok};
     pub use crate::{
-        assert, assert_eq, assert_ne, cfg, column, concat, debug_assert, debug_assert_eq,
+        assert, assert_eq, assert_ne, cfg, column, compile_error, concat, debug_assert, debug_assert_eq,
         debug_assert_ne, derive, env, file, format_args, include_bytes, include_str, line, matches,
         option_env, panic, stringify, todo, unimplemented, unreachable, write, writeln,
     };
