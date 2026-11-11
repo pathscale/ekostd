@@ -392,9 +392,10 @@ pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
     Ok(unsafe { String::from_utf8_unchecked(bytes) })
 }
 
-/// Write a whole file, replacing it.
-pub fn write(path: impl AsRef<Path>, bytes: &[u8]) -> Result<()> {
-    File::create(path)?.write_all(bytes)
+/// Write a whole file, replacing it. The contents are anything that is bytes - a `String` as well
+/// as a slice - which is what `std::fs::write` takes.
+pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> Result<()> {
+    File::create(path)?.write_all(bytes.as_ref())
 }
 
 /// Whether a name exists.
