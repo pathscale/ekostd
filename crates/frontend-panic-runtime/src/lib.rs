@@ -67,5 +67,76 @@ fn panic_handler(info: &core::panic::PanicInfo<'_>) -> ! {
     } else {
         write_str("panicked\n");
     }
+    #[cfg(feature = "diagnostics")]
+    diagnostics::report(info);
     unsafe { abort() }
+}
+
+/// What a host-built compiler prints before it aborts, beyond the location: the message, and a raw
+/// backtrace. Behind a feature because this crate is also a unit the compiler compiles for itself,
+/// against a `core` that has no formatting machinery to spare.
+#[cfg(feature = "diagnostics")]
+mod diagnostics {
+    use super::{write_str, write_u32};
+
+    struct Stderr;
+    impl core::fmt::Write for Stderr {
+        fn write_str(&mut self, text: &str) -> core::fmt::Result {
+            write_str(text);
+            Ok(())
+        }
+    }
+
+    fn write_hex(mut value: usize) {
+        let mut buf = [b'0'; 18];
+        buf[1] = b'x';
+        let mut idx = buf.len();
+        while idx > 2 {
+            idx -= 1;
+            buf[idx] = b"0123456789abcdef"[value & 15];
+            value >>= 4;
+        }
+        if let Ok(text) = core::str::from_utf8(&buf) {
+            write_str(text);
+        }
+    }
+
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    unsafe extern "C" {
+        fn _dyld_get_image_vmaddr_slide(index: u32) -> isize;
+    }
+
+    pub fn report(info: &core::panic::PanicInfo<'_>) {
+        // The message says what was violated; the location alone does not.
+        let _ = core::fmt::write(&mut Stderr, format_args!("{}\n", info.message()));
+        // The return addresses up the frame-pointer chain, raw, with the image slide: what
+        // `atos -o <binary> -s <slide> <addresses>` needs to name every frame. No allocation, and
+        // no unwinder: the frame records are read directly, which Darwin arm64 always keeps.
+        #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+        unsafe {
+            write_str("image slide ");
+            write_hex(_dyld_get_image_vmaddr_slide(0) as usize);
+            write_str("\n");
+            let mut frame: *const usize;
+            core::arch::asm!("mov {}, x29", out(reg) frame, options(nomem, nostack, preserves_flags));
+            let mut index = 0u32;
+            while !frame.is_null() && (frame as usize) % 8 == 0 && index < 96 {
+                let next = *frame as *const usize;
+                let ret = *frame.add(1);
+                if ret == 0 {
+                    break;
+                }
+                write_str("frame ");
+                write_u32(index);
+                write_str(" ");
+                write_hex(ret);
+                write_str("\n");
+                if next <= frame {
+                    break;
+                }
+                frame = next;
+                index += 1;
+            }
+        }
+    }
 }

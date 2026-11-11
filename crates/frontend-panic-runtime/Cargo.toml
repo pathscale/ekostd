@@ -6,6 +6,10 @@ publish = false
 license = "Apache-2.0 OR MIT"
 description = "Abort-only panic handler for the compiler frontend"
 
+[features]
+# Message and raw backtrace before the abort. Off by default: see `mod diagnostics`.
+diagnostics = []
+
 [lib]
 path = "src/lib.rs"
 test = false
