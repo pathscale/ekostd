@@ -498,7 +498,18 @@ impl<T> OnceLock<T> {
                 Ordering::Acquire,
             ) {
                 Ok(_) => {
+                    // If `f` unwinds, the lock goes back to empty and the panic stays the
+                    // caller's, as with `std`'s. Left busy, every later caller would yield
+                    // forever waiting for a value that is never coming.
+                    struct Unfinished<'a>(&'a core::sync::atomic::AtomicU8);
+                    impl Drop for Unfinished<'_> {
+                        fn drop(&mut self) {
+                            self.0.store(ONCE_EMPTY, Ordering::Release);
+                        }
+                    }
+                    let unfinished = Unfinished(&self.state);
                     let v = f();
+                    core::mem::forget(unfinished);
                     // Safe: this thread won the CAS, so it alone may write, and no reader can
                     // observe the cell until the Release store below.
                     unsafe { *self.value.get() = Some(v) };
