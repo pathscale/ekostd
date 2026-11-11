@@ -495,6 +495,26 @@ impl serde::Serialize for PathBuf {
     }
 }
 
+// The other direction, from the text `Serialize` writes. `std::path::PathBuf` has it too.
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for PathBuf {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<PathBuf, D::Error> {
+        // A visitor rather than `String::deserialize`: that impl needs serde's `alloc` feature,
+        // which this wrapper does not turn on.
+        struct Text;
+        impl<'de> serde::de::Visitor<'de> for Text {
+            type Value = PathBuf;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a path as text")
+            }
+            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<PathBuf, E> {
+                Ok(PathBuf::from(text))
+            }
+        }
+        d.deserialize_str(Text)
+    }
+}
+
 /// The prefix did not match. Carries nothing, because there is nothing else to say.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct StripPrefixError;
@@ -953,6 +973,37 @@ impl PartialEq<PathBuf> for &Path {
 impl PartialEq<PathBuf> for Path {
     fn eq(&self, other: &PathBuf) -> bool {
         self == other.as_path()
+    }
+}
+
+/// A path compared with text, which `std` also allows. Byte for byte: no normalisation.
+impl PartialEq<str> for Path {
+    fn eq(&self, other: &str) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl PartialEq<&str> for Path {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl PartialEq<Path> for str {
+    fn eq(&self, other: &Path) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl PartialEq<str> for PathBuf {
+    fn eq(&self, other: &str) -> bool {
+        self.as_path() == other
+    }
+}
+
+impl PartialEq<&str> for PathBuf {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_path() == *other
     }
 }
 
