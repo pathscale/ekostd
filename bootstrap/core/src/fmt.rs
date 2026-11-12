@@ -363,3 +363,80 @@ impl<T: ?Sized> Pointer for &T {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { Pointer::fmt(&(*self as *const T), f) }
 }
 
+
+/// Builder behind `Formatter::debug_struct`. Writes `Name { a: 1, b: 2 }`, or `Name` with no fields.
+pub struct DebugStruct<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+impl<'b, 'a: 'b> DebugStruct<'b, 'a> {
+    pub fn field(&mut self, name: &str, value: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            let first = !self.fields;
+            self.failed = self.entry(first, name, value).is_err();
+        }
+        self.fields = true;
+        self
+    }
+    fn entry(&mut self, first: bool, name: &str, value: &dyn Debug) -> Result {
+        attempt!(self.fmt.write_str(if first { " { " } else { ", " }));
+        attempt!(self.fmt.write_str(name));
+        attempt!(self.fmt.write_str(": "));
+        value.fmt(self.fmt)
+    }
+    pub fn finish_non_exhaustive(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(if self.fields { ", .. }" } else { " { .. }" })
+    }
+    pub fn finish(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        if self.fields { self.fmt.write_str(" }") } else { Ok(()) }
+    }
+}
+
+/// Builder behind `Formatter::debug_tuple`. Writes `Name(1, 2)`, or `Name` with no fields.
+pub struct DebugTuple<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+impl<'b, 'a: 'b> DebugTuple<'b, 'a> {
+    pub fn field(&mut self, value: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            let first = !self.fields;
+            self.failed = self.entry(first, value).is_err();
+        }
+        self.fields = true;
+        self
+    }
+    fn entry(&mut self, first: bool, value: &dyn Debug) -> Result {
+        attempt!(self.fmt.write_str(if first { "(" } else { ", " }));
+        value.fmt(self.fmt)
+    }
+    pub fn finish(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        if self.fields { self.fmt.write_str(")") } else { Ok(()) }
+    }
+}
+
+impl<'a> Formatter<'a> {
+    pub fn debug_struct<'b>(&'b mut self, name: &str) -> DebugStruct<'b, 'a> {
+        let failed = self.write_str(name).is_err();
+        DebugStruct { fmt: self, failed, fields: false }
+    }
+    pub fn debug_tuple<'b>(&'b mut self, name: &str) -> DebugTuple<'b, 'a> {
+        let failed = self.write_str(name).is_err();
+        DebugTuple { fmt: self, failed, fields: false }
+    }
+}
+
+impl<T: ?Sized> Pointer for crate::ptr::NonNull<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { Pointer::fmt(&(self.as_ptr() as *const T), f) }
+}
+impl<T: ?Sized> Debug for crate::ptr::NonNull<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { Pointer::fmt(self, f) }
+}
+impl<T: crate::marker::Copy + Debug> Debug for crate::cell::Cell<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.debug_struct("Cell").field("value", &self.get()).finish() }
+}
+impl<T: ?Sized> Debug for crate::marker::PhantomData<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("PhantomData") }
+}
+impl Debug for crate::alloc::Layout {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        f.debug_struct("Layout").field("size", &self.size()).field("align", &self.align()).finish()
+    }
+}

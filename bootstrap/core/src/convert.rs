@@ -172,3 +172,37 @@ impl TryFrom<u128> for usize {
         }
     }
 }
+
+impl<T, const N: usize> AsRef<[T]> for [T; N] {
+    fn as_ref(&self) -> &[T] { self }
+}
+impl<T, const N: usize> AsMut<[T]> for [T; N] {
+    fn as_mut(&mut self) -> &mut [T] { self }
+}
+impl AsRef<[u8]> for str {
+    fn as_ref(&self) -> &[u8] { self.as_bytes() }
+}
+
+/// A slice whose length is not the array's length.
+pub struct TryFromSliceError(());
+impl Copy for TryFromSliceError {}
+impl Clone for TryFromSliceError { fn clone(&self) -> Self { *self } }
+impl crate::fmt::Debug for TryFromSliceError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("TryFromSliceError") }
+}
+impl crate::fmt::Display for TryFromSliceError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("could not convert slice to array")
+    }
+}
+impl<T: Copy, const N: usize> TryFrom<&[T]> for [T; N] {
+    type Error = TryFromSliceError;
+    fn try_from(slice: &[T]) -> crate::result::Result<Self, TryFromSliceError> {
+        if slice.len() == N {
+            // Same length and element type, so the slice's storage is exactly one `[T; N]`.
+            Ok(unsafe { *(slice.as_ptr() as *const [T; N]) })
+        } else {
+            Err(TryFromSliceError(()))
+        }
+    }
+}

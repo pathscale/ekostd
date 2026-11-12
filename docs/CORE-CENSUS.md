@@ -28,12 +28,19 @@ Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwi
 |---|---|---|---|---|---|---|---|
 | 1, 2026-11-12, before any change | 7 | 11 | 14 | 24 | 45 | 48 | 149 |
 | 2, after batch 1 | 6 | 5 | 14 | 23 | 30 | 34 | 112 |
+| 3, after batch 2 | 2 | 4 | 14 | 8 | 27 | 25 | 80 |
 
 Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, as_mut_ptr}`,
 `ptr::{read_unaligned, write_unaligned}` and the pointer method, `wrapping_shl`, `wrapping_shr`,
 `UnsafeCell::get_mut`, and the legacy integer modules (`core::usize::MAX`).
 
+Batch 2 added: `Formatter::{debug_struct, debug_tuple}` with their builders; `Debug` for `NonNull`, `Cell`,
+`PhantomData` and `Layout`; `Pointer` for `NonNull`; `AsRef<[T]>` and `AsMut<[T]>` for arrays; `AsRef<[u8]>` for
+`str`; `TryFrom<&[T]>` for arrays.
+
 ## Open after run 2, largest first
+
+(Not yet re-sorted after batch 2; the trait-impl and formatter groups below are mostly closed.)
 
 - Missing trait impls, about 34: `Debug` and `Pointer` for `NonNull`, `Cell`, `PhantomData`, `Layout`;
   `AsRef<[u8]>` for arrays, `str` and `Vec`; `TryFrom<&[u8]>` for arrays; `Hash` for `Vec<u8>`.
