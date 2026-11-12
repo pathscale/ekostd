@@ -10,14 +10,12 @@ pub fn black_box<T>(value: T) -> T {
     }
     intrinsic::black_box(value)
 }
-#[rustc_builtin_macro]
-macro_rules! asm { ($($tokens:tt)*) => {}; }
 #[inline(always)]
 pub fn spin_loop() {
     #[cfg(any(target_arch = "aarch64", target_arch = "arm"))]
-    unsafe { asm!("yield", options(nomem, nostack, preserves_flags)); }
+    unsafe { crate::arch::asm!("yield", options(nomem, nostack, preserves_flags)); }
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    unsafe { asm!("pause", options(nomem, nostack, preserves_flags)); }
+    unsafe { crate::arch::asm!("pause", options(nomem, nostack, preserves_flags)); }
     #[cfg(not(any(target_arch = "aarch64", target_arch = "arm", target_arch = "x86", target_arch = "x86_64")))]
     { black_box(()); }
 }
