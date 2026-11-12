@@ -47,7 +47,7 @@ macro_rules! integer {
             }
             pub const fn saturating_sub(self, rhs: Self) -> Self {
                 let (value, overflow) = sub_with_overflow(self, rhs);
-                if !overflow { value } else if $signed && self < 0 { Self::MIN } else { Self::MAX }
+                if !overflow { value } else if !$signed { 0 } else if self < 0 { Self::MIN } else { Self::MAX }
             }
             pub const fn max(self, other: Self) -> Self { if self < other { other } else { self } }
             pub const fn min(self, other: Self) -> Self { if self < other { self } else { other } }
