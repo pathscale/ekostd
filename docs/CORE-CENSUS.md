@@ -86,6 +86,14 @@ Owner direction: do not grow `core` to cover third-party crates; best effort to 
   and `memchr` leaves with it; then `core::arch` shrinks to what `hashbrown` alone calls.
 - `ps-rusty_alloc` (56 open) is ours: change it to use less first, add to `core` only what is unavoidable.
 
+Run 9, same day: `ps-rusty_alloc` compiles (56 to 0). It is ours and stays in every graph, so what it needs was
+added: the address-only pointer operations (`expose_provenance`, `with_addr`, `map_addr`, `without_provenance`,
+`with_exposed_provenance`), `mem::offset_of!` with its intrinsic, the `asm!` and `global_asm!` macros,
+`AtomicI32`, `AtomicI64`, `fetch_max`, `is_multiple_of`, `next_multiple_of`, `checked_next_multiple_of`,
+`checked_shl`, `overflowing_add`, `clamp`, `unsigned_abs`, ASCII case helpers, `Iterator::sum`,
+`IntoIterator` for `&[T; N]`, a const `Cell::into_inner`, and `str::parse` (which brought `from_str_radix` back).
+Only `object` still fails: 150.
+
 Rule for every later addition: it must be needed by a crate that stays in the graph, and when that crate leaves,
 the addition leaves with it.
 

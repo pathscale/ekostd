@@ -47,6 +47,8 @@ pub trait Iterator {
     fn chain<U: IntoIterator<Item = Self::Item>>(self, other: U) -> Chain<Self, U::IntoIter> where Self: Sized { Chain { a: Some(self), b: Some(other.into_iter()) } }
     fn take(self, n: usize) -> Take<Self> where Self: Sized { Take { iter: self, n } }
     fn skip(self, n: usize) -> Skip<Self> where Self: Sized { Skip { iter: self, n } }
+    /// Adds up every item.
+    fn sum<S: Sum<Self::Item>>(self) -> S where Self: Sized { S::sum(self) }
     /// Every `step`th item, starting with the first. `step` must not be zero.
     fn step_by(self, step: usize) -> StepBy<Self> where Self: Sized {
         if step == 0 { crate::panic::panic_nounwind("step_by: step must be non-zero"); }
@@ -451,3 +453,19 @@ impl<I: Iterator> Iterator for StepBy<I> {
         self.iter.next()
     }
 }
+
+/// Types that can be made by adding up an iterator. `Iterator::sum` goes through this.
+pub trait Sum<A = Self>: Sized {
+    fn sum<I: Iterator<Item = A>>(iter: I) -> Self;
+}
+macro_rules! integer_sum {
+    ($($t:ty)*) => {$(
+        impl Sum for $t {
+            fn sum<I: Iterator<Item = $t>>(mut iter: I) -> $t {
+                let mut total: $t = 0;
+                loop { match iter.next() { Some(item) => total += item, None => return total } }
+            }
+        }
+    )*};
+}
+integer_sum!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);

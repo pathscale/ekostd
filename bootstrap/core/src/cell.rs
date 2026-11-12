@@ -69,7 +69,7 @@ impl<T> Cell<T> {
     }
 
     #[inline]
-    pub fn into_inner(self) -> T {
+    pub const fn into_inner(self) -> T {
         self.value.into_inner()
     }
 

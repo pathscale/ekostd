@@ -8,7 +8,7 @@
 #![feature(freeze_impls, unsized_fn_params)]
 #![feature(const_precise_live_drops, transparent_unions)]
 #![feature(const_trait_impl, const_destruct, unboxed_closures, prelude_import)]
-#![feature(decl_macro, allow_internal_unstable, structural_match)]
+#![feature(decl_macro, allow_internal_unstable, structural_match, builtin_syntax)]
 #![feature(adt_const_params, generic_const_parameter_types)]
 
 extern crate self as core;

@@ -56,6 +56,47 @@ macro_rules! integer {
                 let (value, overflow) = mul_with_overflow(self, rhs);
                 if !overflow { value } else if $signed && ((self < 0) != (rhs < 0)) { Self::MIN } else { Self::MAX }
             }
+            /// Parses digits in `radix` (2 to 36), with an optional `+`, and `-` for signed types.
+            pub fn from_str_radix(src: &str, radix: u32) -> Result<Self, ParseIntError> {
+                let bytes = src.as_bytes();
+                if bytes.len() == 0 { return Err(ParseIntError { kind: IntErrorKind::Empty }); }
+                let (negative, mut i) = match bytes[0] {
+                    b'+' => (false, 1),
+                    b'-' if $signed => (true, 1),
+                    _ => (false, 0),
+                };
+                if i == bytes.len() { return Err(ParseIntError { kind: IntErrorKind::InvalidDigit }); }
+                let mut value: Self = 0;
+                while i < bytes.len() {
+                    let digit = match bytes[i] {
+                        b @ b'0'..=b'9' => (b - b'0') as u32,
+                        b @ b'a'..=b'z' => (b - b'a') as u32 + 10,
+                        b @ b'A'..=b'Z' => (b - b'A') as u32 + 10,
+                        _ => radix,
+                    };
+                    if digit >= radix { return Err(ParseIntError { kind: IntErrorKind::InvalidDigit }); }
+                    // Negative values are built downwards so that MIN, which has no positive twin, parses.
+                    let step = match value.checked_mul(radix as Self) {
+                        Some(scaled) if negative => scaled.checked_sub(digit as Self),
+                        Some(scaled) => scaled.checked_add(digit as Self),
+                        None => None,
+                    };
+                    value = match step {
+                        Some(next) => next,
+                        None if negative => return Err(ParseIntError { kind: IntErrorKind::NegOverflow }),
+                        None => return Err(ParseIntError { kind: IntErrorKind::PosOverflow }),
+                    };
+                    i += 1;
+                }
+                Ok(value)
+            }
+            pub const fn checked_shl(self, rhs: u32) -> Option<Self> {
+                if rhs < $bits { Some(self << (rhs as $t)) } else { None }
+            }
+            pub const fn overflowing_add(self, rhs: Self) -> (Self, bool) { add_with_overflow(self, rhs) }
+            pub const fn clamp(self, min: Self, max: Self) -> Self {
+                if self < min { min } else if self > max { max } else { self }
+            }
             pub const fn max(self, other: Self) -> Self { if self < other { other } else { self } }
             pub const fn min(self, other: Self) -> Self { if self < other { self } else { other } }
         }
@@ -98,6 +139,18 @@ macro_rules! unsigned {
             pub const fn rotate_right(self, n: u32) -> Self {
                 let n = n & ($bits - 1);
                 if n == 0 { self } else { (self >> (n as $t)) | (self << (($bits - n) as $t)) }
+            }
+            /// Whether `self` is a whole multiple of `rhs`. Only zero is a multiple of zero.
+            pub const fn is_multiple_of(self, rhs: Self) -> bool { if rhs == 0 { self == 0 } else { self % rhs == 0 } }
+            /// The smallest multiple of `rhs` that is not below `self`. Overflow is a panic.
+            pub const fn next_multiple_of(self, rhs: Self) -> Self {
+                let rest = self % rhs;
+                if rest == 0 { self } else { self + (rhs - rest) }
+            }
+            pub const fn checked_next_multiple_of(self, rhs: Self) -> Option<Self> {
+                if rhs == 0 { return None; }
+                let rest = self % rhs;
+                if rest == 0 { Some(self) } else { self.checked_add(rhs - rest) }
             }
             pub const fn count_ones(self) -> u32 { ctpop(self) }
             pub const fn leading_zeros(self) -> u32 { ctlz(self) }
@@ -158,11 +211,46 @@ nonzero!(NonZeroU8, u8); nonzero!(NonZeroU16, u16); nonzero!(NonZeroU32, u32);
 nonzero!(NonZeroU64, u64); nonzero!(NonZeroU128, u128); nonzero!(NonZeroUsize, usize);
 
 macro_rules! signed_abs {
-    ($($t:ty)*) => {$(
+    ($($t:ty, $u:ty);*) => {$(
         impl $t {
+            /// Absolute value as the unsigned type, where `MIN` fits.
+            pub const fn unsigned_abs(self) -> $u { if self < 0 { (0 as $u).wrapping_sub(self as $u) } else { self as $u } }
             /// Absolute value. `MIN` has none and wraps to itself.
             pub const fn abs(self) -> Self { if self < 0 { (0 as $t).wrapping_sub(self) } else { self } }
         }
     )*};
 }
-signed_abs!(i8 i16 i32 i64 i128 isize);
+signed_abs!(i8, u8; i16, u16; i32, u32; i64, u64; i128, u128; isize, usize);
+
+/// Why `from_str_radix` refused its input.
+pub enum IntErrorKind { Empty, InvalidDigit, PosOverflow, NegOverflow, Zero }
+impl crate::marker::Copy for IntErrorKind {}
+impl crate::clone::Clone for IntErrorKind { fn clone(&self) -> Self { *self } }
+
+pub struct ParseIntError { kind: IntErrorKind }
+impl ParseIntError {
+    pub const fn kind(&self) -> &IntErrorKind { &self.kind }
+    const fn text(&self) -> &'static str {
+        match self.kind {
+            IntErrorKind::Empty => "cannot parse integer from empty string",
+            IntErrorKind::InvalidDigit => "invalid digit found in string",
+            IntErrorKind::PosOverflow => "number too large to fit in target type",
+            IntErrorKind::NegOverflow => "number too small to fit in target type",
+            IntErrorKind::Zero => "number would be zero for non-zero type",
+        }
+    }
+}
+impl crate::marker::Copy for ParseIntError {}
+impl crate::clone::Clone for ParseIntError { fn clone(&self) -> Self { *self } }
+impl crate::fmt::Display for ParseIntError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str(self.text()) }
+}
+impl crate::fmt::Debug for ParseIntError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str(self.text()) }
+}
+
+impl u8 {
+    pub const fn to_ascii_uppercase(&self) -> u8 { if *self >= b'a' && *self <= b'z' { *self - 32 } else { *self } }
+    pub const fn to_ascii_lowercase(&self) -> u8 { if *self >= b'A' && *self <= b'Z' { *self + 32 } else { *self } }
+    pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool { self.to_ascii_lowercase() == other.to_ascii_lowercase() }
+}

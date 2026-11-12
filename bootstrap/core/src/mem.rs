@@ -137,3 +137,9 @@ pub const unsafe fn zeroed<T>() -> T {
 pub unsafe fn transmute_copy<Src, Dst>(src: &Src) -> Dst {
     unsafe { crate::intrinsics::read_via_copy(src as *const Src as *const Dst) }
 }
+
+/// The byte offset of a field in a type. Expanded by the compiler.
+#[allow_internal_unstable(builtin_syntax)]
+pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
+    {builtin # offset_of($Container, $($fields)+)}
+}

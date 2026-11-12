@@ -5,6 +5,18 @@
 //! compiler that can compile a loop can compile these; turning them back into vector instructions is the
 //! optimizer's job.
 
+/// Inline assembly. Expanded by the compiler.
+#[rustc_builtin_macro]
+pub macro asm("assembly template", $(operands,)* $(options($(option),*))?) {
+    /* compiler built-in */
+}
+
+/// Module-level assembly. Expanded by the compiler.
+#[rustc_builtin_macro]
+pub macro global_asm("assembly template", $(operands,)* $(options($(option),*))?) {
+    /* compiler built-in */
+}
+
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64 {
     #![allow(non_camel_case_types)]

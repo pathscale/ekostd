@@ -96,6 +96,13 @@ pub const unsafe fn read_unaligned<T>(src: *const T) -> T {
     }
 }
 
+/// A pointer with the given address that may not be used to access anything.
+pub const fn without_provenance<T>(addr: usize) -> *const T { addr as *const T }
+pub const fn without_provenance_mut<T>(addr: usize) -> *mut T { addr as *mut T }
+/// A pointer from an address whose provenance was exposed earlier with `expose_provenance`.
+pub fn with_exposed_provenance<T>(addr: usize) -> *const T { addr as *const T }
+pub fn with_exposed_provenance_mut<T>(addr: usize) -> *mut T { addr as *mut T }
+
 /// Swaps `count` values between two regions that do not overlap.
 pub unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
     let mut i = 0;
@@ -523,6 +530,20 @@ impl<T: PointeeSized> *const T {
         unsafe { read_unaligned(self) }
     }
 
+    /// The address, marking the pointer's provenance as exposed so an integer can become a pointer again.
+    #[inline(always)]
+    pub fn expose_provenance(self) -> usize where T: Sized { self as usize }
+    /// This pointer moved to `addr`, keeping what it is allowed to access.
+    #[inline(always)]
+    pub fn with_addr(self, addr: usize) -> Self where T: Sized {
+        (self as *mut u8).wrapping_add(addr.wrapping_sub(self as usize)) as Self
+    }
+    /// `with_addr` with the new address computed from the old one.
+    #[inline(always)]
+    pub fn map_addr(self, f: impl crate::ops::FnOnce(usize) -> usize) -> Self where T: Sized {
+        self.with_addr(f(self as usize))
+    }
+
     /// How many elements to step forward to reach an address aligned to `align` (a power of two).
     /// Returns `usize::MAX` when no whole number of elements gets there, which callers must handle.
     #[inline(always)]
@@ -662,6 +683,20 @@ impl<T: PointeeSized> *mut T {
         T: Sized,
     {
         unsafe { read_unaligned(self) }
+    }
+
+    /// The address, marking the pointer's provenance as exposed so an integer can become a pointer again.
+    #[inline(always)]
+    pub fn expose_provenance(self) -> usize where T: Sized { self as usize }
+    /// This pointer moved to `addr`, keeping what it is allowed to access.
+    #[inline(always)]
+    pub fn with_addr(self, addr: usize) -> Self where T: Sized {
+        (self as *mut u8).wrapping_add(addr.wrapping_sub(self as usize)) as Self
+    }
+    /// `with_addr` with the new address computed from the old one.
+    #[inline(always)]
+    pub fn map_addr(self, f: impl crate::ops::FnOnce(usize) -> usize) -> Self where T: Sized {
+        self.with_addr(f(self as usize))
     }
 
     /// How many elements to step forward to reach an address aligned to `align` (a power of two).

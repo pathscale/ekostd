@@ -57,3 +57,9 @@ impl<T, const N: usize> crate::iter::IntoIterator for [T; N] {
     type IntoIter = IntoIter<T, N>;
     fn into_iter(self) -> IntoIter<T, N> { IntoIter { data: crate::mem::MaybeUninit::new(self), next: 0 } }
 }
+
+impl<'a, T, const N: usize> crate::iter::IntoIterator for &'a [T; N] {
+    type Item = &'a T;
+    type IntoIter = crate::slice::Iter<'a, T>;
+    fn into_iter(self) -> Self::IntoIter { (self as &'a [T]).into_iter() }
+}

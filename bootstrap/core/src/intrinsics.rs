@@ -144,3 +144,8 @@ pub trait DiscriminantKind {
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discriminant;
+
+/// The byte offset of field `field` of variant `variant` of `T`. What `mem::offset_of!` expands to.
+#[rustc_intrinsic]
+#[lang = "offset_of"]
+pub const fn offset_of<T: crate::marker::PointeeSized>(variant: u32, field: u32) -> usize;

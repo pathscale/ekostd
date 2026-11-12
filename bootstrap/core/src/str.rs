@@ -523,3 +523,33 @@ impl Ord for str {
         self.as_bytes().cmp(other.as_bytes())
     }
 }
+
+/// Parsing a value from a string. `str::parse` goes through this.
+pub trait FromStr: crate::marker::Sized {
+    type Err;
+    fn from_str(s: &str) -> Result<Self, Self::Err>;
+}
+macro_rules! from_str_int {
+    ($($t:ty)*) => {$(
+        impl FromStr for $t {
+            type Err = crate::num::ParseIntError;
+            fn from_str(s: &str) -> Result<Self, Self::Err> { <$t>::from_str_radix(s, 10) }
+        }
+    )*};
+}
+from_str_int!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+impl str {
+    pub fn parse<F: FromStr>(&self) -> Result<F, F::Err> { F::from_str(self) }
+    /// Equal when ASCII letters are compared without regard to case.
+    pub fn eq_ignore_ascii_case(&self, other: &str) -> bool {
+        let (a, b) = (self.as_bytes(), other.as_bytes());
+        if a.len() != b.len() { return false; }
+        let mut i = 0;
+        while i < a.len() {
+            if !a[i].eq_ignore_ascii_case(&b[i]) { return false; }
+            i += 1;
+        }
+        true
+    }
+}

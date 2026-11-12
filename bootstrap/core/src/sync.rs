@@ -71,7 +71,7 @@ macro_rules! atomic_int { ($name:ident,$t:ty) => {
     }
 } }
 atomic_int!(AtomicU8,u8); atomic_int!(AtomicU16,u16); atomic_int!(AtomicU32,u32); atomic_int!(AtomicU64,u64);
-atomic_int!(AtomicUsize,usize); atomic_int!(AtomicIsize,isize);
+atomic_int!(AtomicUsize,usize); atomic_int!(AtomicIsize,isize); atomic_int!(AtomicI32,i32); atomic_int!(AtomicI64,i64);
 
 #[repr(transparent)] pub struct AtomicPtr<T>(UnsafeCell<*mut T>); unsafe impl<T> Sync for AtomicPtr<T> {} unsafe impl<T> Send for AtomicPtr<T> {}
 impl<T> AtomicPtr<T> {
@@ -100,3 +100,22 @@ macro_rules! atomic_get_mut {
     )*};
 }
 atomic_get_mut!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize);
+
+macro_rules! atomic_fetch_max {
+    ($($name:path, $t:ty);*) => {$(
+        impl $name {
+            /// Stores the larger of the current value and `value`; returns the previous value.
+            pub fn fetch_max(&self, value: $t, order: atomic::Ordering) -> $t {
+                let mut current = self.load(atomic::Ordering::Relaxed);
+                loop {
+                    let next = if current < value { value } else { current };
+                    match self.compare_exchange(current, next, order, atomic::Ordering::Relaxed) {
+                        Ok(previous) => return previous,
+                        Err(actual) => current = actual,
+                    }
+                }
+            }
+        }
+    )*};
+}
+atomic_fetch_max!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64);
