@@ -108,6 +108,7 @@ pub const EINTR: c_int = 4;
 pub const EACCES: c_int = 13;
 pub const EEXIST: c_int = 17;
 pub const EISDIR: c_int = 21;
+pub const ETXTBSY: c_int = 26;
 pub const EFBIG: c_int = 27;
 pub const EXDEV: c_int = 18;
 #[cfg(target_os = "macos")]

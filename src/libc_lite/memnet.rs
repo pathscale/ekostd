@@ -119,7 +119,10 @@ pub const MAP_ANON: c_int = 0x1000;
 pub const MAP_ANON: c_int = 0x0020;
 
 pub const MAP_FAILED: *mut c_void = !0 as *mut c_void;
+pub const MAP_SHARED: c_int = 0x0001;
 pub const MAP_PRIVATE: c_int = 0x0002;
+/// `msync`: invalidate other mappings of the same file. 2 on macOS and on Linux.
+pub const MS_INVALIDATE: c_int = 0x0002;
 pub const MAP_FIXED: c_int = 0x0010;
 
 #[cfg(target_os = "macos")]
@@ -164,6 +167,7 @@ unsafe extern "C" {
         offset: i64,
     ) -> *mut c_void;
     pub fn munmap(addr: *mut c_void, len: usize) -> c_int;
+    pub fn msync(addr: *mut c_void, len: usize, flags: c_int) -> c_int;
     pub fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
     pub fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> c_int;
     // Apple takes a `const` address and a `c_char` vector; Linux takes a `mut` address and `c_uchar`.
