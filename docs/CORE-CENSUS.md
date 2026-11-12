@@ -19,8 +19,8 @@ phase. Crates above the leaves are not reached until the leaves pass.
 
 ## Graph
 
-Leaves (reached): `bitflags`, `bumpalo`, `ekostd`, `foldhash`, `memchr`, `spin`.
-Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwild`, `wild`.
+Leaves: `bitflags`, `bumpalo`, `ekostd`, `foldhash`, `memchr`, `spin`.
+Above them: `hashbrown`, `object`, `ps-rusty_alloc`, then `linker-utils`, `libwild`, `wild`.
 
 ## Count
 
@@ -32,6 +32,7 @@ Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwi
 | 4, after batch 3 | passes | 1 | 2 | 6 | 25 | 22 | 56, plus `hashbrown` reached: 37 |
 | 5, after batch 4 | passes | passes | passes | 3 | 22 | 20 | 45, plus `hashbrown`: 5 |
 | 6, after batch 5 | passes | passes | passes | passes | 22 | passes | 22, plus `hashbrown`: 1 and `ps-rusty_alloc` reached: 56 |
+| 7, after batch 6 | passes | passes | passes | passes | passes | passes | leaves done; `hashbrown` passes; `ps-rusty_alloc` 56; `object` reached: 150 |
 
 Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, as_mut_ptr}`,
 `ptr::{read_unaligned, write_unaligned}` and the pointer method, `wrapping_shl`, `wrapping_shr`,
@@ -66,7 +67,17 @@ constants and `const fn`.
 After run 6 five of the six leaves compile, `ekostd` among them. What remains on `memchr` and `hashbrown` is
 `core::arch` (NEON) only.
 
+Batch 6 added `core::arch::aarch64`: the six NEON vector types and twenty operations that `memchr` and
+`hashbrown` call, written lane by lane over plain arrays with no vector language items, so any compiler that can
+compile a loop can compile them.
+
+**Milestone 1 reached at run 7: all six leaf crates compile against `eko-core` with an empty sysroot.**
+`hashbrown` compiles too. Open: `ps-rusty_alloc` (56) and `object` (150); `linker-utils`, `libwild` and `wild`
+are not reached yet.
+
 ## Open after run 2, largest first
+
+(Historical: everything in this list is closed as of run 7.)
 
 (Not yet re-sorted after batch 2; the trait-impl and formatter groups below are mostly closed.)
 

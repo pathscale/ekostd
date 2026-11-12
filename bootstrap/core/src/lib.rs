@@ -17,6 +17,7 @@ extern crate self as core;
 pub mod macros;
 
 pub mod alloc;
+pub mod arch;
 pub mod array;
 pub mod any;
 pub mod borrow;
