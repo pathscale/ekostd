@@ -79,3 +79,27 @@ The measure after the wave: g1's count of stage0 units that stage1 builds.
    real fix and the larger job. The second is quick but stage1 would not be building from the same source text.
 2. Linux for libc-lite: wait for a machine where the parity test can run, or declare it now unverified?
 3. `doacross`: move it, if it turns out to be general?
+
+## 7. Build scripts are supported, not worked around (owner ruling, 2026-11-12)
+
+Reading stage0's build-script output, or declaring a script's flags by hand, is not self-hosting and is rejected.
+`ekod` builds and runs build scripts itself. Three pieces, none large:
+
+1. **`std` for a build script comes from ekostd.** Scripts use a small part of `std`: environment variables, running a
+   command and reading its output, printing a line, reading and writing files, paths. ekostd has all of it (`env`,
+   `command`, `print`, `file`, `fs`, `path`). ekostd provides a `std`-shaped layer over those, covering what the scripts
+   in our build use.
+2. **`ekod` produces a program and runs it.** An entry point plus a direct link with the platform linker
+   (`/usr/bin/ld`, proven for stage0 on 2026-11-12). On macOS there is no startup object to supply: the entry is `main`
+   and the program links the system library. On Linux it is the usual startup object. The driver runs the program with
+   cargo's environment (`OUT_DIR`, `TARGET`, `CARGO_CFG_*`) and reads its `cargo:` lines.
+3. **A stand-in `rustc` that forwards to `ekors`.** Measured on the 24 scripts in `ekod`'s build: every script that
+   calls the compiler takes it from the `RUSTC` environment variable (three also read `RUSTC_WRAPPER`); none hard-codes
+   a path. So the runner sets `RUSTC` to the stand-in, and the stand-in is also first on `PATH`. It must answer
+   `--version` (most scripts), `-vV` (the `version_check`, `autocfg` and `rustc_version` helpers) and compile a small
+   probe file by forwarding to `ekors` (`proc-macro2`, `thiserror`, and `num-traits` through `autocfg`).
+   The full table is `~/code/tmp/karen-owner/w38/logs/rustc-probes.tsv`.
+
+Order: libc-lite, stage1 builds ekostd, then these three. They depend on stage1 compiling ekostd and on nothing else.
+
+Done on 2026-11-12: `anyhow` removed from `opt/machine` (ekopathrs `07b6dbc7`); `ps-st3` 0.6.4 published without crossbeam.
