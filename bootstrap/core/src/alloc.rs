@@ -99,9 +99,6 @@ pub unsafe trait Allocator {
     unsafe fn deallocate(&self, ptr: crate::ptr::NonNull<u8>, layout: Layout);
 }
 
-/// The older name for `LayoutError`.
-pub type LayoutErr = LayoutError;
-
 impl crate::cmp::PartialEq for Layout {
     fn eq(&self, other: &Self) -> bool { self.size == other.size && self.align == other.align }
 }

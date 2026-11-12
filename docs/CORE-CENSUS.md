@@ -75,6 +75,20 @@ compile a loop can compile them.
 `hashbrown` compiles too. Open: `ps-rusty_alloc` (56) and `object` (150); `linker-utils`, `libwild` and `wild`
 are not reached yet.
 
+## Direction change, 2026-11-12: keep `core` minimal, shrink the graph instead
+
+Owner direction: do not grow `core` to cover third-party crates; best effort to limit and prune.
+
+- ps-wild dropped `bitflags` and `bumpalo` (in-house, ps-wild C12). What only they needed was then removed from
+  `eko-core`: `from_str_radix` with `ParseIntError`, `str::split`, `abs_diff`, `Result::unwrap_err` and
+  `alloc::LayoutErr`. Run 8 confirms `ekostd`, `foldhash`, `spin`, `memchr` and `hashbrown` still compile.
+- `object` (150 open) is not to be chased in `core`. It leaves ps-wild's default graph with ELF behind a feature,
+  and `memchr` leaves with it; then `core::arch` shrinks to what `hashbrown` alone calls.
+- `ps-rusty_alloc` (56 open) is ours: change it to use less first, add to `core` only what is unavoidable.
+
+Rule for every later addition: it must be needed by a crate that stays in the graph, and when that crate leaves,
+the addition leaves with it.
+
 ## Open after run 2, largest first
 
 (Historical: everything in this list is closed as of run 7.)

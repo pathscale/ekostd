@@ -53,13 +53,6 @@ impl<T, E> Result<T, E> {
         match self { Ok(value) => value, Err(_) => unsafe { crate::hint::unreachable_unchecked() } }
     }
 
-    pub fn unwrap_err(self) -> E {
-        match self {
-            Ok(_) => crate::panic::panic_nounwind("called `Result::unwrap_err()` on an `Ok` value"),
-            Err(error) => error,
-        }
-    }
-
     pub fn unwrap(self) -> T {
         match self {
             Ok(value) => value,
