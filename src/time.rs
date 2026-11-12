@@ -6,6 +6,8 @@
 
 use core::time::Duration;
 
+use crate::libc_lite as libc;
+
 /// A point on the monotonic clock.
 ///
 /// Monotonic, so it does not move when the system clock is adjusted - which is the property the

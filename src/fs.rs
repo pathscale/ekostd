@@ -16,6 +16,7 @@
 
 use alloc::vec::Vec;
 
+use crate::libc_lite as libc;
 use crate::path::{Path, PathBuf};
 use crate::{checked, Errno};
 

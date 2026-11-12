@@ -59,6 +59,7 @@
 //! reacquires the disposition it was avoiding.
 
 use crate::Errno;
+use crate::libc_lite as libc;
 
 /// The signals a serving process stops on.
 ///

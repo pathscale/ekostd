@@ -30,6 +30,8 @@
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr;
 
+use crate::libc_lite as libc;
+
 /// The alignment `malloc` guarantees on this platform.
 ///
 /// 16 on 64-bit, which covers every type the compiler allocates except the deliberately

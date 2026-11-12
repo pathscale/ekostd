@@ -13,6 +13,7 @@
 use core::ops::{Deref, DerefMut};
 
 use crate::file::{Error, File, Result};
+use crate::libc_lite as libc;
 use crate::Errno;
 
 /// A read-only private mapping.

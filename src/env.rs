@@ -8,6 +8,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::libc_lite as libc;
+
 /// The raw bytes of an environment variable, or `None` if it is unset.
 ///
 /// This is `std::env::var_os`. The name is the same because the semantics are: unset and

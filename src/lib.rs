@@ -52,6 +52,8 @@
 // ---------------------------------------------------------------------------------------------
 extern crate alloc;
 
+use crate::libc_lite as libc;
+
 pub mod channel;
 pub mod command;
 pub mod compat;
@@ -62,6 +64,7 @@ pub mod file;
 pub mod fs;
 // `heap`, not `alloc`: this crate says `extern crate alloc;` and the two names collide.
 pub mod heap;
+pub mod libc_lite;
 pub mod math;
 pub mod mmap;
 pub mod path;

@@ -1,5 +1,7 @@
 //! The process: its id, and how many threads the machine will usefully run.
 
+use crate::libc_lite as libc;
+
 /// This process's id.
 pub fn id() -> u32 {
     (unsafe { libc::getpid() }) as u32

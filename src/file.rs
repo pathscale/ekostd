@@ -13,6 +13,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
 
+use crate::libc_lite as libc;
 use crate::path::Path;
 use crate::Errno;
 

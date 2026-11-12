@@ -22,6 +22,7 @@
 use alloc::boxed::Box;
 
 use crate::Errno;
+use crate::libc_lite as libc;
 
 /// Run `f` on a new thread with `stack_bytes` of stack, detached.
 ///

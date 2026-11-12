@@ -23,8 +23,15 @@ path = "src/lib.rs"
 # have to carry. It does not have to carry `libc` - the platform already has it. On macOS this is
 # not even a compromise, because `std` itself goes through libSystem: Apple does not provide a
 # stable syscall ABI.
-libc = { version = "^0.2.189", default-features = false }
 serde = { version = "^1.0.229", default-features = false, optional = true }
+
+# Only where `src/libc_lite` has no checked declarations yet.
+[target.'cfg(not(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64"))))'.dependencies]
+libc = { version = "^0.2.189", default-features = false }
+
+# The parity tests compare `libc_lite` with this crate. Nothing else may use it.
+[dev-dependencies]
+libc = { version = "^0.2.189", default-features = false }
 
 [features]
 # Off by default: a crate that has no serialiser should not gain serde through the wrapper.

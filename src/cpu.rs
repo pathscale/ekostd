@@ -19,6 +19,8 @@
 //! loudly: it silently tells the backend a feature is present that is not, and the first symptom
 //! is `SIGILL` in generated code. That is why each block names its source.
 
+use crate::libc_lite as libc;
+
 /// What the host aarch64 processor supports, of the features the backend asks about.
 ///
 /// Fields, not methods, because every one of them costs a syscall on Darwin and the callers want

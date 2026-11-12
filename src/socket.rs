@@ -29,6 +29,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::libc_lite as libc;
 use crate::{checked, Errno};
 
 /// An open file descriptor, closed when dropped.

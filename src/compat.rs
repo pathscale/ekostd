@@ -67,6 +67,7 @@ pub mod env {
 /// `std::fs`, as far as callers have needed it.
 pub mod fs {
     use crate::file::{Error, Result};
+    use crate::libc_lite as libc;
     use crate::path::{Path, PathBuf};
     use crate::Errno;
 

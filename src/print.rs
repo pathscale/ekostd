@@ -13,6 +13,8 @@
 
 use alloc::vec::Vec;
 
+use crate::libc_lite as libc;
+
 struct FdBuf(Vec<u8>);
 
 impl core::fmt::Write for FdBuf {

@@ -40,6 +40,7 @@
 // to find them at all.
 
 use crate::Errno;
+use crate::libc_lite as libc;
 
 /// The daemon's end of the readiness pipe.
 ///

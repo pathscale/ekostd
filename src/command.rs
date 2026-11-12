@@ -12,6 +12,7 @@
 use alloc::vec::Vec;
 use core::time::Duration;
 
+use crate::libc_lite as libc;
 use crate::path::Path;
 
 /// What a finished program left behind.
