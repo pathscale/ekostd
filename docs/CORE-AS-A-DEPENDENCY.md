@@ -5,7 +5,7 @@ Status: proposal, 2026-11-12. Nothing here is built yet. Owner decisions needed 
 ## 1. What is true today
 
 - `bootstrap/core`, `bootstrap/alloc` and `bootstrap/compiler_builtins` are bare `src/` directories in this repository.
-  They have no `Cargo.toml` and are published nowhere. Only `bootstrap/build.ts` knows them, through `bootstrap/sources.json`.
+  They have no `Cargo.toml` and are published nowhere. Nothing builds them: the hand-rolled harness that did (`bootstrap/build.ts`, `bootstrap/sources.json`) was removed on 2026-11-12.
 - The in-house binaries do not use them. `ekod`, `ekors`, `pathdb`, `karen` and `ps-wild` are built by cargo with stable
   rustc, and rustc silently supplies its own prebuilt `core` from its sysroot. Nothing in any manifest says so.
 - The bootstrap `core` is about 5,800 lines, a minimal subset. It is enough for the five bootstrap units
@@ -30,7 +30,7 @@ Publish three packages from this repository, on the same registry the family alr
 | `eko-compiler-builtins` | `compiler_builtins` | `bootstrap/compiler_builtins` |
 
 The package names differ from the library names because a registry will not take `core`, `alloc` or `std` as package
-names (to be confirmed at first publish). Each gets a `Cargo.toml`; `sources.json` is then generated from cargo
+names (to be confirmed at first publish). Each gets a `Cargo.toml`; the unit list then comes from cargo
 metadata instead of being written by hand.
 
 ## 4. How a build gets it
@@ -47,7 +47,7 @@ cannot do that alone. So the dependency is declared once per workspace and the b
   builds the three packages first; runs the real build with an explicit `--target` so host tools (build scripts,
   proc macros) keep the host compiler's own library and only target units are affected; and gives every target unit
   the built `core` and an otherwise empty library root, so rustc's own `core` cannot be picked up. It needs
-  `RUSTC_BOOTSTRAP=1`, as `bootstrap/build.ts` already uses.
+  `RUSTC_BOOTSTRAP=1`.
 - **The default.** The driver refuses to build a target unit if rustc's own `core` would be used. Opting back in is
   an explicit, visible flag.
 
@@ -77,7 +77,7 @@ default `core`, and count what is missing, per item and per crate. That number i
 ## 7. Order of work
 
 1. Census (section 5): one wave, read-only, four binaries.
-2. `Cargo.toml` for the three packages; `sources.json` generated.
+2. `Cargo.toml` for the three packages.
 3. EKO driver adds them as language roots to every unit; rerun the Karen build attempt.
 4. rustc stage0 driver with the refusal-by-default, proven on `ps-wild` first.
 5. Publish.
