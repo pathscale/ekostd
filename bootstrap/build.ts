@@ -4,9 +4,10 @@ import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 type Unit = {
-  key: string; repository: "ekostd" | "ekopathrs"; root: string;
+  key: string; repository: string; root: string;
   package: string; version: string; crate: string; edition: string;
   language: boolean; dependencies: string[];
+  features?: string[]; extern_names?: Record<string, string>; build_script?: string;
 };
 type Manifest = {
   schema: string; target: string; panic: string; cfg: string[]; units: Unit[];
@@ -29,7 +30,7 @@ for (let i = 2; i < process.argv.length; i++) {
     options.set(name, "true");
     continue;
   }
-  if (!["--out", "--rustc", "--ekopathrs", "--ekors", "--socket", "--ekod-bin", "--timeout-ms"].includes(name)
+  if (!["--out", "--rustc", "--ekopathrs", "--ekors", "--socket", "--ekod-bin", "--timeout-ms", "--sources"].includes(name)
       || options.has(name) || !process.argv[i + 1] || process.argv[i + 1].startsWith("--")) {
     throw new Error(`invalid or duplicate option: ${name}`);
   }
@@ -43,7 +44,8 @@ const out = resolve(outOption);
 if (out === repo || out.startsWith(repo + sep)) throw new Error("--out must be outside the source repository");
 const compilerRepo = await realpath(options.get("--ekopathrs") ?? resolve(repo, "../ekopathrs"));
 if (out === compilerRepo || out.startsWith(compilerRepo + sep)) throw new Error("--out must be outside ekopathrs");
-const manifestPath = join(repo, "bootstrap/sources.json");
+const sourcesOption = options.get("--sources");
+const manifestPath = sourcesOption ? resolve(sourcesOption) : join(repo, "bootstrap/sources.json");
 const manifestBytes = await readFile(manifestPath);
 const m: Manifest = JSON.parse(manifestBytes.toString("utf8"));
 if (m.schema !== "ekostd.bootstrap/1" || m.panic !== "abort"
@@ -52,15 +54,24 @@ if (m.schema !== "ekostd.bootstrap/1" || m.panic !== "abort"
   throw new Error("invalid bootstrap configuration");
 }
 const units = new Map<string, Unit>();
+const identifier = /^[a-z_][a-z0-9_]*$/;
 for (const u of m.units) {
-  if (!u || typeof u.key !== "string" || !/^[a-z_][a-z0-9_]*$/.test(u.key)
-      || units.has(u.key) || !["ekostd", "ekopathrs"].includes(u.repository)
-      || typeof u.root !== "string" || isAbsolute(u.root) || u.root.split(/[\\/]/).includes("..")
-      || !u.root.endsWith("/lib.rs") || !/^[a-z_][a-z0-9_]*$/.test(u.crate)
+  if (!u || typeof u.key !== "string" || !identifier.test(u.key)
+      || units.has(u.key) || typeof u.repository !== "string" || !/^[a-z][a-z0-9_-]*$/.test(u.repository)
+      || typeof u.root !== "string" || u.root.split(/[\\/]/).includes("..")
+      || (isAbsolute(u.root) ? !u.root.endsWith(".rs")
+        : !u.root.endsWith("/lib.rs") || !["ekostd", "ekopathrs"].includes(u.repository))
+      || !identifier.test(u.crate)
       || typeof u.package !== "string" || typeof u.version !== "string"
-      || !["2021", "2024"].includes(u.edition) || typeof u.language !== "boolean"
+      || !["2015", "2018", "2021", "2024"].includes(u.edition) || typeof u.language !== "boolean"
       || !Array.isArray(u.dependencies) || new Set(u.dependencies).size !== u.dependencies.length
-      || u.dependencies.some(d => !units.has(d))) throw new Error(`invalid dependency-first unit: ${u?.key}`);
+      || u.dependencies.some(d => !units.has(d))
+      || (u.features !== undefined && (!Array.isArray(u.features) || u.features.some(f => typeof f !== "string")))
+      || (u.extern_names !== undefined && (typeof u.extern_names !== "object" || u.extern_names === null
+        || Object.entries(u.extern_names).some(([d, n]) => !u.dependencies.includes(d) || !identifier.test(n))))
+      || (u.build_script !== undefined && (typeof u.build_script !== "string" || !isAbsolute(u.build_script)))) {
+    throw new Error(`invalid dependency-first unit: ${u?.key}`);
+  }
   units.set(u.key, u);
 }
 for (const [key, root] of [["core", "bootstrap/core/src/lib.rs"], ["alloc", "bootstrap/alloc/src/lib.rs"]]) {
@@ -305,7 +316,8 @@ async function waitForSocket(path: string): Promise<void> {
   }
   throw new Error(`ekod socket did not appear: ${path}`);
 }
-const artifact = (u: Unit) => join(stage0, `lib${u.crate}.rlib`);
+const artifact = (u: Unit) => join(stage0, `lib${u.key}.rlib`);
+const externName = (u: Unit, d: string) => u.extern_names?.[d] ?? units.get(d)!.crate;
 const stage0Promises = new Map<string, Promise<Attempt>>();
 for (const u of m.units) {
   const promise = (async (): Promise<Attempt> => {
@@ -314,7 +326,8 @@ for (const u of m.units) {
       "--edition", u.edition, "--target", m.target, "-Cpanic=abort", "-Cdebug-assertions=no",
       "-Coverflow-checks=no", "--sysroot", sysroot, "-L", `dependency=${stage0}`,
       ...m.cfg.flatMap(c => ["--cfg", c]),
-      ...u.dependencies.flatMap(d => ["--extern", `${units.get(d)!.crate}=${artifact(units.get(d)!)}`]),
+      ...(u.features ?? []).flatMap(f => ["--cfg", `feature="${f}"`]),
+      ...u.dependencies.flatMap(d => ["--extern", `${externName(u, d)}=${artifact(units.get(d)!)}`]),
       "-o", artifact(u)];
     const blocked = dependencies.filter(a => a.status !== "rlib-produced").map(a => a.unit);
     const a: Attempt = { stage: "stage0", unit: u.key, argv,
@@ -350,11 +363,11 @@ for (const root of stage1Roots) {
       package_namespace: u.repository,
       package_name: u.package, package_version: u.version, crate_name: u.crate,
       logical_target: u.crate, logical_root: u.root, kind: "library", role: "target",
-      target_triple: m.target, edition: u.edition, panic_strategy: m.panic, features: [], cfg: m.cfg,
+      target_triple: m.target, edition: u.edition, panic_strategy: m.panic, features: u.features ?? [], cfg: m.cfg,
     }, crate_root: roots.get(u.key), generator: "none",
     semantics: { debug_assertions: false, overflow_checks: false, rustflags: [] } })),
     edges: selected.filter(u => !u.language).flatMap(u => u.dependencies.filter(d => !units.get(d)!.language)
-      .map(d => ({ from: u.key, extern_name: units.get(d)!.crate, to: d, kind: "rust", role: "target" }))),
+      .map(d => ({ from: u.key, extern_name: externName(u, d), to: d, kind: "rust", role: "target" }))),
     language_roots: language.map(u => ({ crate: u.crate, crate_root: roots.get(u.key),
       edition: u.edition, panic_strategy: m.panic, target_triple: m.target, cfg: m.cfg })),
   };
