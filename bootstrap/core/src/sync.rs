@@ -121,13 +121,13 @@ macro_rules! atomic_fetch_max {
 atomic_fetch_max!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64);
 
 macro_rules! atomic_value_traits {
-    ($($name:path, $t:ty);*) => {$(
+    ($($name:path, $t:ty, $zero:expr);*) => {$(
         impl $name {
             /// Ownership needs no atomic operation.
             pub fn into_inner(self) -> $t { self.load(atomic::Ordering::Relaxed) }
         }
         impl crate::default::Default for $name {
-            fn default() -> Self { Self::new(<$t as crate::default::Default>::default()) }
+            fn default() -> Self { <$name>::new($zero) }
         }
         impl crate::fmt::Debug for $name {
             fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
@@ -136,4 +136,4 @@ macro_rules! atomic_value_traits {
         }
     )*};
 }
-atomic_value_traits!(atomic::AtomicBool, bool; atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64);
+atomic_value_traits!(atomic::AtomicU8, u8, 0; atomic::AtomicU16, u16, 0; atomic::AtomicU32, u32, 0; atomic::AtomicU64, u64, 0; atomic::AtomicUsize, usize, 0; atomic::AtomicIsize, isize, 0; atomic::AtomicI32, i32, 0; atomic::AtomicI64, i64, 0; atomic::AtomicBool, bool, false);

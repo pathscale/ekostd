@@ -118,11 +118,6 @@ macro_rules! scalar_binary_ops {
             #[inline]
             fn div(self, rhs: Self) -> Self { self / rhs }
         }
-        impl Rem for $ty {
-            type Output = Self;
-            #[inline]
-            fn rem(self, rhs: Self) -> Self { self % rhs }
-        }
         impl AddAssign for $ty {
             #[inline]
             fn add_assign(&mut self, rhs: Self) { *self += rhs; }
@@ -138,10 +133,6 @@ macro_rules! scalar_binary_ops {
         impl DivAssign for $ty {
             #[inline]
             fn div_assign(&mut self, rhs: Self) { *self /= rhs; }
-        }
-        impl RemAssign for $ty {
-            #[inline]
-            fn rem_assign(&mut self, rhs: Self) { *self %= rhs; }
         }
     )* };
 }
@@ -196,7 +187,23 @@ macro_rules! scalar_neg_ops {
     )* };
 }
 
+/// The remainder operators, on the integers only: no crate in the graph takes a floating-point remainder.
+macro_rules! scalar_rem_ops {
+    ($($ty:ty),* $(,)?) => { $(
+        impl Rem for $ty {
+            type Output = Self;
+            #[inline]
+            fn rem(self, rhs: Self) -> Self { self % rhs }
+        }
+        impl RemAssign for $ty {
+            #[inline]
+            fn rem_assign(&mut self, rhs: Self) { *self %= rhs; }
+        }
+    )* };
+}
+
 scalar_binary_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
+scalar_rem_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_bit_assign_ops!(bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_shift_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_neg_ops!(i8, i16, i32, i64, i128, isize, f32, f64);
@@ -224,18 +231,18 @@ macro_rules! mixed_shift_ops {
         }
     )*};
 }
-mixed_shift_ops!(u8: u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(u16: u8 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(u32: u8 u16 u64 u128 usize i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(u64: u8 u16 u32 u128 usize i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(u128: u8 u16 u32 u64 usize i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(usize: u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 isize);
-mixed_shift_ops!(i8: u8 u16 u32 u64 u128 usize i16 i32 i64 i128 isize);
-mixed_shift_ops!(i16: u8 u16 u32 u64 u128 usize i8 i32 i64 i128 isize);
-mixed_shift_ops!(i32: u8 u16 u32 u64 u128 usize i8 i16 i64 i128 isize);
-mixed_shift_ops!(i64: u8 u16 u32 u64 u128 usize i8 i16 i32 i128 isize);
-mixed_shift_ops!(i128: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 isize);
-mixed_shift_ops!(isize: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128);
+mixed_shift_ops!(u8: u16 u32 u64 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(u16: u8 u32 u64 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(u32: u8 u16 u64 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(u64: u8 u16 u32 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(u128: u8 u16 u32 u64 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(usize: u8 u16 u32 u64 i8 i16 i32 i64 isize);
+mixed_shift_ops!(i8: u8 u16 u32 u64 usize i16 i32 i64 isize);
+mixed_shift_ops!(i16: u8 u16 u32 u64 usize i8 i32 i64 isize);
+mixed_shift_ops!(i32: u8 u16 u32 u64 usize i8 i16 i64 isize);
+mixed_shift_ops!(i64: u8 u16 u32 u64 usize i8 i16 i32 isize);
+mixed_shift_ops!(i128: u8 u16 u32 u64 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(isize: u8 u16 u32 u64 usize i8 i16 i32 i64);
 
 /// The operators with a reference on either side: they read the value and apply the plain operator.
 macro_rules! scalar_ref_ops {
@@ -268,4 +275,4 @@ macro_rules! scalar_ref_ops {
         }
     )* };
 }
-scalar_ref_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
+scalar_ref_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);

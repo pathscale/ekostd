@@ -179,6 +179,13 @@ and returned 42 as the fixture says. Planted defect: the same link through `/usr
 `--ld-path` linker is the one that ran. This is one fixture on one host, debug profile; the linker's test
 suite has not been run on an `eko-core` build.
 
+## Run 12, 2026-11-13: ekod on `eko-core`
+
+ekod admits, analyses and verifies `eko-core` and reaches its backend; it publishes no object yet. The blockers
+are compiler work and are listed in `ekopathrs/docs/TODO.md`. Two things left `eko-core` because ekod refuses
+them and nothing in the graph uses them: `Rem` and `RemAssign` for `f32` and `f64`, and shifts by a 128-bit
+amount. The census still exits 0 without them. `Default` for the atomics takes its zero as a macro argument.
+
 ## Open after run 2, largest first
 
 (Historical: everything in this list is closed as of run 7.)
