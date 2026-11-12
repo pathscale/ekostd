@@ -102,7 +102,7 @@ the addition leaves with it.
 
 After ps-wild dropped `object` (and with it `memchr`), the graph is `ekostd`, `foldhash`, `spin`, `hashbrown`,
 `ps-rusty_alloc`, `linker-utils`, `libwild`, `wild`. `cargo check -p wild` against `eko-core` with an empty
-sysroot now exits 0 for all eight. It is a check: nothing was generated or linked.
+sysroot now exits 0 for all eight. Run 10 is a check; run 11 below builds and links.
 
 | Step | linker-utils | libwild | wild |
 |---|---|---|---|
@@ -166,7 +166,18 @@ Open, found while doing this:
 - `core::arch::aarch64` still carries what only `memchr` called; prune to what `hashbrown` uses.
 - `mem::Alignment` and `Layout::from_size_alignment_unchecked` exist because this rustc's
   `global_allocator` expansion names them. Another compiler's expansion may not.
-- Nothing has been generated or linked against these packages. `cargo build` is the next measurement.
+
+## Run 11, 2026-11-13: it builds, links and runs
+
+`cargo build -p wild` with the same flags exits 0: rustc generated code for all eight packages on `eko-core`,
+`eko-compiler-builtins` and `eko-alloc`, and the system linker produced a `wild` executable. One change was
+needed: `eko-alloc` declares the allocator entry points with `rustc_std_internal_symbol`, the mangling under
+which the `global_allocator` expansion defines them.
+
+That `wild` then linked `libwild/tests/fixtures/macho/rust-trivial` (`cc --ld-path=<wild>`), and the result ran
+and returned 42 as the fixture says. Planted defect: the same link through `/usr/bin/false` fails, so the
+`--ld-path` linker is the one that ran. This is one fixture on one host, debug profile; the linker's test
+suite has not been run on an `eko-core` build.
 
 ## Open after run 2, largest first
 
