@@ -117,16 +117,6 @@ macro_rules! unsigned {
                 }
                 n
             }
-            /// Reverses the byte order.
-            pub const fn swap_bytes(self) -> Self {
-                let (mut rest, mut out, mut i) = (self, 0 as $t, 0);
-                while i < $bits / 8 {
-                    out = out.wrapping_shl(8) | (rest & (0xff as $t));
-                    rest = rest.wrapping_shr(8);
-                    i += 1;
-                }
-                out
-            }
             /// Division rounded towards positive infinity.
             pub const fn div_ceil(self, rhs: Self) -> Self {
                 let quotient = self / rhs;
@@ -183,6 +173,16 @@ macro_rules! bytes {
                 while i < $n { value |= (bytes[i] as $u) << ((i * 8) as $u); i += 1; }
                 value as Self
             }
+            /// Reverses the byte order.
+            pub const fn swap_bytes(self) -> Self {
+                let bytes = self.to_le_bytes();
+                let mut out = [0; $n];
+                let mut i = 0;
+                while i < $n { out[i] = bytes[$n - 1 - i]; i += 1; }
+                Self::from_le_bytes(out)
+            }
+            pub const fn to_be_bytes(self) -> [u8; $n] { self.swap_bytes().to_le_bytes() }
+            pub const fn from_be_bytes(bytes: [u8; $n]) -> Self { Self::from_le_bytes(bytes).swap_bytes() }
             pub const fn from_ne_bytes(bytes: [u8; $n]) -> Self {
                 Self::from_le_bytes(bytes)
             }
@@ -254,3 +254,58 @@ impl u8 {
     pub const fn to_ascii_lowercase(&self) -> u8 { if *self >= b'A' && *self <= b'Z' { *self + 32 } else { *self } }
     pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool { self.to_ascii_lowercase() == other.to_ascii_lowercase() }
 }
+
+impl bool {
+    /// `Some(value)` when true.
+    pub fn then_some<T>(self, value: T) -> Option<T> { if self { Some(value) } else { None } }
+    /// `Some(f())` when true; `f` is not called otherwise.
+    pub fn then<T, F: crate::ops::FnOnce() -> T>(self, f: F) -> Option<T> { if self { Some(f()) } else { None } }
+}
+
+impl u8 {
+    pub const fn is_ascii_digit(&self) -> bool { *self >= b'0' && *self <= b'9' }
+}
+
+macro_rules! nonzero_traits {
+    ($($name:ident, $t:ty);*) => {$(
+        impl $name {
+            /// The smallest value: one.
+            pub const MIN: Self = Self(1);
+            /// The sum, held at the largest value when it would not fit.
+            pub const fn saturating_add(self, other: $t) -> Self { Self(self.0.saturating_add(other)) }
+        }
+        impl crate::marker::Copy for $name {}
+        impl crate::clone::Clone for $name { fn clone(&self) -> Self { *self } }
+        impl crate::cmp::PartialEq for $name { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+        impl crate::cmp::Eq for $name {}
+        impl crate::cmp::PartialOrd for $name {
+            fn partial_cmp(&self, other: &Self) -> Option<crate::cmp::Ordering> { self.0.partial_cmp(&other.0) }
+        }
+        impl crate::cmp::Ord for $name {
+            fn cmp(&self, other: &Self) -> crate::cmp::Ordering { self.0.cmp(&other.0) }
+        }
+        impl crate::hash::Hash for $name {
+            fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) }
+        }
+        impl crate::fmt::Debug for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Debug::fmt(&self.0, f) }
+        }
+        impl crate::fmt::Display for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Display::fmt(&self.0, f) }
+        }
+        impl crate::fmt::LowerHex for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::LowerHex::fmt(&self.0, f) }
+        }
+        impl crate::convert::From<$name> for $t { fn from(value: $name) -> $t { value.0 } }
+        impl crate::convert::TryFrom<$t> for $name {
+            type Error = crate::convert::TryFromIntError;
+            fn try_from(value: $t) -> crate::result::Result<Self, Self::Error> {
+                match Self::new(value) {
+                    Some(nonzero) => crate::result::Result::Ok(nonzero),
+                    None => crate::result::Result::Err(crate::convert::TryFromIntError::new()),
+                }
+            }
+        }
+    )*};
+}
+nonzero_traits!(NonZeroU8, u8; NonZeroU16, u16; NonZeroU32, u32; NonZeroU64, u64; NonZeroU128, u128; NonZeroUsize, usize);

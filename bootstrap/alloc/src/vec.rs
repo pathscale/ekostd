@@ -8,23 +8,25 @@ pub struct Vec<T> {
     pointer: NonNull<T>,
     length: usize,
     capacity: usize,
+    /// The vector owns its elements and drops them.
+    _owns: core::marker::PhantomData<T>,
 }
 
 impl<T> Vec<T> {
     pub const fn new() -> Self {
-        Self { pointer: NonNull::dangling(), length: 0, capacity: 0 }
+        Self { pointer: NonNull::dangling(), length: 0, capacity: 0, _owns: core::marker::PhantomData }
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
         if mem::size_of::<T>() == 0 {
-            return Self { pointer: NonNull::dangling(), length: 0, capacity: usize::MAX };
+            return Self { pointer: NonNull::dangling(), length: 0, capacity: usize::MAX, _owns: core::marker::PhantomData };
         }
         if capacity == 0 {
             return Self::new();
         }
         let layout = Layout::array::<T>(capacity).expect("capacity overflow");
         let pointer = unsafe { alloc::alloc(layout).cast::<T>() };
-        Self { pointer: unsafe { NonNull::new_unchecked(pointer) }, length: 0, capacity }
+        Self { pointer: unsafe { NonNull::new_unchecked(pointer) }, length: 0, capacity, _owns: core::marker::PhantomData }
     }
 
     pub fn len(&self) -> usize { self.length }
@@ -46,7 +48,7 @@ impl<T> Vec<T> {
     }
 
     pub unsafe fn from_raw_parts(pointer: *mut T, length: usize, capacity: usize) -> Self {
-        Self { pointer: unsafe { NonNull::new_unchecked(pointer) }, length, capacity }
+        Self { pointer: unsafe { NonNull::new_unchecked(pointer) }, length, capacity, _owns: core::marker::PhantomData }
     }
 
     pub fn push(&mut self, value: T) {
@@ -249,7 +251,8 @@ impl<T> Default for Vec<T> {
     fn default() -> Self { Self::new() }
 }
 
-impl<T> Drop for Vec<T> {
+// SAFETY: The elements are only dropped, never read; `_owns` tells the drop checker about that drop.
+unsafe impl<#[may_dangle] T> Drop for Vec<T> {
     fn drop(&mut self) {
         self.clear();
         if mem::size_of::<T>() != 0 && self.capacity != 0 {
@@ -318,8 +321,17 @@ impl<T> Iterator for IntoIter<T> {
 }
 impl<T> DoubleEndedIterator for IntoIter<T> { fn next_back(&mut self)->Option<T> { if self.front==self.back{return None} self.back-=1; Some(unsafe{self.vec.pointer.as_ptr().add(self.back).read()}) } }
 impl<T> ExactSizeIterator for IntoIter<T> {}
-impl<T> Drop for IntoIter<T> { fn drop(&mut self) { unsafe { let p=self.vec.pointer.as_ptr(); for i in self.front..self.back { ptr::drop_in_place(p.add(i)); } self.vec.length=0; } } }
+// SAFETY: As for `Vec`: the remaining elements are only dropped.
+unsafe impl<#[may_dangle] T> Drop for IntoIter<T> { fn drop(&mut self) { unsafe { let p=self.vec.pointer.as_ptr(); for i in self.front..self.back { ptr::drop_in_place(p.add(i)); } self.vec.length=0; } } }
 
 impl<T: core::hash::Hash> core::hash::Hash for Vec<T> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) { self.as_slice().hash(state) }
 }
+
+// SAFETY: A vector owns its elements; the pointer is not shared with anything else.
+unsafe impl<T: Send> Send for Vec<T> {}
+// SAFETY: Shared access to a vector is shared access to its elements.
+unsafe impl<T: Sync> Sync for Vec<T> {}
+impl<T> AsMut<Vec<T>> for Vec<T> { fn as_mut(&mut self) -> &mut Vec<T> { self } }
+impl<T> AsRef<Vec<T>> for Vec<T> { fn as_ref(&self) -> &Vec<T> { self } }
+impl<'a, T: Copy + 'a> core::iter::Extend<&'a T> for Vec<T> { fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) { for item in iter { self.push(*item); } } }

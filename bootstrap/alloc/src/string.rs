@@ -151,3 +151,40 @@ impl core::ops::AddAssign<&str> for String { fn add_assign(&mut self,s:&str){sel
 impl core::iter::FromIterator<char> for String { fn from_iter<I:IntoIterator<Item=char>>(iter:I)->Self { let mut s=Self::new(); for c in iter{s.push(c)} s } }
 impl<'a> core::iter::FromIterator<&'a str> for String { fn from_iter<I:IntoIterator<Item=&'a str>>(iter:I)->Self { let mut s=Self::new(); for p in iter{s.push_str(p)} s } }
 impl core::iter::FromIterator<String> for String { fn from_iter<I:IntoIterator<Item=String>>(iter:I)->Self { let mut s=Self::new(); for p in iter{s.push_str(p.as_str())} s } }
+
+impl String {
+    /// The text of `bytes`, with each run that is not UTF-8 replaced by U+FFFD. Borrows when
+    /// nothing had to be replaced.
+    pub fn from_utf8_lossy(bytes: &[u8]) -> crate::borrow::Cow<'_, str> {
+        let mut error = match core::str::from_utf8(bytes) {
+            Ok(text) => return crate::borrow::Cow::Borrowed(text),
+            Err(error) => error,
+        };
+        let mut rest = bytes;
+        let mut out = String::with_capacity(bytes.len());
+        loop {
+            let valid = error.valid_up_to();
+            // SAFETY: The decoder reported this prefix as valid.
+            out.push_str(unsafe { core::str::from_utf8_unchecked(&rest[..valid]) });
+            out.push('\u{fffd}');
+            // No length means the input ends inside a character: all that is left is invalid.
+            let invalid = match error.error_len() {
+                Some(len) => len,
+                None => rest.len() - valid,
+            };
+            rest = &rest[valid + invalid..];
+            match core::str::from_utf8(rest) {
+                Ok(text) => {
+                    out.push_str(text);
+                    return crate::borrow::Cow::Owned(out);
+                }
+                Err(next) => error = next,
+            }
+        }
+    }
+}
+
+impl PartialEq<str> for String { fn eq(&self, other: &str) -> bool { self.as_str() == other } }
+impl PartialEq<&str> for String { fn eq(&self, other: &&str) -> bool { self.as_str() == *other } }
+impl PartialEq<String> for str { fn eq(&self, other: &String) -> bool { self == other.as_str() } }
+impl PartialEq<String> for &str { fn eq(&self, other: &String) -> bool { *self == other.as_str() } }

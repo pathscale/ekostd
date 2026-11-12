@@ -236,3 +236,36 @@ mixed_shift_ops!(i32: u8 u16 u32 u64 u128 usize i8 i16 i64 i128 isize);
 mixed_shift_ops!(i64: u8 u16 u32 u64 u128 usize i8 i16 i32 i128 isize);
 mixed_shift_ops!(i128: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 isize);
 mixed_shift_ops!(isize: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128);
+
+/// The operators with a reference on either side: they read the value and apply the plain operator.
+macro_rules! scalar_ref_ops {
+    ($($ty:ty),* $(,)?) => { $(
+        scalar_ref_ops!(@binary $ty, Add add, Sub sub, Mul mul, Div div, Rem rem);
+        scalar_ref_ops!(@assign $ty, AddAssign add_assign, SubAssign sub_assign, MulAssign mul_assign,
+            DivAssign div_assign, RemAssign rem_assign);
+    )* };
+    (@binary $ty:ty, $($op:ident $method:ident),*) => { $(
+        impl $op<&$ty> for $ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: &$ty) -> $ty { $op::$method(self, *rhs) }
+        }
+        impl $op<$ty> for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: $ty) -> $ty { $op::$method(*self, rhs) }
+        }
+        impl $op<&$ty> for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: &$ty) -> $ty { $op::$method(*self, *rhs) }
+        }
+    )* };
+    (@assign $ty:ty, $($op:ident $method:ident),*) => { $(
+        impl $op<&$ty> for $ty {
+            #[inline]
+            fn $method(&mut self, rhs: &$ty) { $op::$method(self, *rhs) }
+        }
+    )* };
+}
+scalar_ref_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);

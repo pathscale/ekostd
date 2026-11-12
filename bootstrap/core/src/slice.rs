@@ -708,6 +708,125 @@ impl<T> [T] {
         Err(left)
     }
 
+    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    where
+        F: crate::ops::FnMut(&T) -> B,
+        B: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
+    }
+
+    /// The index of the first element pred rejects, for a slice whose accepted elements all come first.
+    pub fn partition_point<P>(&self, mut pred: P) -> usize
+    where
+        P: crate::ops::FnMut(&T) -> bool,
+    {
+        let (mut left, mut right) = (0, self.len());
+        while left < right {
+            let mid = left + (right - left) / 2;
+            if pred(unsafe { self.get_unchecked(mid) }) { left = mid + 1; } else { right = mid; }
+        }
+        left
+    }
+
+    /// Every run of size neighbouring elements, each one element further on than the last.
+    pub fn windows(&self, size: usize) -> Windows<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        Windows { rest: self, size }
+    }
+
+    pub fn sort_by_key<K, F>(&mut self, mut f: F)
+    where
+        F: crate::ops::FnMut(&T) -> K,
+        K: Ord,
+    {
+        self.sort_by(|a, b| f(a).cmp(&f(b)));
+    }
+
+    pub fn sort_unstable_by_key<K, F>(&mut self, f: F)
+    where
+        F: crate::ops::FnMut(&T) -> K,
+        K: Ord,
+    {
+        self.sort_by_key(f);
+    }
+
+    /// What follows `prefix`, when the slice starts with it.
+    pub fn strip_prefix(&self, prefix: &[T]) -> Option<&[T]>
+    where
+        T: PartialEq,
+    {
+        if self.starts_with(prefix) { Some(&self[prefix.len()..]) } else { None }
+    }
+
+    /// What precedes `suffix`, when the slice ends with it.
+    pub fn strip_suffix(&self, suffix: &[T]) -> Option<&[T]>
+    where
+        T: PartialEq,
+    {
+        if self.ends_with(suffix) { Some(&self[..self.len() - suffix.len()]) } else { None }
+    }
+
+    /// Reverses the order of the elements in place.
+    pub fn reverse(&mut self) {
+        let len = self.len();
+        let mut i = 0;
+        while i < len / 2 {
+            self.swap(i, len - 1 - i);
+            i += 1;
+        }
+    }
+
+    /// Consecutive pieces of `size` elements; the last one holds what is left and may be shorter.
+    pub fn chunks(&self, size: usize) -> Chunks<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        Chunks { rest: self, size }
+    }
+
+    /// Consecutive pieces of exactly `size` elements; what does not fill a piece is the remainder.
+    pub fn chunks_exact(&self, size: usize) -> ChunksExact<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        let whole = self.len() - self.len() % size;
+        let (rest, remainder) = self.split_at(whole);
+        ChunksExact { rest, remainder, size }
+    }
+
+    /// As `chunks_exact`, lending each piece mutably. The remainder is not visited.
+    pub fn chunks_exact_mut(&mut self, size: usize) -> ChunksExactMut<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        let whole = self.len() - self.len() % size;
+        ChunksExactMut { rest: self.split_at_mut(whole).0, size }
+    }
+
+    /// Cuts the part `range` names off a slice held by reference and returns it; the reference
+    /// keeps the other part. `None`, changing nothing, when `range` reaches past the end.
+    pub fn split_off_mut<'a, R: OneSidedRange>(self: &mut &'a mut Self, range: R) -> Option<&'a mut [T]> {
+        let (front, at) = range.cut();
+        if at > self.len() {
+            return None;
+        }
+        let whole = crate::mem::replace(self, &mut []);
+        let (head, tail) = whole.split_at_mut(at);
+        if front {
+            *self = tail;
+            Some(head)
+        } else {
+            *self = head;
+            Some(tail)
+        }
+    }
+
+    /// Cuts the first element off a slice held by reference and returns it.
+    pub fn split_off_first_mut<'a>(self: &mut &'a mut Self) -> Option<&'a mut T> {
+        if self.is_empty() {
+            return None;
+        }
+        let whole = crate::mem::replace(self, &mut []);
+        let (head, tail) = whole.split_at_mut(1);
+        *self = tail;
+        Some(&mut head[0])
+    }
+
     pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: crate::ops::FnMut(&T, &T) -> Ordering,
@@ -797,4 +916,138 @@ where
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         IndexMut::index_mut(self as &mut [T], index)
     }
+}
+
+pub struct Windows<'a, T: 'a> {
+    rest: &'a [T],
+    size: usize,
+}
+
+impl<'a, T> Iterator for Windows<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.size > self.rest.len() {
+            return None;
+        }
+        let window = &self.rest[..self.size];
+        self.rest = &self.rest[1..];
+        Some(window)
+    }
+}
+
+impl<T> crate::default::Default for &[T] {
+    fn default() -> Self { &[] }
+}
+
+impl<T> crate::default::Default for &mut [T] {
+    fn default() -> Self { &mut [] }
+}
+
+/// A range with one end left open: `..end`, `..=last` or `start..`.
+pub trait OneSidedRange {
+    /// Whether the range is the front part, and the index where the two parts meet.
+    fn cut(self) -> (bool, usize);
+}
+impl OneSidedRange for crate::ops::RangeTo<usize> {
+    fn cut(self) -> (bool, usize) { (true, self.end) }
+}
+impl OneSidedRange for crate::ops::RangeToInclusive<usize> {
+    fn cut(self) -> (bool, usize) { (true, self.end.saturating_add(1)) }
+}
+impl OneSidedRange for crate::ops::RangeFrom<usize> {
+    fn cut(self) -> (bool, usize) { (false, self.start) }
+}
+
+pub struct Chunks<'a, T: 'a> {
+    rest: &'a [T],
+    size: usize,
+}
+impl<'a, T> Iterator for Chunks<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let at = if self.size < self.rest.len() { self.size } else { self.rest.len() };
+        let (piece, rest) = self.rest.split_at(at);
+        self.rest = rest;
+        Some(piece)
+    }
+}
+
+pub struct ChunksExact<'a, T: 'a> {
+    rest: &'a [T],
+    remainder: &'a [T],
+    size: usize,
+}
+impl<'a, T> ChunksExact<'a, T> {
+    /// The trailing elements that do not fill a piece.
+    pub fn remainder(&self) -> &'a [T] { self.remainder }
+}
+impl<'a, T> Iterator for ChunksExact<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let (piece, rest) = self.rest.split_at(self.size);
+        self.rest = rest;
+        Some(piece)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.rest.len() / self.size;
+        (n, Some(n))
+    }
+}
+impl<T> ExactSizeIterator for ChunksExact<'_, T> {}
+
+pub struct ChunksExactMut<'a, T: 'a> {
+    rest: &'a mut [T],
+    size: usize,
+}
+impl<'a, T> Iterator for ChunksExactMut<'a, T> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let whole = crate::mem::replace(&mut self.rest, &mut []);
+        let (piece, rest) = whole.split_at_mut(self.size);
+        self.rest = rest;
+        Some(piece)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.rest.len() / self.size;
+        (n, Some(n))
+    }
+}
+impl<T> ExactSizeIterator for ChunksExactMut<'_, T> {}
+
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for [T] {
+    fn eq(&self, other: &[U; N]) -> bool {
+        if self.len() != N {
+            return false;
+        }
+        let mut i = 0;
+        while i < N {
+            if !self[i].eq(&other[i]) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+}
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for &[T] {
+    fn eq(&self, other: &[U; N]) -> bool { (**self).eq(other) }
+}
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for &mut [T] {
+    fn eq(&self, other: &[U; N]) -> bool { (**self).eq(other) }
+}
+
+impl<T> crate::clone::Clone for ChunksExact<'_, T> {
+    fn clone(&self) -> Self { ChunksExact { rest: self.rest, remainder: self.remainder, size: self.size } }
+}
+impl<T: crate::fmt::Debug> crate::fmt::Debug for ChunksExact<'_, T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Debug::fmt(self.rest, f) }
 }

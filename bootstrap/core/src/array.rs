@@ -63,3 +63,13 @@ impl<'a, T, const N: usize> crate::iter::IntoIterator for &'a [T; N] {
     type IntoIter = crate::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter { (self as &'a [T]).into_iter() }
 }
+
+impl<T, const N: usize> [T; N] {
+    pub const fn as_slice(&self) -> &[T] { self }
+}
+
+impl<'a, T, const N: usize> crate::iter::IntoIterator for &'a mut [T; N] {
+    type Item = &'a mut T;
+    type IntoIter = crate::slice::IterMut<'a, T>;
+    fn into_iter(self) -> crate::slice::IterMut<'a, T> { self.iter_mut() }
+}

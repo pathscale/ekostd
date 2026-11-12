@@ -79,6 +79,22 @@ impl<T, E> Result<T, E> {
         match self { Ok(value) => value, Err(err) => op(err) }
     }
 
+    pub fn unwrap_or_default(self) -> T where T: crate::default::Default {
+        match self { Ok(x) => x, Err(_) => T::default() }
+    }
+
+    pub fn map_or<U, F: FnOnce(T) -> U>(self, default: U, f: F) -> U {
+        match self { Ok(x) => f(x), Err(_) => default }
+    }
+
+    pub fn map_or_else<U, D: FnOnce(E) -> U, F: FnOnce(T) -> U>(self, default: D, f: F) -> U {
+        match self { Ok(x) => f(x), Err(e) => default(e) }
+    }
+
+    pub fn is_ok_and<F: FnOnce(T) -> bool>(self, f: F) -> bool {
+        match self { Ok(x) => f(x), Err(_) => false }
+    }
+
     pub fn and_then<U, F: FnOnce(T) -> Result<U, E>>(self, op: F) -> Result<U, E> {
         match self { Ok(value) => op(value), Err(err) => Err(err) }
     }

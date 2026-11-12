@@ -73,3 +73,10 @@ impl<'a> From<crate::string::String> for Cow<'a, str> {
 impl<'a, T: Clone> From<crate::vec::Vec<T>> for Cow<'a, [T]> {
     fn from(value: crate::vec::Vec<T>) -> Self { Self::Owned(value) }
 }
+
+impl<B: ?Sized + ToOwned + core::hash::Hash> core::hash::Hash for Cow<'_, B> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) { self.as_ref().hash(state) }
+}
+impl<'a, B: ?Sized + ToOwned> Borrow<B> for Cow<'a, B> {
+    fn borrow(&self) -> &B { self.as_ref() }
+}

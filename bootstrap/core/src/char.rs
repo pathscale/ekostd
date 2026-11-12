@@ -33,6 +33,7 @@ impl char {
     }
 
     pub const fn is_ascii(&self) -> bool { *self as u32 <= 0x7f }
+    pub const fn is_ascii_uppercase(&self) -> bool { *self >= 'A' && *self <= 'Z' }
     pub const fn is_ascii_digit(&self) -> bool { *self >= '0' && *self <= '9' }
     pub const fn is_ascii_alphabetic(&self) -> bool {
         (*self >= 'a' && *self <= 'z') || (*self >= 'A' && *self <= 'Z')

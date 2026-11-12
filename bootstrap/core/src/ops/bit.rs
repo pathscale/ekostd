@@ -49,3 +49,33 @@ macro_rules! scalar_bit_ops {
 
 scalar_bit_ops!(bool, u8, u16, u32, u64, u128, usize,
     i8, i16, i32, i64, i128, isize);
+
+/// The bit operators with a reference on either side: they read the value and apply the plain operator.
+macro_rules! scalar_ref_bit_ops {
+    ($($ty:ty),* $(,)?) => { $(
+        impl Not for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn not(self) -> $ty { !*self }
+        }
+        scalar_ref_bit_ops!(@binary $ty, BitAnd bitand, BitOr bitor, BitXor bitxor);
+    )* };
+    (@binary $ty:ty, $($op:ident $method:ident),*) => { $(
+        impl $op<&$ty> for $ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: &$ty) -> $ty { $op::$method(self, *rhs) }
+        }
+        impl $op<$ty> for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: $ty) -> $ty { $op::$method(*self, rhs) }
+        }
+        impl $op<&$ty> for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn $method(self, rhs: &$ty) -> $ty { $op::$method(*self, *rhs) }
+        }
+    )* };
+}
+scalar_ref_bit_ops!(bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);

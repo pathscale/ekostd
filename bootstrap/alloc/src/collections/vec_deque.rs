@@ -43,3 +43,5 @@ impl<'a, T> IntoIterator for &'a VecDeque<T> { type Item=&'a T; type IntoIter=co
 impl<'a, T> IntoIterator for &'a mut VecDeque<T> { type Item=&'a mut T; type IntoIter=core::slice::IterMut<'a,T>; fn into_iter(self)->Self::IntoIter { self.items.iter_mut() } }
 impl<T> FromIterator<T> for VecDeque<T> { fn from_iter<I:IntoIterator<Item=T>>(it:I)->Self { Self { items: it.into_iter().collect() } } }
 impl<T> Extend<T> for VecDeque<T> { fn extend<I:IntoIterator<Item=T>>(&mut self,it:I) { self.items.extend(it); } }
+impl<T> From<Vec<T>> for VecDeque<T> { fn from(items: Vec<T>) -> Self { Self { items } } }
+impl<T, const N: usize> From<[T; N]> for VecDeque<T> { fn from(items: [T; N]) -> Self { Self { items: Vec::from_iter(items) } } }

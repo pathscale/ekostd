@@ -42,8 +42,6 @@ impl<T> Option<T> {
 
     #[track_caller]
     pub const fn unwrap(self) -> T
-    where
-        T: [const] Destruct,
     {
         match self {
             Some(value) => value,
@@ -53,8 +51,6 @@ impl<T> Option<T> {
 
     #[track_caller]
     pub const fn expect(self, msg: &str) -> T
-    where
-        T: [const] Destruct,
     {
         match self {
             Some(value) => value,
@@ -106,6 +102,36 @@ impl<T> Option<T> {
     pub fn or_else<F: FnOnce() -> Option<T>>(self, f: F) -> Option<T> {
         match self { Some(x) => Some(x), None => f() }
     }
+
+    pub fn filter<P: FnOnce(&T) -> bool>(self, predicate: P) -> Option<T> {
+        match self { Some(x) if predicate(&x) => Some(x), _ => None }
+    }
+
+    pub fn is_none_or<F: FnOnce(T) -> bool>(self, f: F) -> bool {
+        match self { Some(x) => f(x), None => true }
+    }
+
+    pub fn unwrap_or_default(self) -> T where T: Default {
+        match self { Some(x) => x, None => T::default() }
+    }
+
+    pub fn map_or_else<U, D: FnOnce() -> U, F: FnOnce(T) -> U>(self, default: D, f: F) -> U {
+        match self { Some(x) => f(x), None => default() }
+    }
+
+    /// Puts `value` in when empty, and lends what is then inside.
+    pub fn get_or_insert(&mut self, value: T) -> &mut T {
+        self.get_or_insert_with(|| value)
+    }
+
+    /// Puts the result of `f` in when empty, and lends what is then inside.
+    pub fn get_or_insert_with<F: FnOnce() -> T>(&mut self, f: F) -> &mut T {
+        if self.is_none() { *self = Some(f()); }
+        match self { Some(x) => x, None => unsafe { crate::hint::unreachable_unchecked() } }
+    }
+
+    /// Puts `value` in and returns what was there.
+    pub fn replace(&mut self, value: T) -> Option<T> { crate::mem::replace(self, Some(value)) }
 
     pub fn is_some_and<F: FnOnce(T) -> bool>(self, f: F) -> bool {
         match self { Some(x) => f(x), None => false }
@@ -172,5 +198,29 @@ const impl<T> Try for Option<T> {
 const impl<T> FromResidual<Option<Infallible>> for Option<T> {
     fn from_residual(residual: Option<Infallible>) -> Self {
         match residual { None => None, Some(never) => match never {} }
+    }
+}
+
+impl<T: crate::ops::Deref> Option<T> {
+    pub fn as_deref(&self) -> Option<&T::Target> {
+        match self { Some(x) => Some(&**x), None => None }
+    }
+}
+
+impl<T: crate::ops::DerefMut> Option<T> {
+    pub fn as_deref_mut(&mut self) -> Option<&mut T::Target> {
+        match self { Some(x) => Some(&mut **x), None => None }
+    }
+}
+
+impl<T> Option<Option<T>> {
+    pub fn flatten(self) -> Option<T> {
+        match self { Some(inner) => inner, None => None }
+    }
+}
+
+impl<T, E> Option<Result<T, E>> {
+    pub fn transpose(self) -> Result<Option<T>, E> {
+        match self { Some(Ok(x)) => Ok(Some(x)), Some(Err(e)) => Err(e), None => Ok(None) }
     }
 }

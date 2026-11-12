@@ -60,7 +60,8 @@ impl<T: ?Sized> core::ops::DerefMut for Box<T> {
     }
 }
 
-impl<T: ?Sized> Drop for Box<T> {
+// SAFETY: The value is only dropped, never read; `Unique` tells the drop checker about that drop.
+unsafe impl<#[may_dangle] T: ?Sized> Drop for Box<T> {
     fn drop(&mut self) {
         unsafe {
             let raw = self.0.pointer.as_ptr();
@@ -144,3 +145,16 @@ const _: usize = mem::size_of::<NonNull<u8>>();
 
 impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<Unique<U>> for Unique<T> {}
 impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::DispatchFromDyn<Unique<U>> for Unique<T> {}
+
+// SAFETY: The allocation is owned, so the pointer follows the value it points to.
+unsafe impl<T: ?Sized + Send> Send for Unique<T> {}
+// SAFETY: Shared access to the pointer is shared access to the value.
+unsafe impl<T: ?Sized + Sync> Sync for Unique<T> {}
+
+impl From<&str> for Box<str> {
+    fn from(text: &str) -> Self { crate::string::String::from(text).into_boxed_str() }
+}
+
+impl<T: ?Sized> core::borrow::Borrow<T> for Box<T> {
+    fn borrow(&self) -> &T { &**self }
+}

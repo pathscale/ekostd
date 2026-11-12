@@ -200,6 +200,22 @@ impl<T: PartialEq> PartialEq for Option<T> {
 }
 impl<T: Eq> Eq for Option<T> {}
 
+impl<T: PartialEq, E: PartialEq> PartialEq for crate::result::Result<T, E> {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (crate::result::Result::Ok(left), crate::result::Result::Ok(right)) => left.eq(right),
+            (crate::result::Result::Err(left), crate::result::Result::Err(right)) => left.eq(right),
+            _ => false,
+        }
+    }
+}
+impl<T: Eq, E: Eq> Eq for crate::result::Result<T, E> {}
+
+impl<T: PointeeSized> PartialEq for crate::marker::PhantomData<T> {
+    fn eq(&self, _other: &Self) -> bool { true }
+}
+impl<T: PointeeSized> Eq for crate::marker::PhantomData<T> {}
+
 pub fn min<T: Ord>(v1: T, v2: T) -> T {
     v1.min(v2)
 }
@@ -260,3 +276,8 @@ impl<T: Ord, const N: usize> Ord for [T; N] {
         self[..].cmp(&other[..])
     }
 }
+
+impl<A: PartialEq, B: PartialEq, C: PartialEq> PartialEq for (A, B, C) {
+    fn eq(&self, other: &(A, B, C)) -> bool { self.0 == other.0 && self.1 == other.1 && self.2 == other.2 }
+}
+impl<A: Eq, B: Eq, C: Eq> Eq for (A, B, C) {}

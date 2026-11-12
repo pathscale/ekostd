@@ -1,6 +1,7 @@
 use crate::clone::Clone;
 use crate::marker::{Copy, PhantomData, Sized};
-use crate::ops::{FnMut, Range, RangeInclusive};
+use crate::ops::{ControlFlow, FnMut, FromResidual, Range, RangeInclusive, Try};
+use crate::result::Result;
 use crate::option::Option::{self, None, Some};
 
 #[lang = "iterator"]
@@ -59,6 +60,65 @@ pub trait Iterator {
     fn rev(self) -> Rev<Self> where Self: Sized + DoubleEndedIterator { Rev { iter: self } }
     fn collect<B: FromIterator<Self::Item>>(self) -> B where Self: Sized { B::from_iter(self) }
     fn by_ref(&mut self) -> &mut Self where Self: Sized { self }
+    /// The smallest item; the first of several equal ones.
+    fn min(self) -> Option<Self::Item> where Self: Sized, Self::Item: crate::cmp::Ord {
+        self.fold(None, |best, x| match best { Some(b) if !(x < b) => Some(b), _ => Some(x) })
+    }
+    /// The largest item; the last of several equal ones.
+    fn max(self) -> Option<Self::Item> where Self: Sized, Self::Item: crate::cmp::Ord {
+        self.fold(None, |best, x| match best { Some(b) if x < b => Some(b), _ => Some(x) })
+    }
+    /// The item whose key is largest; the last of several equal ones.
+    fn max_by_key<K: crate::cmp::Ord, F: FnMut(&Self::Item) -> K>(mut self, mut f: F) -> Option<Self::Item> where Self: Sized {
+        let mut best: Option<(K, Self::Item)> = None;
+        while let Some(x) = self.next() {
+            let key = f(&x);
+            best = match best { Some((k, b)) if key < k => Some((k, b)), _ => Some((key, x)) };
+        }
+        match best { Some((_, x)) => Some(x), None => None }
+    }
+    /// The item whose key is smallest; the first of several equal ones.
+    fn min_by_key<K: crate::cmp::Ord, F: FnMut(&Self::Item) -> K>(mut self, mut f: F) -> Option<Self::Item> where Self: Sized {
+        let mut best: Option<(K, Self::Item)> = None;
+        while let Some(x) = self.next() {
+            let key = f(&x);
+            best = match best { Some((k, b)) if !(key < k) => Some((k, b)), _ => Some((key, x)) };
+        }
+        match best { Some((_, x)) => Some(x), None => None }
+    }
+    /// Folds until `f` first reports failure, and returns that failure.
+    fn try_fold<B, F, R>(&mut self, init: B, mut f: F) -> R
+    where Self: Sized, F: FnMut(B, Self::Item) -> R, R: Try<Output = B> {
+        let mut acc = init;
+        while let Some(x) = self.next() {
+            match f(acc, x).branch() {
+                ControlFlow::Continue(value) => acc = value,
+                ControlFlow::Break(residual) => return R::from_residual(residual),
+            }
+        }
+        R::from_output(acc)
+    }
+    /// Calls `f` on each item until one reports failure, and returns that failure.
+    fn try_for_each<F, R>(&mut self, mut f: F) -> R
+    where Self: Sized, F: FnMut(Self::Item) -> R, R: Try<Output = ()> {
+        while let Some(x) = self.next() {
+            match f(x).branch() {
+                ControlFlow::Continue(()) => {}
+                ControlFlow::Break(residual) => return R::from_residual(residual),
+            }
+        }
+        R::from_output(())
+    }
+    fn flat_map<U: IntoIterator, F: FnMut(Self::Item) -> U>(self, f: F) -> FlatMap<Self, U, F> where Self: Sized {
+        FlatMap { iter: self, f, front: None }
+    }
+    fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Item: IntoIterator {
+        Flatten { iter: self, front: None }
+    }
+    fn peekable(self) -> Peekable<Self> where Self: Sized { Peekable { iter: self, peeked: None } }
+    fn take_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> TakeWhile<Self, P> where Self: Sized {
+        TakeWhile { iter: self, predicate, done: false }
+    }
     fn eq<I>(mut self, other: I) -> bool
     where
         I: IntoIterator,
@@ -469,3 +529,118 @@ macro_rules! integer_sum {
     )*};
 }
 integer_sum!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+/// The items of every iterable `f` produces, one iterable after the other.
+pub struct FlatMap<I, U: IntoIterator, F> { iter: I, f: F, front: Option<U::IntoIter> }
+impl<I: Iterator, U: IntoIterator, F: FnMut(I::Item) -> U> Iterator for FlatMap<I, U, F> {
+    type Item = U::Item;
+    fn next(&mut self) -> Option<U::Item> {
+        loop {
+            if let Some(inner) = &mut self.front {
+                if let Some(x) = inner.next() { return Some(x); }
+                self.front = None;
+            }
+            match self.iter.next() {
+                Some(outer) => self.front = Some((self.f)(outer).into_iter()),
+                None => return None,
+            }
+        }
+    }
+}
+
+/// The items of every iterable an iterator yields, one iterable after the other.
+pub struct Flatten<I: Iterator> where I::Item: IntoIterator {
+    iter: I,
+    front: Option<<I::Item as IntoIterator>::IntoIter>,
+}
+impl<I: Iterator> Iterator for Flatten<I> where I::Item: IntoIterator {
+    type Item = <I::Item as IntoIterator>::Item;
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(inner) = &mut self.front {
+                if let Some(x) = inner.next() { return Some(x); }
+                self.front = None;
+            }
+            match self.iter.next() {
+                Some(outer) => self.front = Some(outer.into_iter()),
+                None => return None,
+            }
+        }
+    }
+}
+
+/// An iterator whose next item can be looked at before it is taken.
+pub struct Peekable<I: Iterator> { iter: I, peeked: Option<Option<I::Item>> }
+impl<I: Iterator> Peekable<I> {
+    pub fn peek(&mut self) -> Option<&I::Item> {
+        if self.peeked.is_none() { self.peeked = Some(self.iter.next()); }
+        match &self.peeked { Some(Some(x)) => Some(x), _ => None }
+    }
+    /// Takes the next item only when `accept` approves of it.
+    pub fn next_if<F: crate::ops::FnOnce(&I::Item) -> bool>(&mut self, accept: F) -> Option<I::Item> {
+        match self.next() {
+            Some(x) if accept(&x) => Some(x),
+            other => { self.peeked = Some(other); None }
+        }
+    }
+}
+impl<I: Iterator> Iterator for Peekable<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        match self.peeked.take() { Some(x) => x, None => self.iter.next() }
+    }
+}
+
+/// The leading items a predicate accepts.
+pub struct TakeWhile<I, P> { iter: I, predicate: P, done: bool }
+impl<I: Iterator, P: FnMut(&I::Item) -> bool> Iterator for TakeWhile<I, P> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        if self.done { return None; }
+        match self.iter.next() {
+            Some(x) if (self.predicate)(&x) => Some(x),
+            _ => { self.done = true; None }
+        }
+    }
+}
+
+/// Feeds the successes of a fallible iterator onward and remembers the first failure.
+struct UntilFailure<'a, I, R> { iter: I, failure: &'a mut Option<R> }
+impl<I: Iterator, R> Iterator for UntilFailure<'_, I, R> where I::Item: Try<Residual = R> {
+    type Item = <I::Item as Try>::Output;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failure.is_some() { return None; }
+        match self.iter.next() {
+            Some(x) => match x.branch() {
+                ControlFlow::Continue(value) => Some(value),
+                ControlFlow::Break(residual) => { *self.failure = Some(residual); None }
+            },
+            None => None,
+        }
+    }
+}
+
+/// Collects the successes, or gives back the first error.
+impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E> {
+    fn from_iter<I: IntoIterator<Item = Result<A, E>>>(iter: I) -> Self {
+        let mut failure = None;
+        let collected = V::from_iter(UntilFailure { iter: iter.into_iter(), failure: &mut failure });
+        match failure {
+            Some(Result::Err(error)) => Result::Err(error),
+            _ => Result::Ok(collected),
+        }
+    }
+}
+
+/// Collects the values, or gives `None` when any item is `None`.
+impl<A, V: FromIterator<A>> FromIterator<Option<A>> for Option<V> {
+    fn from_iter<I: IntoIterator<Item = Option<A>>>(iter: I) -> Self {
+        let mut failure = None;
+        let collected = V::from_iter(UntilFailure { iter: iter.into_iter(), failure: &mut failure });
+        match failure { Some(_) => None, None => Some(collected) }
+    }
+}
+
+impl<I: Clone, U: IntoIterator, F: Clone> Clone for FlatMap<I, U, F> where U::IntoIter: Clone {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), f: self.f.clone(), front: self.front.clone() } }
+}

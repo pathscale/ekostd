@@ -104,6 +104,15 @@ pub trait Pointer { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 impl Debug for () {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("()") }
 }
+impl<A: Debug, B: Debug> Debug for (A, B) {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        attempt!(f.write_str("("));
+        attempt!(Debug::fmt(&self.0, f));
+        attempt!(f.write_str(", "));
+        attempt!(Debug::fmt(&self.1, f));
+        f.write_str(")")
+    }
+}
 impl<T: Debug> Debug for [T] {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         attempt!(f.write_str("["));
@@ -441,4 +450,19 @@ impl Debug for crate::alloc::Layout {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         f.debug_struct("Layout").field("size", &self.size()).field("align", &self.align()).finish()
     }
+}
+
+impl<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        attempt!(f.write_str("("));
+        attempt!(Debug::fmt(&self.0, f));
+        attempt!(f.write_str(", "));
+        attempt!(Debug::fmt(&self.1, f));
+        attempt!(f.write_str(", "));
+        attempt!(Debug::fmt(&self.2, f));
+        f.write_str(")")
+    }
+}
+impl Debug for ! {
+    fn fmt(&self, _f: &mut Formatter<'_>) -> Result { match *self {} }
 }

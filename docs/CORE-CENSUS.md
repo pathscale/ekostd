@@ -19,8 +19,9 @@ phase. Crates above the leaves are not reached until the leaves pass.
 
 ## Graph
 
-Leaves: `bitflags`, `bumpalo`, `ekostd`, `foldhash`, `memchr`, `spin`.
+At the start (runs 1 to 9). Leaves: `bitflags`, `bumpalo`, `ekostd`, `foldhash`, `memchr`, `spin`.
 Above them: `hashbrown`, `object`, `ps-rusty_alloc`, then `linker-utils`, `libwild`, `wild`.
+From run 10 the graph is eight packages; see that section.
 
 ## Count
 
@@ -96,6 +97,76 @@ Only `object` still fails: 150.
 
 Rule for every later addition: it must be needed by a crate that stays in the graph, and when that crate leaves,
 the addition leaves with it.
+
+## Run 10, 2026-11-13: the whole ps-wild graph checks
+
+After ps-wild dropped `object` (and with it `memchr`), the graph is `ekostd`, `foldhash`, `spin`, `hashbrown`,
+`ps-rusty_alloc`, `linker-utils`, `libwild`, `wild`. `cargo check -p wild` against `eko-core` with an empty
+sysroot now exits 0 for all eight. It is a check: nothing was generated or linked.
+
+| Step | linker-utils | libwild | wild |
+|---|---|---|---|
+| start | 85 | not reached | not reached |
+| slice searching, `Option::filter`, comparison and default impls; six one-off uses rewritten in the linker | 0 | 2963 | not reached |
+| `Send` and `Sync` for `Vec` and `Box` | 0 | 549 | not reached |
+| the batch below; about thirty one-off uses rewritten in the linker | 0 | 15 (borrow check) | not reached |
+| the drop-check and `size_of_val` corrections below | 0 | 0 | 2 |
+| `global_allocator`, `mem::Alignment` | 0 | 0 | 0 |
+
+Added, all needed by `linker-utils` or `libwild`, which are ours and stay in the graph:
+
+- Slices: `windows`, `chunks`, `chunks_exact`, `chunks_exact_mut`, `binary_search_by_key`, `partition_point`,
+  `sort_by_key`, `sort_unstable_by_key`, `strip_prefix`, `strip_suffix`, `reverse`, `split_off_mut`,
+  `split_off_first_mut`; `Default` for `&[T]` and `&mut [T]`; comparison of a slice with an array;
+  `IntoIterator` for `&mut [T; N]`; array `as_slice`; `Default` for arrays.
+- `Option`: `filter`, `is_none_or`, `unwrap_or_default`, `map_or_else`, `get_or_insert`, `get_or_insert_with`,
+  `replace`, `as_deref`, `as_deref_mut`, `flatten`, `transpose`. `Result`: `unwrap_or_default`, `map_or`,
+  `map_or_else`, `is_ok_and`. `bool::then`, `bool::then_some`.
+- Iterators: `min`, `max`, `max_by_key`, `min_by_key`, `try_fold`, `try_for_each`, `flat_map`, `flatten`,
+  `peekable`, `take_while`; collecting into `Result` and into `Option`.
+- Strings: `core::str::pattern::Pattern` for a string, a character and a test on characters; over it
+  `starts_with`, `ends_with`, `strip_prefix`, `strip_suffix`, `find`, `contains`, `split`, `split_inclusive`,
+  `split_once`, `trim_end_matches`; `chars` (both directions), `lines`; `Debug` and `Display` for `Utf8Error`.
+  In `eko-alloc`: `String::from_utf8_lossy`, `str::to_ascii_lowercase`, `join` on slices of strings,
+  `String` compared with `str`.
+- Numbers: `swap_bytes` on the signed types, `to_be_bytes`, `from_be_bytes`; narrowing `TryFrom` between signed
+  types and from unsigned to signed; the operators with a reference on either side; on the non-zero types
+  the comparison, hashing and formatting traits, `MIN`, `saturating_add`, `TryFrom` and `From`.
+- Trait impls: `PartialEq` and `Eq` for `Result`, `PhantomData`, `Range`, `Infallible` and three-element tuples;
+  `Debug` for two- and three-element tuples, `Range`, `Infallible`, `!` and the atomics; `Hash` for pairs;
+  `Clone` for `Range`; `Range::contains`, `RangeInclusive::contains`; `Default` and `into_inner` on the atomics.
+- Macros: the `test` and `global_allocator` attributes, the `#[default]` helper of `derive(Default)`.
+- `eko-alloc`: `Borrow` and `From<&str>` for `Box`; `Hash` and `Borrow` for `Cow`; `VecDeque` from a `Vec` or
+  an array; `Extend<&T>` and `AsMut<Vec<T>>` for `Vec`.
+
+Corrections to what was already there, found by this run:
+
+- `Vec` and `Box` were not `Send` or `Sync`.
+- The `Drop` impls of `Vec`, its `IntoIter` and `Box` lacked `#[may_dangle]`, so a container of borrows kept
+  the borrow alive until the container was dropped. `Vec` now carries `PhantomData<T>` to say it owns its
+  elements.
+- `mem::size_of_val` and `mem::align_of_val` were the raw intrinsics (`unsafe`, taking a pointer). They take a
+  reference and are safe; the intrinsics are in `intrinsics`.
+- `Option::unwrap` and `expect` carried a const-trait bound that made them unusable in a constant from a crate
+  without that feature.
+- `str::split` is back, for any pattern.
+
+Not added; the linker was changed to do without: `pow`, `is_negative`, `first_chunk`,
+`CStr::from_bytes_until_nul`, `CString`, `core::num::NonZero`, `iter::repeat_n`, `fmt::from_fn`,
+`DebugTuple::finish_non_exhaustive`, `match_indices`, `rsplit`, `splitn`, array patterns, `trim_ascii`,
+`Vec::drain`, `BTreeMap::into_values`, `IntoIterator` for `Result`, `Fn` for `Box<dyn Fn>`.
+
+Cost: `eko-core` and `eko-alloc` grew by about 1,450 lines to about 9,500.
+
+Open, found while doing this:
+
+- `sort_by` is an insertion sort and `sort_unstable_by` calls it: quadratic. `VecDeque` is a `Vec`, so
+  `pop_front` is linear. Both are correct and both are too slow for a linker's symbol tables; they need real
+  implementations before a linker built on `eko-core` is measured.
+- `core::arch::aarch64` still carries what only `memchr` called; prune to what `hashbrown` uses.
+- `mem::Alignment` and `Layout::from_size_alignment_unchecked` exist because this rustc's
+  `global_allocator` expansion names them. Another compiler's expansion may not.
+- Nothing has been generated or linked against these packages. `cargo build` is the next measurement.
 
 ## Open after run 2, largest first
 

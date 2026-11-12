@@ -236,3 +236,46 @@ macro_rules! impl_try_from_signed {
 // Same-width or wider targets only, so the one way to fail is a negative value.
 impl_try_from_signed!(i8 => u8, i16 => u16, i32 => u32, i64 => u64, i128 => u128, isize => usize,
     i32 => usize, i64 => usize, i32 => u64, isize => u64);
+
+impl TryFromIntError {
+    pub(crate) const fn new() -> Self { TryFromIntError(()) }
+}
+
+impl_from_int!(u64 => i128);
+
+impl_try_from_upper_bounded!(
+    u32 => i32, u64 => i32, u64 => i64, usize => i32, usize => i64, usize => isize, u128 => i128,
+);
+
+/// Narrowing between signed types: the value must lie within the target's whole range.
+macro_rules! impl_try_from_both_bounded {
+    ($($source:ty => $target:ty),* $(,)?) => { $(
+        impl TryFrom<$source> for $target {
+            type Error = TryFromIntError;
+            #[inline(always)]
+            fn try_from(value: $source) -> crate::result::Result<Self, Self::Error> {
+                if value < (Self::MIN as $source) || value > (Self::MAX as $source) {
+                    crate::result::Result::Err(TryFromIntError(()))
+                } else {
+                    crate::result::Result::Ok(value as Self)
+                }
+            }
+        }
+    )* };
+}
+
+impl_try_from_both_bounded!(
+    i16 => i8, i32 => i8, i32 => i16, i64 => i8, i64 => i16, i64 => i32,
+    i128 => i32, i128 => i64, isize => i32,
+);
+
+impl crate::cmp::PartialEq for Infallible {
+    fn eq(&self, _other: &Self) -> bool { match *self {} }
+}
+impl crate::cmp::Eq for Infallible {}
+impl crate::fmt::Debug for Infallible {
+    fn fmt(&self, _f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { match *self {} }
+}
+impl crate::fmt::Display for Infallible {
+    fn fmt(&self, _f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { match *self {} }
+}

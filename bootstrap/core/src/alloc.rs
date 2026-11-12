@@ -25,6 +25,11 @@ impl Layout {
         Self { size, align }
     }
 
+    /// As `from_size_align_unchecked`, with the alignment already known to be a power of two.
+    pub const unsafe fn from_size_alignment_unchecked(size: usize, alignment: crate::mem::Alignment) -> Self {
+        Self { size, align: alignment.as_usize() }
+    }
+
     pub const fn size(&self) -> usize { self.size }
     pub const fn align(&self) -> usize { self.align }
 
@@ -46,8 +51,8 @@ impl Layout {
     }
 
     pub unsafe fn for_value_raw<T: ?Sized>(t: *const T) -> Self {
-        let size = unsafe { crate::mem::size_of_val(t) };
-        let align = unsafe { crate::mem::align_of_val(t) };
+        let size = unsafe { crate::mem::size_of_val_raw(t) };
+        let align = unsafe { crate::mem::align_of_val_raw(t) };
         unsafe { Self::from_size_align_unchecked(size, align) }
     }
 

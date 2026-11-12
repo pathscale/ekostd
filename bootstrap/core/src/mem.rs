@@ -70,22 +70,28 @@ impl<T> MaybeUninit<T> {
     }
 }
 
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const unsafe fn size_of_val<T: ?Sized>(value: *const T) -> usize;
+/// The size in bytes of the value behind the reference.
+#[inline(always)]
+pub const fn size_of_val<T: ?Sized>(value: &T) -> usize {
+    // SAFETY: A reference points to a valid value.
+    unsafe { crate::intrinsics::size_of_val(value) }
+}
 
-#[rustc_intrinsic]
-#[rustc_nounwind]
-pub const unsafe fn align_of_val<T: ?Sized>(value: *const T) -> usize;
+/// The alignment in bytes of the value behind the reference.
+#[inline(always)]
+pub const fn align_of_val<T: ?Sized>(value: &T) -> usize {
+    // SAFETY: A reference points to a valid value.
+    unsafe { crate::intrinsics::align_of_val(value) }
+}
 
 #[inline(always)]
 pub const unsafe fn size_of_val_raw<T: ?Sized>(value: *const T) -> usize {
-    unsafe { size_of_val(value) }
+    unsafe { crate::intrinsics::size_of_val(value) }
 }
 
 #[inline(always)]
 pub const unsafe fn align_of_val_raw<T: ?Sized>(value: *const T) -> usize {
-    unsafe { align_of_val(value) }
+    unsafe { crate::intrinsics::align_of_val(value) }
 }
 
 trait SizedTypeProperties: crate::marker::Sized {
@@ -142,4 +148,18 @@ pub unsafe fn transmute_copy<Src, Dst>(src: &Src) -> Dst {
 #[allow_internal_unstable(builtin_syntax)]
 pub macro offset_of($Container:ty, $($fields:expr)+ $(,)?) {
     {builtin # offset_of($Container, $($fields)+)}
+}
+
+/// An alignment in bytes: a power of two. The `global_allocator` expansion passes alignments to
+/// the allocator entry points as this type, which has the representation of `usize`.
+#[repr(transparent)]
+pub struct Alignment(usize);
+
+impl crate::marker::Copy for Alignment {}
+impl crate::clone::Clone for Alignment {
+    fn clone(&self) -> Self { *self }
+}
+
+impl Alignment {
+    pub const fn as_usize(self) -> usize { self.0 }
 }

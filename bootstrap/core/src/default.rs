@@ -22,3 +22,7 @@ scalar_default!(
 const impl<T: PointeeSized> Default for PhantomData<T> {
     fn default() -> Self { PhantomData }
 }
+
+impl<T: Default, const N: usize> Default for [T; N] {
+    fn default() -> Self { crate::array::from_fn(|_| T::default()) }
+}

@@ -102,6 +102,14 @@ pub macro include_bytes($($tokens:tt)*) {}
 pub macro derive($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro compile_error($($tokens:tt)*) {}
+/// Names the static whose `GlobalAlloc` implementation serves the program's allocations.
+#[rustc_builtin_macro]
+#[allow_internal_unstable(rustc_attrs)]
+pub macro global_allocator($item:item) {}
+/// Marks a test function. Outside a test build the function is dropped.
+#[rustc_builtin_macro]
+#[allow_internal_unstable(test, rustc_attrs, coverage_attribute)]
+pub macro test($item:item) {}
 
 pub mod builtin {
     #[rustc_builtin_macro(Copy)]
@@ -113,7 +121,7 @@ pub mod builtin {
     #[rustc_builtin_macro(Debug)]
     #[allow_internal_unstable(fmt_internals)]
     pub macro Debug($($tokens:tt)*) {}
-    #[rustc_builtin_macro(Default)]
+    #[rustc_builtin_macro(Default, attributes(default))]
     pub macro Default($($tokens:tt)*) {}
     #[rustc_builtin_macro(Eq)]
     #[allow_internal_unstable(core_intrinsics, derive_eq, coverage_attribute)]

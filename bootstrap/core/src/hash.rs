@@ -107,3 +107,7 @@ impl<H: Hasher + Default> BuildHasher for BuildHasherDefault<H> {
     type Hasher = H;
     fn build_hasher(&self) -> H { H::default() }
 }
+
+impl<A: Hash, B: Hash> Hash for (A, B) {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); self.1.hash(state); }
+}

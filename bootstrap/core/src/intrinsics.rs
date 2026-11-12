@@ -149,3 +149,11 @@ pub const fn discriminant_value<T>(v: &T) -> <T as DiscriminantKind>::Discrimina
 #[rustc_intrinsic]
 #[lang = "offset_of"]
 pub const fn offset_of<T: crate::marker::PointeeSized>(variant: u32, field: u32) -> usize;
+
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const unsafe fn size_of_val<T: ?Sized>(value: *const T) -> usize;
+
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const unsafe fn align_of_val<T: ?Sized>(value: *const T) -> usize;

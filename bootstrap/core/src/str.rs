@@ -7,6 +7,9 @@ use crate::option::Option::{self, None, Some};
 use crate::result::Result::{self, Err, Ok};
 use crate::slice::{self, SliceIndex};
 
+pub mod pattern;
+use self::pattern::Pattern;
+
 pub struct Utf8Error {
     valid_up_to: usize,
     error_len: Option<u8>,
@@ -179,31 +182,87 @@ impl str {
     }
 
     #[inline(always)]
-    pub fn starts_with(&self, pat: &str) -> bool {
-        self.as_bytes().starts_with(pat.as_bytes())
+    pub fn starts_with<P: Pattern>(&self, mut pat: P) -> bool {
+        pat.prefix_len(self).is_some()
     }
 
     #[inline(always)]
-    pub fn ends_with(&self, pat: &str) -> bool {
-        self.as_bytes().ends_with(pat.as_bytes())
+    pub fn ends_with<P: Pattern>(&self, mut pat: P) -> bool {
+        pat.suffix_len(self).is_some()
     }
 
     #[inline(always)]
-    pub fn strip_prefix(&self, pat: &str) -> Option<&str> {
-        if self.starts_with(pat) {
-            Some(&self[pat.len()..])
-        } else {
-            None
+    pub fn strip_prefix<P: Pattern>(&self, mut pat: P) -> Option<&str> {
+        match pat.prefix_len(self) {
+            Some(len) => Some(&self[len..]),
+            None => None,
         }
     }
 
     #[inline(always)]
-    pub fn strip_suffix(&self, pat: &str) -> Option<&str> {
-        if self.ends_with(pat) {
-            Some(&self[..self.len() - pat.len()])
-        } else {
-            None
+    pub fn strip_suffix<P: Pattern>(&self, mut pat: P) -> Option<&str> {
+        match pat.suffix_len(self) {
+            Some(len) => Some(&self[..self.len() - len]),
+            None => None,
         }
+    }
+
+    /// As the free function `from_utf8`.
+    pub const fn from_utf8(v: &[u8]) -> Result<&str, Utf8Error> {
+        from_utf8(v)
+    }
+
+    /// The byte offset of the first match.
+    pub fn find<P: Pattern>(&self, mut pat: P) -> Option<usize> {
+        match pat.find_in(self, 0) {
+            Some((start, _)) => Some(start),
+            None => None,
+        }
+    }
+
+    pub fn contains<P: Pattern>(&self, mut pat: P) -> bool {
+        pat.find_in(self, 0).is_some()
+    }
+
+    /// The pieces between matches. A pattern that matches nothing at all, such as an empty string,
+    /// ends the splitting: what is left comes out as the last piece.
+    pub fn split<P: Pattern>(&self, pat: P) -> Split<'_, P> {
+        Split { haystack: self, start: 0, finished: false, pattern: pat }
+    }
+
+    /// As `split`, with each match kept at the end of the piece before it. A match at the very end
+    /// is not followed by an empty piece.
+    pub fn split_inclusive<P: Pattern>(&self, pat: P) -> SplitInclusive<'_, P> {
+        SplitInclusive { haystack: self, start: 0, finished: false, pattern: pat }
+    }
+
+    /// What lies before the first match, and what lies after it.
+    pub fn split_once<P: Pattern>(&self, mut pat: P) -> Option<(&str, &str)> {
+        match pat.find_in(self, 0) {
+            Some((start, end)) => Some((&self[..start], &self[end..])),
+            None => None,
+        }
+    }
+
+    /// What is left after removing every match from the end.
+    pub fn trim_end_matches<P: Pattern>(&self, mut pat: P) -> &str {
+        let mut rest = self;
+        while let Some(len) = pat.suffix_len(rest) {
+            if len == 0 {
+                break;
+            }
+            rest = &rest[..rest.len() - len];
+        }
+        rest
+    }
+
+    pub fn chars(&self) -> Chars<'_> {
+        Chars { rest: self }
+    }
+
+    /// The lines, without their `\n` or `\r\n` endings.
+    pub fn lines(&self) -> Lines<'_> {
+        Lines { inner: self.split_inclusive('\n') }
     }
 
     #[inline(always)]
@@ -551,5 +610,149 @@ impl str {
             i += 1;
         }
         true
+    }
+}
+
+/// The character that starts at `at`, and how many bytes encode it. `bytes` is valid UTF-8 and
+/// `at` a character boundary inside it.
+pub(crate) fn decode(bytes: &[u8], at: usize) -> (char, usize) {
+    let first = bytes[at] as u32;
+    let continuation = |offset: usize| (bytes[at + offset] & 0x3f) as u32;
+    let (value, len) = if first < 0x80 {
+        (first, 1)
+    } else if first < 0xe0 {
+        ((first & 0x1f) << 6 | continuation(1), 2)
+    } else if first < 0xf0 {
+        ((first & 0x0f) << 12 | continuation(1) << 6 | continuation(2), 3)
+    } else {
+        ((first & 0x07) << 18 | continuation(1) << 12 | continuation(2) << 6 | continuation(3), 4)
+    };
+    // SAFETY: Valid UTF-8 encodes only Unicode scalar values.
+    (unsafe { char::from_u32_unchecked(value) }, len)
+}
+
+pub struct Chars<'a> {
+    rest: &'a str,
+}
+impl<'a> Chars<'a> {
+    /// What has not been yielded yet.
+    pub fn as_str(&self) -> &'a str { self.rest }
+}
+impl Clone for Chars<'_> {
+    fn clone(&self) -> Self { Chars { rest: self.rest } }
+}
+impl crate::iter::Iterator for Chars<'_> {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let (character, len) = decode(self.rest.as_bytes(), 0);
+        self.rest = &self.rest[len..];
+        Some(character)
+    }
+}
+
+pub struct Split<'a, P> {
+    haystack: &'a str,
+    start: usize,
+    finished: bool,
+    pattern: P,
+}
+impl<'a, P: Pattern> crate::iter::Iterator for Split<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        if self.finished {
+            return None;
+        }
+        match self.pattern.find_in(self.haystack, self.start) {
+            Some((start, end)) if end > start => {
+                let piece = &self.haystack[self.start..start];
+                self.start = end;
+                Some(piece)
+            }
+            _ => {
+                self.finished = true;
+                Some(&self.haystack[self.start..])
+            }
+        }
+    }
+}
+
+pub struct SplitInclusive<'a, P> {
+    haystack: &'a str,
+    start: usize,
+    finished: bool,
+    pattern: P,
+}
+impl<'a, P: Pattern> crate::iter::Iterator for SplitInclusive<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        if self.finished || self.start == self.haystack.len() {
+            return None;
+        }
+        match self.pattern.find_in(self.haystack, self.start) {
+            Some((start, end)) if end > start => {
+                let piece = &self.haystack[self.start..end];
+                self.start = end;
+                Some(piece)
+            }
+            _ => {
+                self.finished = true;
+                Some(&self.haystack[self.start..])
+            }
+        }
+    }
+}
+
+pub struct Lines<'a> {
+    inner: SplitInclusive<'a, char>,
+}
+impl<'a> crate::iter::Iterator for Lines<'a> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        let line = match self.inner.next() {
+            Some(line) => line,
+            None => return None,
+        };
+        let line = match line.strip_suffix('\n') {
+            Some(line) => line,
+            None => return Some(line),
+        };
+        Some(match line.strip_suffix('\r') {
+            Some(line) => line,
+            None => line,
+        })
+    }
+}
+
+impl crate::iter::DoubleEndedIterator for Chars<'_> {
+    fn next_back(&mut self) -> Option<char> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let bytes = self.rest.as_bytes();
+        // Step back over continuation bytes to the start of the last character.
+        let mut at = bytes.len() - 1;
+        while at > 0 && bytes[at] & 0xc0 == 0x80 {
+            at -= 1;
+        }
+        let (character, _) = decode(bytes, at);
+        self.rest = &self.rest[..at];
+        Some(character)
+    }
+}
+
+impl crate::fmt::Debug for Utf8Error {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Utf8Error").field("valid_up_to", &self.valid_up_to).field("error_len", &self.error_len).finish()
+    }
+}
+impl crate::fmt::Display for Utf8Error {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        match self.error_len {
+            Some(_) => crate::write!(f, "invalid utf-8 sequence starting at index {}", self.valid_up_to),
+            None => crate::write!(f, "incomplete utf-8 byte sequence from index {}", self.valid_up_to),
+        }
     }
 }
