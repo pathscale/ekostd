@@ -29,6 +29,9 @@ macro_rules! integer {
             pub const fn wrapping_add(self, rhs: Self) -> Self { add_with_overflow(self, rhs).0 }
             pub const fn wrapping_sub(self, rhs: Self) -> Self { sub_with_overflow(self, rhs).0 }
             pub const fn wrapping_mul(self, rhs: Self) -> Self { mul_with_overflow(self, rhs).0 }
+            /// Shift with the amount taken modulo the width, so it cannot overflow.
+            pub const fn wrapping_shl(self, rhs: u32) -> Self { self << ((rhs & ($bits - 1)) as $t) }
+            pub const fn wrapping_shr(self, rhs: u32) -> Self { self >> ((rhs & ($bits - 1)) as $t) }
             pub const fn checked_add(self, rhs: Self) -> Option<Self> {
                 let (value, overflow) = add_with_overflow(self, rhs);
                 if overflow { None } else { Some(value) }

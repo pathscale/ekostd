@@ -50,6 +50,17 @@ impl<T> MaybeUninit<T> {
         unsafe { ManuallyDrop::into_inner(self.value) }
     }
 
+    /// A value whose bytes are all zero. Still uninitialized as far as the type is concerned.
+    pub const fn zeroed() -> Self {
+        let mut value = Self::uninit();
+        unsafe { crate::intrinsics::write_bytes(value.as_mut_ptr(), 0, 1) };
+        value
+    }
+
+    pub const fn as_ptr(&self) -> *const T { self as *const Self as *const T }
+
+    pub const fn as_mut_ptr(&mut self) -> *mut T { self as *mut Self as *mut T }
+
     pub const fn write(&mut self, value: T) -> &mut T {
         self.value = ManuallyDrop::new(value);
         unsafe { &mut *(&mut self.value as *mut ManuallyDrop<T> as *mut T) }
@@ -112,6 +123,13 @@ pub fn take<T: crate::default::Default>(dest: &mut T) -> T {
 }
 
 pub const fn drop<T: [const] Destruct>(value: T) { let _ = value; }
+
+pub use crate::intrinsics::transmute;
+
+/// A value of `T` whose bytes are all zero. Sound only for types where that is a valid value.
+pub const unsafe fn zeroed<T>() -> T {
+    unsafe { MaybeUninit::<T>::zeroed().assume_init() }
+}
 
 pub unsafe fn transmute_copy<Src, Dst>(src: &Src) -> Dst {
     unsafe { crate::intrinsics::read_via_copy(src as *const Src as *const Dst) }

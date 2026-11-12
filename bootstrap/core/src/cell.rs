@@ -27,6 +27,11 @@ impl<T> UnsafeCell<T> {
 
 impl<T: ?Sized> UnsafeCell<T> {
     #[inline]
+    pub const fn get_mut(&mut self) -> &mut T {
+        &mut self.value
+    }
+
+    #[inline]
     pub const fn get(&self) -> *mut T {
         self as *const UnsafeCell<T> as *const T as *mut T
     }

@@ -86,6 +86,25 @@ pub const unsafe fn write<T>(dst: *mut T, src: T) {
     unsafe { intrinsics::write_via_move(dst, src) }
 }
 
+/// Reads a `T` from an address that need not be aligned for `T`, by copying its bytes.
+#[inline(always)]
+pub const unsafe fn read_unaligned<T>(src: *const T) -> T {
+    let mut value = crate::mem::MaybeUninit::<T>::uninit();
+    unsafe {
+        intrinsics::copy_nonoverlapping(src as *const u8, value.as_mut_ptr() as *mut u8, crate::mem::size_of::<T>());
+        value.assume_init()
+    }
+}
+
+/// Writes a `T` to an address that need not be aligned for `T`, by copying its bytes.
+#[inline(always)]
+pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
+    unsafe {
+        intrinsics::copy_nonoverlapping(&raw const src as *const u8, dst as *mut u8, crate::mem::size_of::<T>());
+    }
+    crate::mem::forget(src);
+}
+
 #[inline(always)]
 pub const unsafe fn copy<T>(src: *const T, dst: *mut T, count: usize) {
     unsafe { intrinsics::copy(src, dst, count) }
@@ -484,6 +503,14 @@ impl<T: PointeeSized> *const T {
     }
 
     #[inline(always)]
+    pub const unsafe fn read_unaligned(self) -> T
+    where
+        T: Sized,
+    {
+        unsafe { read_unaligned(self) }
+    }
+
+    #[inline(always)]
     pub const unsafe fn copy_to(self, dst: *mut T, count: usize)
     where
         T: Sized,
@@ -593,6 +620,14 @@ impl<T: PointeeSized> *mut T {
         T: Sized,
     {
         unsafe { read(self) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn read_unaligned(self) -> T
+    where
+        T: Sized,
+    {
+        unsafe { read_unaligned(self) }
     }
 
     #[inline(always)]

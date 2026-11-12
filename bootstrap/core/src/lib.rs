@@ -75,6 +75,17 @@ pub mod error {
     }
 }
 
+/// The pre-associated-constant spellings (`core::usize::MAX`), which older crates still import.
+macro_rules! legacy_int_module {
+    ($($t:ident)*) => {$(
+        pub mod $t {
+            pub const MIN: $t = <$t>::MIN;
+            pub const MAX: $t = <$t>::MAX;
+        }
+    )*};
+}
+legacy_int_module!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
 pub use crate::panic::panicking;
 pub use crate::macros::{format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error};
 
