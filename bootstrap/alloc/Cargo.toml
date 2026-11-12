@@ -1,0 +1,17 @@
+[package]
+name = "eko-alloc"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pathscale/ekostd"
+description = "The minimal alloc library for the EKO compiler family."
+keywords = ["no_std", "bootstrap"]
+categories = ["no-std"]
+
+[lib]
+name = "alloc"
+path = "src/lib.rs"
+
+[dependencies]
+core = { package = "eko-core", path = "../core", version = "0.0.1" }
+compiler_builtins = { package = "eko-compiler-builtins", path = "../compiler_builtins", version = "0.0.1" }

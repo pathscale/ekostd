@@ -1,0 +1,16 @@
+[package]
+name = "eko-compiler-builtins"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pathscale/ekostd"
+description = "The minimal compiler_builtins for the EKO compiler family."
+keywords = ["no_std", "bootstrap"]
+categories = ["no-std"]
+
+[lib]
+name = "compiler_builtins"
+path = "src/lib.rs"
+
+[dependencies]
+core = { package = "eko-core", path = "../core", version = "0.0.1" }

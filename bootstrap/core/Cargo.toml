@@ -1,0 +1,14 @@
+[package]
+name = "eko-core"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pathscale/ekostd"
+description = "The minimal core language library for the EKO compiler family. Built from source; no compiler supplies it."
+keywords = ["no_std", "bootstrap"]
+categories = ["no-std"]
+
+[lib]
+name = "core"
+path = "src/lib.rs"
+
