@@ -101,3 +101,8 @@ pub unsafe trait Allocator {
 
 /// The older name for `LayoutError`.
 pub type LayoutErr = LayoutError;
+
+impl crate::cmp::PartialEq for Layout {
+    fn eq(&self, other: &Self) -> bool { self.size == other.size && self.align == other.align }
+}
+impl crate::cmp::Eq for Layout {}

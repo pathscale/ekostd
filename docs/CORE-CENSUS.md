@@ -30,6 +30,7 @@ Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwi
 | 2, after batch 1 | 6 | 5 | 14 | 23 | 30 | 34 | 112 |
 | 3, after batch 2 | 2 | 4 | 14 | 8 | 27 | 25 | 80 |
 | 4, after batch 3 | passes | 1 | 2 | 6 | 25 | 22 | 56, plus `hashbrown` reached: 37 |
+| 5, after batch 4 | passes | passes | passes | 3 | 22 | 20 | 45, plus `hashbrown`: 5 |
 
 Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, as_mut_ptr}`,
 `ptr::{read_unaligned, write_unaligned}` and the pointer method, `wrapping_shl`, `wrapping_shr`,
@@ -45,6 +46,14 @@ Batch 3 added: `from_str_radix` with `ParseIntError`; `saturating_mul`, `abs`, `
 the `CStr` lang item on the existing type; and `eko-alloc` now re-exports `Layout`.
 
 After run 4 `foldhash` compiles, which lets rustc reach `hashbrown` for the first time.
+
+Batch 4 added: `unwrap_unchecked` on `Option` and `Result`; `core::array` with array `map`; `PartialEq` and `Eq`
+for `Layout`; `swap_bytes`, `div_ceil`; `leading_zeros` and `trailing_zeros` on the non-zero types;
+`Formatter::pad` (no width or fill); `BuildHasher::hash_one`; `From<bool>` for the integers; signed-to-unsigned
+`TryFrom`; `Iterator::step_by`; `ptr::swap_nonoverlapping`; pointer `align_offset`; `atomic::spin_loop_hint`;
+`str::split` on a single character; and `handle_alloc_error` in `eko-alloc`.
+
+After run 5 `foldhash`, `spin` and `bitflags` compile.
 
 ## Open after run 2, largest first
 

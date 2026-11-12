@@ -61,3 +61,8 @@ pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 
     }
     result
 }
+
+/// Called when an allocation fails and the caller cannot continue. Does not return.
+pub fn handle_alloc_error(_layout: Layout) -> ! {
+    core::intrinsics::abort()
+}

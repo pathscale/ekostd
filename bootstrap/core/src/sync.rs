@@ -1,5 +1,7 @@
 //! Atomic synchronization primitives.
 pub mod atomic {
+    /// The older name for `core::hint::spin_loop`.
+    pub fn spin_loop_hint() { crate::hint::spin_loop() }
 use crate::cell::UnsafeCell;
 use crate::clone::Clone;
 use crate::cmp::{Eq, PartialEq};

@@ -47,6 +47,11 @@ pub trait Iterator {
     fn chain<U: IntoIterator<Item = Self::Item>>(self, other: U) -> Chain<Self, U::IntoIter> where Self: Sized { Chain { a: Some(self), b: Some(other.into_iter()) } }
     fn take(self, n: usize) -> Take<Self> where Self: Sized { Take { iter: self, n } }
     fn skip(self, n: usize) -> Skip<Self> where Self: Sized { Skip { iter: self, n } }
+    /// Every `step`th item, starting with the first. `step` must not be zero.
+    fn step_by(self, step: usize) -> StepBy<Self> where Self: Sized {
+        if step == 0 { crate::panic::panic_nounwind("step_by: step must be non-zero"); }
+        StepBy { iter: self, step, first: true }
+    }
     fn copied<'a, T: 'a + Copy>(self) -> Copied<Self> where Self: Sized + Iterator<Item = &'a T> { Copied { iter: self } }
     fn cloned<'a, T: 'a + Clone>(self) -> Cloned<Self> where Self: Sized + Iterator<Item = &'a T> { Cloned { iter: self } }
     fn rev(self) -> Rev<Self> where Self: Sized + DoubleEndedIterator { Rev { iter: self } }
@@ -428,5 +433,21 @@ impl<A: Step> Iterator for RangeInclusive<A> {
             }
             Some(v)
         }
+    }
+}
+
+pub struct StepBy<I> { iter: I, step: usize, first: bool }
+impl<I: Iterator> Iterator for StepBy<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        if self.first {
+            self.first = false;
+            return self.iter.next();
+        }
+        let mut skipped = 1;
+        while skipped < self.step {
+            match self.iter.next() { Some(_) => skipped += 1, None => return None }
+        }
+        self.iter.next()
     }
 }

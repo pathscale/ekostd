@@ -413,6 +413,8 @@ impl<'b, 'a: 'b> DebugTuple<'b, 'a> {
 }
 
 impl<'a> Formatter<'a> {
+    /// Writes `s`. Width, fill and precision are not supported by this formatter and are ignored.
+    pub fn pad(&mut self, s: &str) -> Result { self.write_str(s) }
     pub fn debug_struct<'b>(&'b mut self, name: &str) -> DebugStruct<'b, 'a> {
         let failed = self.write_str(name).is_err();
         DebugStruct { fmt: self, failed, fields: false }

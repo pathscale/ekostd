@@ -92,6 +92,12 @@ impl<T: Hash, E: Hash> Hash for crate::result::Result<T, E> {
 pub trait BuildHasher {
     type Hasher: Hasher;
     fn build_hasher(&self) -> Self::Hasher;
+    /// Hashes one value with a fresh hasher.
+    fn hash_one<T: Hash>(&self, value: T) -> u64 where Self: Sized {
+        let mut hasher = self.build_hasher();
+        value.hash(&mut hasher);
+        hasher.finish()
+    }
 }
 pub struct BuildHasherDefault<H>(PhantomData<fn() -> H>);
 impl<H> BuildHasherDefault<H> {

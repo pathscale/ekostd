@@ -206,3 +206,32 @@ impl<T: Copy, const N: usize> TryFrom<&[T]> for [T; N] {
         }
     }
 }
+
+macro_rules! impl_from_bool {
+    ($($t:ty)*) => {$(
+        const impl From<bool> for $t {
+            #[inline(always)]
+            fn from(value: bool) -> Self { value as Self }
+        }
+    )*};
+}
+impl_from_bool!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+macro_rules! impl_try_from_signed {
+    ($($source:ty => $target:ty),* $(,)?) => {$(
+        impl TryFrom<$source> for $target {
+            type Error = TryFromIntError;
+            #[inline(always)]
+            fn try_from(value: $source) -> crate::result::Result<Self, Self::Error> {
+                if value < 0 {
+                    crate::result::Result::Err(TryFromIntError(()))
+                } else {
+                    crate::result::Result::Ok(value as Self)
+                }
+            }
+        }
+    )*};
+}
+// Same-width or wider targets only, so the one way to fail is a negative value.
+impl_try_from_signed!(i8 => u8, i16 => u16, i32 => u32, i64 => u64, i128 => u128, isize => usize,
+    i32 => usize, i64 => usize, i32 => u64, isize => u64);

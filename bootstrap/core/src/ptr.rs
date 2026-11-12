@@ -96,6 +96,19 @@ pub const unsafe fn read_unaligned<T>(src: *const T) -> T {
     }
 }
 
+/// Swaps `count` values between two regions that do not overlap.
+pub unsafe fn swap_nonoverlapping<T>(x: *mut T, y: *mut T, count: usize) {
+    let mut i = 0;
+    while i < count {
+        unsafe {
+            let held = read(x.add(i));
+            intrinsics::copy_nonoverlapping(y.add(i) as *const T, x.add(i), 1);
+            write(y.add(i), held);
+        }
+        i += 1;
+    }
+}
+
 /// Writes a `T` to an address that need not be aligned for `T`, by copying its bytes.
 #[inline(always)]
 pub const unsafe fn write_unaligned<T>(dst: *mut T, src: T) {
@@ -510,6 +523,18 @@ impl<T: PointeeSized> *const T {
         unsafe { read_unaligned(self) }
     }
 
+    /// How many elements to step forward to reach an address aligned to `align` (a power of two).
+    /// Returns `usize::MAX` when no whole number of elements gets there, which callers must handle.
+    #[inline(always)]
+    pub fn align_offset(self, align: usize) -> usize
+    where
+        T: Sized,
+    {
+        let size = crate::mem::size_of::<T>();
+        let bytes = align.wrapping_sub((self as usize) & (align - 1)) & (align - 1);
+        if bytes == 0 { 0 } else if size != 0 && bytes % size == 0 { bytes / size } else { usize::MAX }
+    }
+
     /// Distance from `origin` to `self` in elements. Both must point into one allocation.
     #[inline(always)]
     pub unsafe fn offset_from(self, origin: *const T) -> isize
@@ -637,6 +662,18 @@ impl<T: PointeeSized> *mut T {
         T: Sized,
     {
         unsafe { read_unaligned(self) }
+    }
+
+    /// How many elements to step forward to reach an address aligned to `align` (a power of two).
+    /// Returns `usize::MAX` when no whole number of elements gets there, which callers must handle.
+    #[inline(always)]
+    pub fn align_offset(self, align: usize) -> usize
+    where
+        T: Sized,
+    {
+        let size = crate::mem::size_of::<T>();
+        let bytes = align.wrapping_sub((self as usize) & (align - 1)) & (align - 1);
+        if bytes == 0 { 0 } else if size != 0 && bytes % size == 0 { bytes / size } else { usize::MAX }
     }
 
     /// Distance from `origin` to `self` in elements. Both must point into one allocation.

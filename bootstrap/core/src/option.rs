@@ -28,6 +28,11 @@ impl<T> Option<T> {
         match self { Some(value) => Some(value), None => None }
     }
 
+    /// The value, without checking. `None` here is undefined behaviour.
+    pub unsafe fn unwrap_unchecked(self) -> T {
+        match self { Some(value) => value, None => unsafe { crate::hint::unreachable_unchecked() } }
+    }
+
     /// Moves the value out, leaving `None`.
     pub fn take(&mut self) -> Option<T> { crate::mem::replace(self, None) }
 

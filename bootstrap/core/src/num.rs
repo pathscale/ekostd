@@ -110,6 +110,21 @@ macro_rules! unsigned {
                 }
                 n
             }
+            /// Reverses the byte order.
+            pub const fn swap_bytes(self) -> Self {
+                let (mut rest, mut out, mut i) = (self, 0 as $t, 0);
+                while i < $bits / 8 {
+                    out = out.wrapping_shl(8) | (rest & (0xff as $t));
+                    rest = rest.wrapping_shr(8);
+                    i += 1;
+                }
+                out
+            }
+            /// Division rounded towards positive infinity.
+            pub const fn div_ceil(self, rhs: Self) -> Self {
+                let quotient = self / rhs;
+                if self % rhs != 0 { quotient + 1 } else { quotient }
+            }
             pub const fn abs_diff(self, other: Self) -> Self { if self < other { other - self } else { self - other } }
             pub const fn rotate_left(self, n: u32) -> Self {
                 let n = n & ($bits - 1);
@@ -169,6 +184,8 @@ macro_rules! nonzero {
             pub const fn new(n: $t) -> Option<Self> { if n == 0 { None } else { Some(Self(n)) } }
             pub const unsafe fn new_unchecked(n: $t) -> Self { Self(n) }
             pub const fn get(self) -> $t { self.0 }
+            pub const fn leading_zeros(self) -> u32 { self.0.leading_zeros() }
+            pub const fn trailing_zeros(self) -> u32 { self.0.trailing_zeros() }
         }
     };
 }
