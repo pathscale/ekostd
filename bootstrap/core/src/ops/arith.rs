@@ -200,3 +200,39 @@ scalar_binary_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isiz
 scalar_bit_assign_ops!(bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_shift_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_neg_ops!(i8, i16, i32, i64, i128, isize, f32, f64);
+
+/// Shifts take any integer type on the right, as in Rust: `x << 3u8`, `x >> n` with `n: usize`.
+macro_rules! mixed_shift_ops {
+    ($lhs:ty: $($rhs:ty)*) => {$(
+        impl Shl<$rhs> for $lhs {
+            type Output = Self;
+            #[inline]
+            fn shl(self, rhs: $rhs) -> Self { self << rhs }
+        }
+        impl Shr<$rhs> for $lhs {
+            type Output = Self;
+            #[inline]
+            fn shr(self, rhs: $rhs) -> Self { self >> rhs }
+        }
+        impl ShlAssign<$rhs> for $lhs {
+            #[inline]
+            fn shl_assign(&mut self, rhs: $rhs) { *self <<= rhs; }
+        }
+        impl ShrAssign<$rhs> for $lhs {
+            #[inline]
+            fn shr_assign(&mut self, rhs: $rhs) { *self >>= rhs; }
+        }
+    )*};
+}
+mixed_shift_ops!(u8: u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(u16: u8 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(u32: u8 u16 u64 u128 usize i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(u64: u8 u16 u32 u128 usize i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(u128: u8 u16 u32 u64 usize i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(usize: u8 u16 u32 u64 u128 i8 i16 i32 i64 i128 isize);
+mixed_shift_ops!(i8: u8 u16 u32 u64 u128 usize i16 i32 i64 i128 isize);
+mixed_shift_ops!(i16: u8 u16 u32 u64 u128 usize i8 i32 i64 i128 isize);
+mixed_shift_ops!(i32: u8 u16 u32 u64 u128 usize i8 i16 i64 i128 isize);
+mixed_shift_ops!(i64: u8 u16 u32 u64 u128 usize i8 i16 i32 i128 isize);
+mixed_shift_ops!(i128: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 isize);
+mixed_shift_ops!(isize: u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128);

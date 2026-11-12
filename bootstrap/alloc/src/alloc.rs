@@ -1,4 +1,4 @@
-use core::alloc::{Layout, LayoutError};
+pub use core::alloc::{Layout, LayoutError};
 
 unsafe extern "Rust" {
     fn __rust_alloc(size: usize, align: usize) -> *mut u8;

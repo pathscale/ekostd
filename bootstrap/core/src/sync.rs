@@ -85,3 +85,16 @@ impl<T> AtomicPtr<T> {
 pub fn fence(o:Ordering){match o{Ordering::Relaxed=>panic!("fence ordering cannot be Relaxed"),Ordering::Release=>unsafe{intrinsics::atomic_fence::<{IOrd::Release}>()},Ordering::Acquire=>unsafe{intrinsics::atomic_fence::<{IOrd::Acquire}>()},Ordering::AcqRel=>unsafe{intrinsics::atomic_fence::<{IOrd::AcqRel}>()},Ordering::SeqCst=>unsafe{intrinsics::atomic_fence::<{IOrd::SeqCst}>()}}}
 pub fn compiler_fence(o:Ordering){match o{Ordering::Relaxed=>panic!("fence ordering cannot be Relaxed"),Ordering::Release=>unsafe{intrinsics::atomic_singlethreadfence::<{IOrd::Release}>()},Ordering::Acquire=>unsafe{intrinsics::atomic_singlethreadfence::<{IOrd::Acquire}>()},Ordering::AcqRel=>unsafe{intrinsics::atomic_singlethreadfence::<{IOrd::AcqRel}>()},Ordering::SeqCst=>unsafe{intrinsics::atomic_singlethreadfence::<{IOrd::SeqCst}>()}}}
 }
+
+macro_rules! atomic_get_mut {
+    ($($name:path, $t:ty);*) => {$(
+        impl $name {
+            /// Exclusive access needs no atomic operation.
+            pub fn get_mut(&mut self) -> &mut $t {
+                // `repr(transparent)` over a cell of `$t`: same address, same layout.
+                unsafe { &mut *(self as *mut Self as *mut $t) }
+            }
+        }
+    )*};
+}
+atomic_get_mut!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize);

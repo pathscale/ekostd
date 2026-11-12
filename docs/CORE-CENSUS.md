@@ -29,6 +29,7 @@ Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwi
 | 1, 2026-11-12, before any change | 7 | 11 | 14 | 24 | 45 | 48 | 149 |
 | 2, after batch 1 | 6 | 5 | 14 | 23 | 30 | 34 | 112 |
 | 3, after batch 2 | 2 | 4 | 14 | 8 | 27 | 25 | 80 |
+| 4, after batch 3 | passes | 1 | 2 | 6 | 25 | 22 | 56, plus `hashbrown` reached: 37 |
 
 Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, as_mut_ptr}`,
 `ptr::{read_unaligned, write_unaligned}` and the pointer method, `wrapping_shl`, `wrapping_shr`,
@@ -37,6 +38,13 @@ Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, a
 Batch 2 added: `Formatter::{debug_struct, debug_tuple}` with their builders; `Debug` for `NonNull`, `Cell`,
 `PhantomData` and `Layout`; `Pointer` for `NonNull`; `AsRef<[T]>` and `AsMut<[T]>` for arrays; `AsRef<[u8]>` for
 `str`; `TryFrom<&[T]>` for arrays.
+
+Batch 3 added: `from_str_radix` with `ParseIntError`; `saturating_mul`, `abs`, `abs_diff`, `rotate_left`,
+`rotate_right`; shifts by any integer type; `Option::take`, `Cell::take`, `Result::{unwrap_err, transpose}`;
+`MaybeUninit::assume_init_read`; `get_mut` on the integer atomics; pointer `offset_from`; `alloc::LayoutErr`;
+the `CStr` lang item on the existing type; and `eko-alloc` now re-exports `Layout`.
+
+After run 4 `foldhash` compiles, which lets rustc reach `hashbrown` for the first time.
 
 ## Open after run 2, largest first
 

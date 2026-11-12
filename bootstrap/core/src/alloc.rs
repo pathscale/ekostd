@@ -98,3 +98,6 @@ pub unsafe trait Allocator {
 
     unsafe fn deallocate(&self, ptr: crate::ptr::NonNull<u8>, layout: Layout);
 }
+
+/// The older name for `LayoutError`.
+pub type LayoutErr = LayoutError;

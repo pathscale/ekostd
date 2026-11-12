@@ -48,6 +48,13 @@ impl<T, E> Result<T, E> {
     }
 
     #[track_caller]
+    pub fn unwrap_err(self) -> E {
+        match self {
+            Ok(_) => crate::panic::panic_nounwind("called `Result::unwrap_err()` on an `Ok` value"),
+            Err(error) => error,
+        }
+    }
+
     pub fn unwrap(self) -> T {
         match self {
             Ok(value) => value,
@@ -122,6 +129,17 @@ const impl<T, E, F: [const] From<E>> FromResidual<Result<Infallible, E>> for Res
         match residual {
             Err(err) => Err(F::from(err)),
             Ok(never) => match never {},
+        }
+    }
+}
+
+impl<T, E> Result<Option<T>, E> {
+    /// `Ok(None)` becomes `None`; `Ok(Some(v))` and `Err(e)` become `Some`.
+    pub fn transpose(self) -> Option<Result<T, E>> {
+        match self {
+            Ok(Some(value)) => Some(Ok(value)),
+            Ok(None) => None,
+            Err(error) => Some(Err(error)),
         }
     }
 }

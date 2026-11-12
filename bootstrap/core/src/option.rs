@@ -28,6 +28,9 @@ impl<T> Option<T> {
         match self { Some(value) => Some(value), None => None }
     }
 
+    /// Moves the value out, leaving `None`.
+    pub fn take(&mut self) -> Option<T> { crate::mem::replace(self, None) }
+
     pub const fn as_mut(&mut self) -> Option<&mut T> {
         match self { Some(value) => Some(value), None => None }
     }

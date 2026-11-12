@@ -510,6 +510,15 @@ impl<T: PointeeSized> *const T {
         unsafe { read_unaligned(self) }
     }
 
+    /// Distance from `origin` to `self` in elements. Both must point into one allocation.
+    #[inline(always)]
+    pub unsafe fn offset_from(self, origin: *const T) -> isize
+    where
+        T: Sized,
+    {
+        ((self as usize).wrapping_sub(origin as usize) as isize) / (crate::mem::size_of::<T>() as isize)
+    }
+
     #[inline(always)]
     pub const unsafe fn copy_to(self, dst: *mut T, count: usize)
     where
@@ -628,6 +637,15 @@ impl<T: PointeeSized> *mut T {
         T: Sized,
     {
         unsafe { read_unaligned(self) }
+    }
+
+    /// Distance from `origin` to `self` in elements. Both must point into one allocation.
+    #[inline(always)]
+    pub unsafe fn offset_from(self, origin: *const T) -> isize
+    where
+        T: Sized,
+    {
+        ((self as usize).wrapping_sub(origin as usize) as isize) / (crate::mem::size_of::<T>() as isize)
     }
 
     #[inline(always)]

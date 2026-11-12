@@ -87,3 +87,8 @@ impl<T: Copy> Cell<T> {
         unsafe { *self.value.get() }
     }
 }
+
+impl<T: crate::default::Default> Cell<T> {
+    /// Moves the value out, leaving the default.
+    pub fn take(&self) -> T { self.replace(crate::default::Default::default()) }
+}

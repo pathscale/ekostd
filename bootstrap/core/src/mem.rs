@@ -59,6 +59,9 @@ impl<T> MaybeUninit<T> {
 
     pub const fn as_ptr(&self) -> *const T { self as *const Self as *const T }
 
+    /// Reads the value out by copy. The caller must not let it be read or dropped twice.
+    pub const unsafe fn assume_init_read(&self) -> T { unsafe { crate::ptr::read(self.as_ptr()) } }
+
     pub const fn as_mut_ptr(&mut self) -> *mut T { self as *mut Self as *mut T }
 
     pub const fn write(&mut self, value: T) -> &mut T {
