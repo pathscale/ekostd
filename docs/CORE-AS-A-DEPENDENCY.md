@@ -64,15 +64,21 @@ every one of them.
 So the first step is a measurement, not a switch: compile each binary's units against the bootstrap `core` with no
 default `core`, and count what is missing, per item and per crate. That number is the size of the job and its order.
 
-## 6. Decisions for the owner
+## 6. Decisions
 
-1. **Which source becomes the complete `core` for the compiler family?** Grow the ekostd bootstrap `core` until the
-   census in section 5 is empty (keeps the rule that the compiler never touches the Rust standard library), or use the
-   `core` inside the `ps-rust-stdlib` fork (complete today, but it is the standard library fork, reserved so far for
-   user programs). Recommendation: grow the ekostd one, driven by the census, starting with `ps-wild` (already `no_std`).
-2. **Registry:** crates.io or the private registry `ekostd`'s consumers already use.
-3. **Karen and `pathdb` use `std`.** They cannot adopt this until they are `std`-free or the standard library fork is
-   available as the ordinary dependency planned for user programs.
+Decided by the owner, 2026-11-12:
+
+1. **The complete `core` is the ekostd one.** Grow `bootstrap/core` until ps-wild's graph compiles, driven by the
+   census in section 5. ps-wild goes first because it is already `no_std`.
+2. **Publish them as real packages**: `eko-core`, `eko-alloc`, `eko-compiler-builtins`.
+3. **No hack scripts in the bootstrap.** The hand-rolled harness is removed. The one tolerated shim is the POSIX
+   `rustc` stand-in that forwards to `ekors` (`ekopathrs/scripts/eko-rustc`).
+
+Still open:
+
+- **Registry:** crates.io or the private registry `ekostd`'s consumers already use.
+- **Karen and `pathdb` use `std`.** They cannot adopt this until they are `std`-free or the standard library fork is
+  available as the ordinary dependency planned for user programs.
 
 ## 7. Order of work
 
