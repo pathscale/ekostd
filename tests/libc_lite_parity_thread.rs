@@ -17,6 +17,9 @@ macro_rules! same_consts {
 }
 
 same_consts!(CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL, PTHREAD_CREATE_DETACHED);
+// `AT_SECURE` is read from the aux vector, so only the Linux targets have it.
+#[cfg(target_os = "linux")]
+same_consts!(AT_SECURE);
 
 // Aliases must be the very same type, not just the same size.
 macro_rules! same_alias {
@@ -44,6 +47,7 @@ macro_rules! same_layout {
 same_layout!(
     c_ulong,
     c_void,
+    Dl_info,
     pthread_attr_t,
     pthread_cond_t,
     pthread_key_t,
@@ -73,6 +77,28 @@ const _: () = {
     let theirs: libc::timeval = unsafe { core::mem::zeroed() };
     same_field_type(&ours.tv_sec, &theirs.tv_sec);
     same_field_type(&ours.tv_usec, &theirs.tv_usec);
+};
+
+// `Dl_info` is all public fields: every offset and every field type.
+const _: () = {
+    assert!(
+        offset_of!(eko::libc_lite::Dl_info, dli_fname) == offset_of!(libc::Dl_info, dli_fname)
+    );
+    assert!(
+        offset_of!(eko::libc_lite::Dl_info, dli_fbase) == offset_of!(libc::Dl_info, dli_fbase)
+    );
+    assert!(
+        offset_of!(eko::libc_lite::Dl_info, dli_sname) == offset_of!(libc::Dl_info, dli_sname)
+    );
+    assert!(
+        offset_of!(eko::libc_lite::Dl_info, dli_saddr) == offset_of!(libc::Dl_info, dli_saddr)
+    );
+    let ours: eko::libc_lite::Dl_info = unsafe { core::mem::zeroed() };
+    let theirs: libc::Dl_info = unsafe { core::mem::zeroed() };
+    same_field_type(&ours.dli_fname, &theirs.dli_fname);
+    same_field_type(&ours.dli_fbase, &theirs.dli_fbase);
+    same_field_type(&ours.dli_sname, &theirs.dli_sname);
+    same_field_type(&ours.dli_saddr, &theirs.dli_saddr);
 };
 
 const fn same_field_type<T>(_: &T, _: &T) {}
@@ -176,6 +202,22 @@ macro_rules! fn_signatures {
         ) -> c_int = $c::sysctlbyname;
         #[cfg(target_os = "linux")]
         const _: unsafe extern "C" fn($c::c_ulong) -> $c::c_ulong = $c::getauxval;
+
+        const _: unsafe extern "C" fn(*const $c::c_void, *mut $c::Dl_info) -> c_int = $c::dladdr;
+        #[cfg(target_os = "macos")]
+        const _: unsafe extern "C" fn($c::pthread_t) -> *mut $c::c_void =
+            $c::pthread_get_stackaddr_np;
+        #[cfg(target_os = "macos")]
+        const _: unsafe extern "C" fn($c::pthread_t) -> usize = $c::pthread_get_stacksize_np;
+        #[cfg(target_os = "linux")]
+        const _: unsafe extern "C" fn($c::pthread_t, *mut $c::pthread_attr_t) -> c_int =
+            $c::pthread_getattr_np;
+        #[cfg(target_os = "linux")]
+        const _: unsafe extern "C" fn(
+            *const $c::pthread_attr_t,
+            *mut *mut $c::c_void,
+            *mut usize,
+        ) -> c_int = $c::pthread_attr_getstack;
     };
 }
 

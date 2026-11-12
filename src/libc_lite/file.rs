@@ -7,6 +7,7 @@ pub use core::ffi::{c_char, c_int, c_short};
 
 pub type off_t = i64;
 pub type uid_t = u32;
+pub type gid_t = u32;
 
 #[cfg(target_os = "macos")]
 pub type mode_t = u16;
@@ -215,4 +216,13 @@ unsafe extern "C" {
     pub fn fsync(fd: c_int) -> c_int;
     pub fn fchmod(fd: c_int, mode: mode_t) -> c_int;
     pub fn geteuid() -> uid_t;
+    pub fn getuid() -> uid_t;
+    pub fn getegid() -> gid_t;
+    pub fn getgid() -> gid_t;
+}
+
+// Only the BSD family has `issetugid`. The Linux targets read `AT_SECURE` from the aux vector.
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    pub fn issetugid() -> c_int;
 }

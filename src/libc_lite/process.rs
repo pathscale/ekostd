@@ -279,6 +279,7 @@ pub struct sigaction {
 
 unsafe extern "C" {
     pub fn abort() -> !;
+    pub fn atexit(cb: extern "C" fn()) -> c_int;
     pub fn exit(status: c_int) -> !;
     pub fn _exit(status: c_int) -> !;
     pub fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
@@ -367,4 +368,63 @@ unsafe extern "C" {
         buffer: *mut c_void,
         buffersize: c_int,
     ) -> c_int;
+}
+
+// Only Apple has the Mach task calls. These aliases are the ones the signature and the record need.
+#[cfg(target_os = "macos")]
+type integer_t = c_int;
+#[cfg(target_os = "macos")]
+type natural_t = u32;
+#[cfg(target_os = "macos")]
+type kern_return_t = c_int;
+#[cfg(target_os = "macos")]
+type policy_t = c_int;
+#[cfg(target_os = "macos")]
+type mach_msg_type_number_t = natural_t;
+#[cfg(target_os = "macos")]
+type task_info_t = *mut integer_t;
+#[cfg(target_os = "macos")]
+pub type task_flavor_t = natural_t;
+
+// Only the record is not on the item list: `mach_task_basic_info` has two fields of this type.
+#[cfg(target_os = "macos")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct time_value_t {
+    pub seconds: integer_t,
+    pub microseconds: integer_t,
+}
+
+// Apple packs this record to 4 bytes, so its 64-bit fields are not 8-byte aligned.
+#[cfg(target_os = "macos")]
+#[repr(C, packed(4))]
+#[derive(Clone, Copy)]
+pub struct mach_task_basic_info {
+    pub virtual_size: mach_vm_size_t,
+    pub resident_size: mach_vm_size_t,
+    pub resident_size_max: mach_vm_size_t,
+    pub user_time: time_value_t,
+    pub system_time: time_value_t,
+    pub policy: policy_t,
+    pub suspend_count: integer_t,
+}
+
+#[cfg(target_os = "macos")]
+pub const KERN_SUCCESS: c_int = 0;
+#[cfg(target_os = "macos")]
+pub const MACH_TASK_BASIC_INFO: u32 = 20;
+// The count is the record size in `natural_t` words, as in the `libc` crate.
+#[cfg(target_os = "macos")]
+pub const MACH_TASK_BASIC_INFO_COUNT: u32 =
+    (core::mem::size_of::<mach_task_basic_info>() / core::mem::size_of::<natural_t>()) as u32;
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    pub static mut mach_task_self_: mach_port_t;
+    pub fn task_info(
+        host: mach_port_t,
+        flavor: task_flavor_t,
+        task_info_out: task_info_t,
+        task_info_count: *mut mach_msg_type_number_t,
+    ) -> kern_return_t;
 }

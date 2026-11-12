@@ -26,6 +26,7 @@ const _: Option<libc::mode_t> = None::<eko::libc_lite::mode_t>;
 const _: Option<libc::off_t> = None::<eko::libc_lite::off_t>;
 const _: Option<libc::c_short> = None::<eko::libc_lite::c_short>;
 const _: Option<libc::uid_t> = None::<eko::libc_lite::uid_t>;
+const _: Option<libc::gid_t> = None::<eko::libc_lite::gid_t>;
 
 macro_rules! same_layout {
     ($($ty:ident),* $(,)?) => {
@@ -92,7 +93,11 @@ same_fn!(unsafe extern "C" fn(*const c_char) -> c_int: rmdir, unlink);
 same_fn!(unsafe extern "C" fn(*const c_char, *mut c_char, usize) -> isize: readlink);
 same_fn!(unsafe extern "C" fn(c_int) -> c_int: fsync);
 same_fn!(unsafe extern "C" fn(c_int, libc::mode_t) -> c_int: fchmod);
-same_fn!(unsafe extern "C" fn() -> libc::uid_t: geteuid);
+same_fn!(unsafe extern "C" fn() -> libc::uid_t: geteuid, getuid);
+same_fn!(unsafe extern "C" fn() -> libc::gid_t: getegid, getgid);
+// Only the BSD family has `issetugid`.
+#[cfg(target_os = "macos")]
+same_fn!(unsafe extern "C" fn() -> c_int: issetugid);
 
 // Functions that take or return a `libc_lite` struct. The struct is a different Rust type on each
 // side, so the one explicit function pointer type is generic over it and instantiated per side;

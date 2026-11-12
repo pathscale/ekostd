@@ -85,6 +85,83 @@ mod checks {
 
     same_type!(nfds_t, pid_t, rlim_t);
 
+    // Only Apple has the Mach task items.
+    #[cfg(target_os = "macos")]
+    same_const!(KERN_SUCCESS, MACH_TASK_BASIC_INFO, MACH_TASK_BASIC_INFO_COUNT);
+
+    #[cfg(target_os = "macos")]
+    same_type!(task_flavor_t);
+
+    #[cfg(target_os = "macos")]
+    same_struct!(time_value_t { same: [seconds, microseconds], offset_only: [] });
+
+    // `mach_task_basic_info` is packed to 4 bytes, so a field cannot be borrowed. Each field is
+    // copied out of the zeroed value before its type is compared. `user_time` and `system_time`
+    // are `time_value_t`, a different Rust type on each side, so only their offsets are compared.
+    #[cfg(target_os = "macos")]
+    const _: () = {
+        use core::mem::{align_of, offset_of, size_of};
+        assert!(
+            size_of::<eko::libc_lite::mach_task_basic_info>()
+                == size_of::<libc::mach_task_basic_info>()
+        );
+        assert!(
+            align_of::<eko::libc_lite::mach_task_basic_info>()
+                == align_of::<libc::mach_task_basic_info>()
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, virtual_size)
+                == offset_of!(libc::mach_task_basic_info, virtual_size)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, resident_size)
+                == offset_of!(libc::mach_task_basic_info, resident_size)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, resident_size_max)
+                == offset_of!(libc::mach_task_basic_info, resident_size_max)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, user_time)
+                == offset_of!(libc::mach_task_basic_info, user_time)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, system_time)
+                == offset_of!(libc::mach_task_basic_info, system_time)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, policy)
+                == offset_of!(libc::mach_task_basic_info, policy)
+        );
+        assert!(
+            offset_of!(eko::libc_lite::mach_task_basic_info, suspend_count)
+                == offset_of!(libc::mach_task_basic_info, suspend_count)
+        );
+        let a: eko::libc_lite::mach_task_basic_info = unsafe { core::mem::zeroed() };
+        let b: libc::mach_task_basic_info = unsafe { core::mem::zeroed() };
+        same_type_of(&{ a.virtual_size }, &{ b.virtual_size });
+        same_type_of(&{ a.resident_size }, &{ b.resident_size });
+        same_type_of(&{ a.resident_size_max }, &{ b.resident_size_max });
+        same_type_of(&{ a.policy }, &{ b.policy });
+        same_type_of(&{ a.suspend_count }, &{ b.suspend_count });
+    };
+
+    // `mach_port_t` is `c_uint`, the flavor and the count are `u32`, the info pointer is `*mut c_int`.
+    #[cfg(target_os = "macos")]
+    same_fn!(
+        task_info: unsafe extern "C" fn(core::ffi::c_uint, u32, *mut c_int, *mut u32) -> c_int
+    );
+
+    // `mach_task_self_` is a static, so it is compared at run time: both names are the same symbol.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[allow(deprecated)]
+    fn libc_lite_mach_task_self_matches_the_libc_crate() {
+        let ours: core::ffi::c_uint = unsafe { eko::libc_lite::mach_task_self_ };
+        let theirs: libc::mach_port_t = unsafe { libc::mach_task_self_ };
+        assert_eq!(ours, theirs);
+    }
+
     same_struct!(pollfd { same: [fd, events, revents], offset_only: [] });
 
     same_struct!(rlimit { same: [rlim_cur, rlim_max], offset_only: [] });
@@ -158,6 +235,7 @@ mod checks {
     };
 
     same_fn!(abort: unsafe extern "C" fn() -> !);
+    same_fn!(atexit: unsafe extern "C" fn(extern "C" fn()) -> c_int);
     same_fn!(exit: unsafe extern "C" fn(c_int) -> !);
     same_fn!(_exit: unsafe extern "C" fn(c_int) -> !);
     same_fn!(fcntl: unsafe extern "C" fn(c_int, c_int, ...) -> c_int);

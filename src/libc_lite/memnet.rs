@@ -8,6 +8,23 @@ use core::ffi::{c_char, c_int, c_void};
 #[allow(non_camel_case_types)]
 pub type socklen_t = u32;
 
+#[allow(non_camel_case_types)]
+pub type size_t = usize;
+
+// Apple only: the Mach port and virtual memory types the allocator names.
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+pub type mach_port_t = core::ffi::c_uint;
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+pub type mach_vm_address_t = u64;
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+pub type mach_vm_size_t = u64;
+#[cfg(target_os = "macos")]
+#[allow(non_camel_case_types)]
+pub type vm_prot_t = c_int;
+
 #[cfg(target_os = "macos")]
 #[allow(non_camel_case_types)]
 pub type time_t = core::ffi::c_long;
@@ -103,6 +120,21 @@ pub const MAP_ANON: c_int = 0x0020;
 
 pub const MAP_FAILED: *mut c_void = !0 as *mut c_void;
 pub const MAP_PRIVATE: c_int = 0x0002;
+pub const MAP_FIXED: c_int = 0x0010;
+
+#[cfg(target_os = "macos")]
+pub const MAP_NORESERVE: c_int = 0x0040;
+#[cfg(target_os = "linux")]
+pub const MAP_NORESERVE: c_int = 0x4000;
+
+pub const MADV_DONTNEED: c_int = 4;
+#[cfg(target_os = "macos")]
+pub const MADV_FREE: c_int = 5;
+#[cfg(target_os = "linux")]
+pub const MADV_FREE: c_int = 8;
+
+#[cfg(target_os = "macos")]
+pub const VM_PROT_NONE: vm_prot_t = 0x00;
 
 pub const PROT_NONE: c_int = 0;
 pub const PROT_READ: c_int = 1;
@@ -133,6 +165,12 @@ unsafe extern "C" {
     ) -> *mut c_void;
     pub fn munmap(addr: *mut c_void, len: usize) -> c_int;
     pub fn mprotect(addr: *mut c_void, len: usize, prot: c_int) -> c_int;
+    pub fn madvise(addr: *mut c_void, len: usize, advice: c_int) -> c_int;
+    // Apple takes a `const` address and a `c_char` vector; Linux takes a `mut` address and `c_uchar`.
+    #[cfg(target_os = "macos")]
+    pub fn mincore(addr: *const c_void, len: usize, vec: *mut c_char) -> c_int;
+    #[cfg(target_os = "linux")]
+    pub fn mincore(addr: *mut c_void, len: usize, vec: *mut core::ffi::c_uchar) -> c_int;
 
     pub fn socket(domain: c_int, ty: c_int, protocol: c_int) -> c_int;
     pub fn bind(socket: c_int, address: *const sockaddr, address_len: socklen_t) -> c_int;

@@ -24,6 +24,13 @@ const _: () = assert!(eko::libc_lite::PROT_READ == libc::PROT_READ);
 const _: () = assert!(eko::libc_lite::PROT_WRITE == libc::PROT_WRITE);
 const _: () = assert!(eko::libc_lite::SOCK_STREAM == libc::SOCK_STREAM);
 const _: () = assert!(eko::libc_lite::_SC_PAGESIZE == libc::_SC_PAGESIZE);
+const _: () = assert!(eko::libc_lite::MAP_FIXED == libc::MAP_FIXED);
+const _: () = assert!(eko::libc_lite::MAP_NORESERVE == libc::MAP_NORESERVE);
+const _: () = assert!(eko::libc_lite::MADV_DONTNEED == libc::MADV_DONTNEED);
+const _: () = assert!(eko::libc_lite::MADV_FREE == libc::MADV_FREE);
+// Only Apple has `VM_PROT_NONE` in the `libc` crate for these targets.
+#[cfg(target_os = "macos")]
+const _: () = assert!(eko::libc_lite::VM_PROT_NONE == libc::VM_PROT_NONE);
 const _: () = assert!(eko::libc_lite::EMFILE == libc::EMFILE);
 const _: () = assert!(eko::libc_lite::ENFILE == libc::ENFILE);
 const _: () = assert!(eko::libc_lite::EPROTO == libc::EPROTO);
@@ -45,6 +52,24 @@ const _: () = assert!(unsafe {
 });
 
 // Type aliases: the identity function only compiles when the two are one type.
+// The allocator's names: the identity function only compiles when the two are one type.
+const _: fn(eko::libc_lite::size_t) -> libc::size_t = |x| x;
+const _: () = assert!(size_of::<eko::libc_lite::size_t>() == size_of::<libc::size_t>());
+const _: () = assert!(align_of::<eko::libc_lite::size_t>() == align_of::<libc::size_t>());
+
+#[cfg(target_os = "macos")]
+macro_rules! same_mach_alias {
+    ($($name:ident),* $(,)?) => {
+        $(
+            const _: fn(eko::libc_lite::$name) -> libc::$name = |x| x;
+            const _: () = assert!(size_of::<eko::libc_lite::$name>() == size_of::<libc::$name>());
+            const _: () = assert!(align_of::<eko::libc_lite::$name>() == align_of::<libc::$name>());
+        )*
+    };
+}
+#[cfg(target_os = "macos")]
+same_mach_alias!(mach_port_t, mach_vm_address_t, mach_vm_size_t, vm_prot_t);
+
 const fn same_socklen(x: eko::libc_lite::socklen_t) -> libc::socklen_t {
     x
 }
@@ -96,6 +121,12 @@ same_fn!(
 );
 same_fn!(munmap, unsafe extern "C" fn(*mut c_void, usize) -> c_int);
 same_fn!(mprotect, unsafe extern "C" fn(*mut c_void, usize, c_int) -> c_int);
+same_fn!(madvise, unsafe extern "C" fn(*mut c_void, usize, c_int) -> c_int);
+// Apple takes a `const` address and a `c_char` vector. Linux takes a `mut` address and `c_uchar`.
+#[cfg(target_os = "macos")]
+same_fn!(mincore, unsafe extern "C" fn(*const c_void, usize, *mut c_char) -> c_int);
+#[cfg(target_os = "linux")]
+same_fn!(mincore, unsafe extern "C" fn(*mut c_void, usize, *mut core::ffi::c_uchar) -> c_int);
 same_fn!(socket, unsafe extern "C" fn(c_int, c_int, c_int) -> c_int);
 same_fn!(listen, unsafe extern "C" fn(c_int, c_int) -> c_int);
 same_fn!(dup, unsafe extern "C" fn(c_int) -> c_int);

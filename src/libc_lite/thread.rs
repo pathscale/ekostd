@@ -174,6 +174,16 @@ pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t { size: [0; 
 #[cfg(target_os = "linux")]
 pub const PTHREAD_RWLOCK_INITIALIZER: pthread_rwlock_t = pthread_rwlock_t { size: [0; 56] };
 
+/// The result of `dladdr`: the image and the symbol that hold an address.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Dl_info {
+    pub dli_fname: *const core::ffi::c_char,
+    pub dli_fbase: *mut c_void,
+    pub dli_sname: *const core::ffi::c_char,
+    pub dli_saddr: *mut c_void,
+}
+
 unsafe extern "C" {
     pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int;
     pub fn sched_yield() -> c_int;
@@ -213,6 +223,8 @@ unsafe extern "C" {
     pub fn pthread_rwlock_rdlock(lock: *mut pthread_rwlock_t) -> c_int;
     pub fn pthread_rwlock_wrlock(lock: *mut pthread_rwlock_t) -> c_int;
     pub fn pthread_rwlock_unlock(lock: *mut pthread_rwlock_t) -> c_int;
+
+    pub fn dladdr(addr: *const c_void, info: *mut Dl_info) -> c_int;
 }
 
 #[cfg(target_os = "macos")]
@@ -224,9 +236,22 @@ unsafe extern "C" {
         newp: *mut c_void,
         newlen: usize,
     ) -> c_int;
+
+    pub fn pthread_get_stackaddr_np(thread: pthread_t) -> *mut c_void;
+    pub fn pthread_get_stacksize_np(thread: pthread_t) -> usize;
 }
+
+#[cfg(target_os = "linux")]
+pub const AT_SECURE: c_ulong = 23;
 
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
     pub fn getauxval(type_: c_ulong) -> c_ulong;
+
+    pub fn pthread_getattr_np(native: pthread_t, attr: *mut pthread_attr_t) -> c_int;
+    pub fn pthread_attr_getstack(
+        attr: *const pthread_attr_t,
+        stackaddr: *mut *mut c_void,
+        stacksize: *mut usize,
+    ) -> c_int;
 }
