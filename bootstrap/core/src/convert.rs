@@ -27,14 +27,15 @@ pub trait AsRef<T: ?Sized>: crate::marker::PointeeSized {
 pub trait AsMut<T: ?Sized>: crate::marker::PointeeSized {
     fn as_mut(&mut self) -> &mut T;
 }
-impl<T: ?Sized> AsRef<T> for &T {
-    fn as_ref(&self) -> &T { *self }
+// A reference converts the way its referent does.
+impl<T: ?Sized + AsRef<U>, U: ?Sized> AsRef<U> for &T {
+    fn as_ref(&self) -> &U { <T as AsRef<U>>::as_ref(*self) }
 }
-impl<T: ?Sized> AsRef<T> for &mut T {
-    fn as_ref(&self) -> &T { &**self }
+impl<T: ?Sized + AsRef<U>, U: ?Sized> AsRef<U> for &mut T {
+    fn as_ref(&self) -> &U { <T as AsRef<U>>::as_ref(*self) }
 }
-impl<T: ?Sized> AsMut<T> for &mut T {
-    fn as_mut(&mut self) -> &mut T { &mut **self }
+impl<T: ?Sized + AsMut<U>, U: ?Sized> AsMut<U> for &mut T {
+    fn as_mut(&mut self) -> &mut U { (*self).as_mut() }
 }
 impl<T> AsRef<[T]> for [T] {
     fn as_ref(&self) -> &[T] { self }

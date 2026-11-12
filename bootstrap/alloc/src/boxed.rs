@@ -3,10 +3,18 @@ use core::alloc::Layout;
 use core::mem::{self, ManuallyDrop};
 use core::ptr::{self, NonNull};
 
-#[fundamental]
-pub struct Box<T: ?Sized> {
+/// The owning pointer inside a `Box`. The compiler reaches the raw pointer through these two fields in order.
+#[repr(transparent)]
+struct Unique<T: ?Sized> {
     pointer: NonNull<T>,
+    _marker: core::marker::PhantomData<T>,
 }
+
+/// An owned heap allocation. It is the `owned_box` language item, so `*boxed` can move the value out and the
+/// compiler drops the contents before `Drop::drop` runs.
+#[lang = "owned_box"]
+#[fundamental]
+pub struct Box<T: ?Sized>(Unique<T>);
 
 impl<T: ?Sized> core::ops::LegacyReceiver for Box<T> {}
 
@@ -15,26 +23,26 @@ impl<T> Box<T> {
         let layout = Layout::new::<T>();
         let raw = unsafe { alloc::alloc(layout).cast::<T>() };
         unsafe { raw.write(value) };
-        Self { pointer: unsafe { NonNull::new_unchecked(raw) } }
+        Self(Unique { pointer: unsafe { NonNull::new_unchecked(raw) }, _marker: core::marker::PhantomData })
     }
 }
 
 impl<T: ?Sized> Box<T> {
     pub unsafe fn from_raw(raw: *mut T) -> Self {
-        Self { pointer: unsafe { NonNull::new_unchecked(raw) } }
+        Self(Unique { pointer: unsafe { NonNull::new_unchecked(raw) }, _marker: core::marker::PhantomData })
     }
 
     pub fn into_raw(value: Self) -> *mut T {
         let value = ManuallyDrop::new(value);
-        value.pointer.as_ptr()
+        value.0.pointer.as_ptr()
     }
 
     pub fn as_ref(&self) -> &T {
-        unsafe { self.pointer.as_ref() }
+        unsafe { self.0.pointer.as_ref() }
     }
 
     pub fn as_mut(&mut self) -> &mut T {
-        unsafe { self.pointer.as_mut() }
+        unsafe { self.0.pointer.as_mut() }
     }
 }
 
@@ -55,9 +63,9 @@ impl<T: ?Sized> core::ops::DerefMut for Box<T> {
 impl<T: ?Sized> Drop for Box<T> {
     fn drop(&mut self) {
         unsafe {
-            let raw = self.pointer.as_ptr();
+            let raw = self.0.pointer.as_ptr();
+            // The compiler has already dropped the contents; only the allocation is left to release.
             let layout = Layout::for_value(&*raw);
-            ptr::drop_in_place(raw);
             if layout.size() != 0 {
                 alloc::dealloc(raw.cast::<u8>(), layout);
             }
@@ -133,3 +141,6 @@ impl<T> From<crate::vec::Vec<T>> for Box<[T]> {
 }
 
 const _: usize = mem::size_of::<NonNull<u8>>();
+
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<Unique<U>> for Unique<T> {}
+impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::DispatchFromDyn<Unique<U>> for Unique<T> {}

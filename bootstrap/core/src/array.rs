@@ -18,3 +18,42 @@ impl<T, const N: usize> [T; N] {
         unsafe { out.assume_init() }
     }
 }
+
+/// Builds an array by calling `f` with each index in order.
+pub fn from_fn<T, const N: usize, F: crate::ops::FnMut(usize) -> T>(mut f: F) -> [T; N] {
+    let mut out = crate::mem::MaybeUninit::<[T; N]>::uninit();
+    let to = out.as_mut_ptr() as *mut T;
+    let mut i = 0;
+    while i < N {
+        unsafe { crate::ptr::write(to.add(i), f(i)) };
+        i += 1;
+    }
+    unsafe { out.assume_init() }
+}
+
+/// An array's elements, by value, in order.
+pub struct IntoIter<T, const N: usize> { data: crate::mem::MaybeUninit<[T; N]>, next: usize }
+impl<T, const N: usize> crate::iter::Iterator for IntoIter<T, N> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.next == N { return None; }
+        let item = unsafe { crate::ptr::read((self.data.as_ptr() as *const T).add(self.next)) };
+        self.next += 1;
+        Some(item)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { (N - self.next, Some(N - self.next)) }
+}
+impl<T, const N: usize> crate::ops::Drop for IntoIter<T, N> {
+    fn drop(&mut self) {
+        // Elements already handed out belong to the caller; the rest are still ours to drop.
+        while self.next < N {
+            unsafe { crate::ptr::drop_in_place((self.data.as_mut_ptr() as *mut T).add(self.next)) };
+            self.next += 1;
+        }
+    }
+}
+impl<T, const N: usize> crate::iter::IntoIterator for [T; N] {
+    type Item = T;
+    type IntoIter = IntoIter<T, N>;
+    fn into_iter(self) -> IntoIter<T, N> { IntoIter { data: crate::mem::MaybeUninit::new(self), next: 0 } }
+}

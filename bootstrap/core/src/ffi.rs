@@ -17,10 +17,14 @@ pub type c_uint = u32;
 pub type c_long = i32;
 #[cfg(target_os = "windows")]
 pub type c_ulong = u32;
-#[cfg(not(target_os = "windows"))]
-pub type c_long = isize;
-#[cfg(not(target_os = "windows"))]
-pub type c_ulong = usize;
+#[cfg(all(not(target_os = "windows"), target_pointer_width = "64"))]
+pub type c_long = i64;
+#[cfg(all(not(target_os = "windows"), target_pointer_width = "64"))]
+pub type c_ulong = u64;
+#[cfg(all(not(target_os = "windows"), not(target_pointer_width = "64")))]
+pub type c_long = i32;
+#[cfg(all(not(target_os = "windows"), not(target_pointer_width = "64")))]
+pub type c_ulong = u32;
 pub type c_longlong = i64;
 pub type c_ulonglong = u64;
 pub type c_float = f32;

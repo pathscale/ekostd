@@ -319,3 +319,7 @@ impl<T> Iterator for IntoIter<T> {
 impl<T> DoubleEndedIterator for IntoIter<T> { fn next_back(&mut self)->Option<T> { if self.front==self.back{return None} self.back-=1; Some(unsafe{self.vec.pointer.as_ptr().add(self.back).read()}) } }
 impl<T> ExactSizeIterator for IntoIter<T> {}
 impl<T> Drop for IntoIter<T> { fn drop(&mut self) { unsafe { let p=self.vec.pointer.as_ptr(); for i in self.front..self.back { ptr::drop_in_place(p.add(i)); } self.vec.length=0; } } }
+
+impl<T: core::hash::Hash> core::hash::Hash for Vec<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) { self.as_slice().hash(state) }
+}

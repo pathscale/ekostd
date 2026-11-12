@@ -31,6 +31,7 @@ Not reached yet: `hashbrown`, `object`, `ps-rusty_alloc`, `linker-utils`, `libwi
 | 3, after batch 2 | 2 | 4 | 14 | 8 | 27 | 25 | 80 |
 | 4, after batch 3 | passes | 1 | 2 | 6 | 25 | 22 | 56, plus `hashbrown` reached: 37 |
 | 5, after batch 4 | passes | passes | passes | 3 | 22 | 20 | 45, plus `hashbrown`: 5 |
+| 6, after batch 5 | passes | passes | passes | passes | 22 | passes | 22, plus `hashbrown`: 1 and `ps-rusty_alloc` reached: 56 |
 
 Batch 1 added: `mem::zeroed`, `mem::transmute`, `MaybeUninit::{zeroed, as_ptr, as_mut_ptr}`,
 `ptr::{read_unaligned, write_unaligned}` and the pointer method, `wrapping_shl`, `wrapping_shr`,
@@ -54,6 +55,16 @@ for `Layout`; `swap_bytes`, `div_ceil`; `leading_zeros` and `trailing_zeros` on 
 `str::split` on a single character; and `handle_alloc_error` in `eko-alloc`.
 
 After run 5 `foldhash`, `spin` and `bitflags` compile.
+
+Batch 5 added: `Box` in `eko-alloc` as the `owned_box` language item, so `*boxed` moves out and the compiler drops
+the contents; `RefCell` with `Ref` and `RefMut`; `AsRef` and `AsMut` through references (the old impls were
+reflexive, which is not what Rust has); array `IntoIterator` by value and `array::from_fn`; `Hash` for `Vec`;
+`Cow` conversions per type instead of a blanket; `c_long` as 64 bits on 64-bit targets; `const_format_args!`
+in the panic macros, a const `Arguments::new`, and a bare `assert!` that is one literal, so assertions work in
+constants and `const fn`.
+
+After run 6 five of the six leaves compile, `ekostd` among them. What remains on `memchr` and `hashbrown` is
+`core::arch` (NEON) only.
 
 ## Open after run 2, largest first
 

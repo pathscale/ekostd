@@ -88,7 +88,7 @@ macro_rules! legacy_int_module {
 legacy_int_module!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
 
 pub use crate::panic::panicking;
-pub use crate::macros::{format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error};
+pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error};
 
 #[prelude_import]
 #[allow(unused_imports)]

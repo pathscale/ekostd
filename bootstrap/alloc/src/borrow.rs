@@ -60,8 +60,12 @@ impl<B: ?Sized + ToOwned + core::fmt::Debug> core::fmt::Debug for Cow<'_, B> {
 impl<B: ?Sized + ToOwned + core::fmt::Display> core::fmt::Display for Cow<'_, B> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { core::fmt::Display::fmt(self.as_ref(), f) }
 }
-impl<'a, B: ?Sized + ToOwned> From<&'a B> for Cow<'a, B> {
-    fn from(value: &'a B) -> Self { Self::Borrowed(value) }
+// Per type, not for every `B`: a blanket impl here would forbid a downstream crate's own `From<&Path>`.
+impl<'a> From<&'a str> for Cow<'a, str> {
+    fn from(value: &'a str) -> Self { Cow::Borrowed(value) }
+}
+impl<'a, T: Clone> From<&'a [T]> for Cow<'a, [T]> {
+    fn from(value: &'a [T]) -> Self { Cow::Borrowed(value) }
 }
 impl<'a> From<crate::string::String> for Cow<'a, str> {
     fn from(value: crate::string::String) -> Self { Self::Owned(value) }

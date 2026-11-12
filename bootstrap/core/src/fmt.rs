@@ -186,7 +186,7 @@ impl Clone for Arguments<'_> { fn clone(&self) -> Self { *self } }
 #[rustc_diagnostic_item = "FmtArgumentsNew"]
 impl<'a> Arguments<'a> {
     /// The compiler must supply a valid encoded template and matching arguments.
-    pub unsafe fn new<const N: usize, const M: usize>(
+    pub const unsafe fn new<const N: usize, const M: usize>(
         template: &'a [u8; N], args: &'a [rt::Argument<'a>; M],
     ) -> Self { Self { template, args, literal: None } }
     pub const fn from_str(s: &'static str) -> Self {

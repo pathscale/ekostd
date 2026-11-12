@@ -3,32 +3,33 @@
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! panic {
     () => { core::panic::panic_fmt(core::fmt::Arguments::from_str("explicit panic")) };
-    ($($arg:tt)+) => { core::panic::panic_fmt(format_args!($($arg)+)) };
+    ($($arg:tt)+) => { core::panic::panic_fmt(core::const_format_args!($($arg)+)) };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! assert {
-    ($cond:expr $(,)?) => { if !$cond { core::panic::panic_fmt(format_args!("assertion failed: {}", stringify!($cond))); } };
-    ($cond:expr, $($arg:tt)+) => { if !$cond { core::panic::panic_fmt(format_args!($($arg)+)); } };
+    // One literal, joined at compile time, so a bare `assert!` is usable in constants and `const fn`.
+    ($cond:expr $(,)?) => { if !$cond { core::panic::panic_fmt(core::fmt::Arguments::from_str(concat!("assertion failed: ", stringify!($cond)))); } };
+    ($cond:expr, $($arg:tt)+) => { if !$cond { core::panic::panic_fmt(core::const_format_args!($($arg)+)); } };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! assert_eq {
     ($left:expr, $right:expr $(,)?) => {
-        match (&$left, &$right) { (left, right) => { if !(*left == *right) { core::panic::panic_fmt(format_args!("assertion `left == right` failed\n  left: {:?}\n right: {:?}", &*left, &*right)); } } }
+        match (&$left, &$right) { (left, right) => { if !(*left == *right) { core::panic::panic_fmt(core::const_format_args!("assertion `left == right` failed\n  left: {:?}\n right: {:?}", &*left, &*right)); } } }
     };
     ($left:expr, $right:expr, $($arg:tt)+) => {
-        match (&$left, &$right) { (left, right) => { if !(*left == *right) { core::panic::panic_fmt(format_args!("assertion `left == right` failed: {}\n  left: {:?}\n right: {:?}", format_args!($($arg)+), &*left, &*right)); } } }
+        match (&$left, &$right) { (left, right) => { if !(*left == *right) { core::panic::panic_fmt(core::const_format_args!("assertion `left == right` failed: {}\n  left: {:?}\n right: {:?}", core::const_format_args!($($arg)+), &*left, &*right)); } } }
     };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! assert_ne {
     ($left:expr, $right:expr $(,)?) => {
-        match (&$left, &$right) { (left, right) => { if *left == *right { core::panic::panic_fmt(format_args!("assertion `left != right` failed\n  left: {:?}\n right: {:?}", &*left, &*right)); } } }
+        match (&$left, &$right) { (left, right) => { if *left == *right { core::panic::panic_fmt(core::const_format_args!("assertion `left != right` failed\n  left: {:?}\n right: {:?}", &*left, &*right)); } } }
     };
     ($left:expr, $right:expr, $($arg:tt)+) => {
-        match (&$left, &$right) { (left, right) => { if *left == *right { core::panic::panic_fmt(format_args!("assertion `left != right` failed: {}\n  left: {:?}\n right: {:?}", format_args!($($arg)+), &*left, &*right)); } } }
+        match (&$left, &$right) { (left, right) => { if *left == *right { core::panic::panic_fmt(core::const_format_args!("assertion `left != right` failed: {}\n  left: {:?}\n right: {:?}", core::const_format_args!($($arg)+), &*left, &*right)); } } }
     };
 }
 #[macro_export]
@@ -44,19 +45,19 @@ macro_rules! debug_assert_ne { ($($arg:tt)*) => { if cfg!(debug_assertions) { as
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! unreachable {
     () => { core::panic::panic_fmt(core::fmt::Arguments::from_str("internal error: entered unreachable code")) };
-    ($($arg:tt)+) => { core::panic::panic_fmt(format_args!("internal error: entered unreachable code: {}", format_args!($($arg)+))) };
+    ($($arg:tt)+) => { core::panic::panic_fmt(core::const_format_args!("internal error: entered unreachable code: {}", core::const_format_args!($($arg)+))) };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! unimplemented {
     () => { core::panic::panic_fmt(core::fmt::Arguments::from_str("not implemented")) };
-    ($($arg:tt)+) => { core::panic::panic_fmt(format_args!("not implemented: {}", format_args!($($arg)+))) };
+    ($($arg:tt)+) => { core::panic::panic_fmt(core::const_format_args!("not implemented: {}", core::const_format_args!($($arg)+))) };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
 macro_rules! todo {
     () => { core::panic::panic_fmt(core::fmt::Arguments::from_str("not yet implemented")) };
-    ($($arg:tt)+) => { core::panic::panic_fmt(format_args!("not yet implemented: {}", format_args!($($arg)+))) };
+    ($($arg:tt)+) => { core::panic::panic_fmt(core::const_format_args!("not yet implemented: {}", core::const_format_args!($($arg)+))) };
 }
 #[macro_export]
 #[allow_internal_unstable(core_intrinsics, fmt_internals)]
@@ -74,6 +75,9 @@ macro_rules! matches {
 }
 #[rustc_builtin_macro]
 pub macro format_args($fmt:expr, $($args:tt)*) {}
+/// As `format_args!`, and usable where a constant is being evaluated. The panic macros use it.
+#[rustc_builtin_macro]
+pub macro const_format_args($fmt:expr, $($args:tt)*) {}
 #[rustc_builtin_macro]
 pub macro cfg($($tokens:tt)*) {}
 #[rustc_builtin_macro]

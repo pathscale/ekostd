@@ -92,3 +92,77 @@ impl<T: crate::default::Default> Cell<T> {
     /// Moves the value out, leaving the default.
     pub fn take(&self) -> T { self.replace(crate::default::Default::default()) }
 }
+
+/// A cell whose borrows are checked when they are taken, not by the compiler.
+pub struct RefCell<T: ?Sized> {
+    // 0: not borrowed. Positive: that many shared borrows. -1: one exclusive borrow.
+    state: Cell<isize>,
+    value: UnsafeCell<T>,
+}
+
+pub struct BorrowError;
+pub struct BorrowMutError;
+impl crate::fmt::Debug for BorrowError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("already mutably borrowed") }
+}
+impl crate::fmt::Debug for BorrowMutError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("already borrowed") }
+}
+
+impl<T> RefCell<T> {
+    pub const fn new(value: T) -> Self { Self { state: Cell::new(0), value: UnsafeCell::new(value) } }
+    pub fn into_inner(self) -> T { self.value.into_inner() }
+    pub fn replace(&self, value: T) -> T { crate::mem::replace(&mut *self.borrow_mut(), value) }
+    pub fn take(&self) -> T where T: crate::default::Default { self.replace(crate::default::Default::default()) }
+}
+
+impl<T: ?Sized> RefCell<T> {
+    pub fn try_borrow(&self) -> Result<Ref<'_, T>, BorrowError> {
+        let state = self.state.get();
+        if state < 0 { return Err(BorrowError); }
+        self.state.set(state + 1);
+        Ok(Ref { value: unsafe { &*self.value.get() }, state: &self.state })
+    }
+    pub fn try_borrow_mut(&self) -> Result<RefMut<'_, T>, BorrowMutError> {
+        if self.state.get() != 0 { return Err(BorrowMutError); }
+        self.state.set(-1);
+        Ok(RefMut { value: unsafe { &mut *self.value.get() }, state: &self.state })
+    }
+    pub fn borrow(&self) -> Ref<'_, T> {
+        match self.try_borrow() {
+            Ok(guard) => guard,
+            Err(_) => crate::panic::panic_nounwind("RefCell already mutably borrowed"),
+        }
+    }
+    pub fn borrow_mut(&self) -> RefMut<'_, T> {
+        match self.try_borrow_mut() {
+            Ok(guard) => guard,
+            Err(_) => crate::panic::panic_nounwind("RefCell already borrowed"),
+        }
+    }
+    pub fn get_mut(&mut self) -> &mut T { self.value.get_mut() }
+    pub const fn as_ptr(&self) -> *mut T { self.value.get() }
+}
+
+/// A shared borrow of a `RefCell`'s value. Released when dropped.
+pub struct Ref<'b, T: ?Sized> { value: &'b T, state: &'b Cell<isize> }
+impl<T: ?Sized> crate::ops::Deref for Ref<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T { self.value }
+}
+impl<T: ?Sized> crate::ops::Drop for Ref<'_, T> {
+    fn drop(&mut self) { self.state.set(self.state.get() - 1); }
+}
+
+/// The exclusive borrow of a `RefCell`'s value. Released when dropped.
+pub struct RefMut<'b, T: ?Sized> { value: &'b mut T, state: &'b Cell<isize> }
+impl<T: ?Sized> crate::ops::Deref for RefMut<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T { self.value }
+}
+impl<T: ?Sized> crate::ops::DerefMut for RefMut<'_, T> {
+    fn deref_mut(&mut self) -> &mut T { self.value }
+}
+impl<T: ?Sized> crate::ops::Drop for RefMut<'_, T> {
+    fn drop(&mut self) { self.state.set(0); }
+}
