@@ -20,3 +20,9 @@ impl<T: ?Sized> Borrow<T> for &mut T {
 impl<T: ?Sized> BorrowMut<T> for &mut T {
     fn borrow_mut(&mut self) -> &mut T { self }
 }
+impl<T, const N: usize> Borrow<[T]> for [T; N] {
+    fn borrow(&self) -> &[T] { self }
+}
+impl<T, const N: usize> BorrowMut<[T]> for [T; N] {
+    fn borrow_mut(&mut self) -> &mut [T] { self }
+}

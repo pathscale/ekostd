@@ -5,10 +5,28 @@ use crate::ops::{Deref, DerefMut};
 #[repr(transparent)]
 pub struct MaybeDangling<P: PointeeSized>(P);
 
+impl<P: Copy> Copy for MaybeDangling<P> {}
+
+impl<P: Clone> Clone for MaybeDangling<P> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 #[lang = "manually_drop"]
 #[repr(transparent)]
 pub struct ManuallyDrop<T: PointeeSized> {
     value: MaybeDangling<T>,
+}
+
+impl<T: Copy> Copy for ManuallyDrop<T> {}
+
+impl<T: Clone> Clone for ManuallyDrop<T> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        Self { value: self.value.clone() }
+    }
 }
 
 impl<T: crate::marker::Sized> ManuallyDrop<T> {
@@ -37,6 +55,15 @@ impl<T: ?Sized> DerefMut for ManuallyDrop<T> {
 pub union MaybeUninit<T> {
     uninit: (),
     value: ManuallyDrop<T>,
+}
+
+impl<T: Copy> Copy for MaybeUninit<T> {}
+
+impl<T: Copy> Clone for MaybeUninit<T> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 impl<T> MaybeUninit<T> {

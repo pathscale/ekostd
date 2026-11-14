@@ -235,10 +235,22 @@ pub mod aarch64 {
     }
 
     pub unsafe fn vld1q_f32(ptr: *const f32) -> float32x4_t {
-        float32x4_t(unsafe { crate::ptr::read_unaligned(ptr as *const [f32; 4]) })
+        unsafe {
+            float32x4_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+                crate::ptr::read_unaligned(ptr.add(2)),
+                crate::ptr::read_unaligned(ptr.add(3)),
+            ])
+        }
     }
     pub unsafe fn vld1_f32(ptr: *const f32) -> float32x2_t {
-        float32x2_t(unsafe { crate::ptr::read_unaligned(ptr as *const [f32; 2]) })
+        unsafe {
+            float32x2_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+            ])
+        }
     }
     pub unsafe fn vld1_dup_f32(ptr: *const f32) -> float32x2_t {
         let v = unsafe { crate::ptr::read_unaligned(ptr) };
@@ -249,17 +261,36 @@ pub mod aarch64 {
         float32x4_t([v; 4])
     }
     pub unsafe fn vld2q_f32(ptr: *const f32) -> float32x4x2_t {
-        let x = unsafe { crate::ptr::read_unaligned(ptr as *const [f32; 8]) };
-        float32x4x2_t(
-            float32x4_t([x[0], x[2], x[4], x[6]]),
-            float32x4_t([x[1], x[3], x[5], x[7]]),
-        )
+        unsafe {
+            float32x4x2_t(
+                float32x4_t([
+                    crate::ptr::read_unaligned(ptr),
+                    crate::ptr::read_unaligned(ptr.add(2)),
+                    crate::ptr::read_unaligned(ptr.add(4)),
+                    crate::ptr::read_unaligned(ptr.add(6)),
+                ]),
+                float32x4_t([
+                    crate::ptr::read_unaligned(ptr.add(1)),
+                    crate::ptr::read_unaligned(ptr.add(3)),
+                    crate::ptr::read_unaligned(ptr.add(5)),
+                    crate::ptr::read_unaligned(ptr.add(7)),
+                ]),
+            )
+        }
     }
     pub unsafe fn vst1q_f32(ptr: *mut f32, value: float32x4_t) {
-        unsafe { crate::ptr::write_unaligned(ptr as *mut [f32; 4], value.0) }
+        unsafe {
+            crate::ptr::write_unaligned(ptr, value.0[0]);
+            crate::ptr::write_unaligned(ptr.add(1), value.0[1]);
+            crate::ptr::write_unaligned(ptr.add(2), value.0[2]);
+            crate::ptr::write_unaligned(ptr.add(3), value.0[3]);
+        }
     }
     pub unsafe fn vst1_f32(ptr: *mut f32, value: float32x2_t) {
-        unsafe { crate::ptr::write_unaligned(ptr as *mut [f32; 2], value.0) }
+        unsafe {
+            crate::ptr::write_unaligned(ptr, value.0[0]);
+            crate::ptr::write_unaligned(ptr.add(1), value.0[1]);
+        }
     }
 
     pub fn vaddq_f32(a: float32x4_t, b: float32x4_t) -> float32x4_t {
@@ -381,32 +412,75 @@ pub mod aarch64 {
     }
 
     pub unsafe fn vld1q_s32(ptr: *const i32) -> int32x4_t {
-        int32x4_t(unsafe { crate::ptr::read_unaligned(ptr as *const [i32; 4]) })
+        unsafe {
+            int32x4_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+                crate::ptr::read_unaligned(ptr.add(2)),
+                crate::ptr::read_unaligned(ptr.add(3)),
+            ])
+        }
     }
     pub unsafe fn vld1_s32(ptr: *const i32) -> int32x2_t {
-        int32x2_t(unsafe { crate::ptr::read_unaligned(ptr as *const [i32; 2]) })
+        unsafe {
+            int32x2_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+            ])
+        }
     }
     pub unsafe fn vst1q_s32(ptr: *mut i32, value: int32x4_t) {
-        unsafe { crate::ptr::write_unaligned(ptr as *mut [i32; 4], value.0) }
+        unsafe {
+            crate::ptr::write_unaligned(ptr, value.0[0]);
+            crate::ptr::write_unaligned(ptr.add(1), value.0[1]);
+            crate::ptr::write_unaligned(ptr.add(2), value.0[2]);
+            crate::ptr::write_unaligned(ptr.add(3), value.0[3]);
+        }
     }
     pub unsafe fn vst1_s32(ptr: *mut i32, value: int32x2_t) {
-        unsafe { crate::ptr::write_unaligned(ptr as *mut [i32; 2], value.0) }
+        unsafe {
+            crate::ptr::write_unaligned(ptr, value.0[0]);
+            crate::ptr::write_unaligned(ptr.add(1), value.0[1]);
+        }
     }
     pub unsafe fn vst1q_lane_s32(ptr: *mut i32, value: int32x4_t, lane: i32) {
         unsafe { crate::ptr::write_unaligned(ptr, value.0[lane as usize]) }
     }
     pub unsafe fn vld1q_s16(ptr: *const i16) -> int16x8_t {
-        int16x8_t(unsafe { crate::ptr::read_unaligned(ptr as *const [i16; 8]) })
+        unsafe {
+            int16x8_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+                crate::ptr::read_unaligned(ptr.add(2)),
+                crate::ptr::read_unaligned(ptr.add(3)),
+                crate::ptr::read_unaligned(ptr.add(4)),
+                crate::ptr::read_unaligned(ptr.add(5)),
+                crate::ptr::read_unaligned(ptr.add(6)),
+                crate::ptr::read_unaligned(ptr.add(7)),
+            ])
+        }
     }
     pub unsafe fn vld1_s16(ptr: *const i16) -> int16x4_t {
-        int16x4_t(unsafe { crate::ptr::read_unaligned(ptr as *const [i16; 4]) })
+        unsafe {
+            int16x4_t([
+                crate::ptr::read_unaligned(ptr),
+                crate::ptr::read_unaligned(ptr.add(1)),
+                crate::ptr::read_unaligned(ptr.add(2)),
+                crate::ptr::read_unaligned(ptr.add(3)),
+            ])
+        }
     }
     pub unsafe fn vld1_dup_s16(ptr: *const i16) -> int16x4_t {
         let v = unsafe { crate::ptr::read_unaligned(ptr) };
         int16x4_t([v; 4])
     }
     pub unsafe fn vst1_s16(ptr: *mut i16, value: int16x4_t) {
-        unsafe { crate::ptr::write_unaligned(ptr as *mut [i16; 4], value.0) }
+        unsafe {
+            crate::ptr::write_unaligned(ptr, value.0[0]);
+            crate::ptr::write_unaligned(ptr.add(1), value.0[1]);
+            crate::ptr::write_unaligned(ptr.add(2), value.0[2]);
+            crate::ptr::write_unaligned(ptr.add(3), value.0[3]);
+        }
     }
 
     pub fn vdupq_n_s32(value: i32) -> int32x4_t { int32x4_t([value; 4]) }
