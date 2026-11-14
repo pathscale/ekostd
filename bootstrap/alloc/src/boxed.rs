@@ -141,6 +141,14 @@ impl<T> From<crate::vec::Vec<T>> for Box<[T]> {
     }
 }
 
+impl<T: Clone> From<&[T]> for Box<[T]> {
+    fn from(slice: &[T]) -> Self {
+        let mut v = crate::vec::Vec::with_capacity(slice.len());
+        v.extend_from_slice(slice);
+        v.into_boxed_slice()
+    }
+}
+
 const _: usize = mem::size_of::<NonNull<u8>>();
 
 impl<T: ?Sized + core::marker::Unsize<U>, U: ?Sized> core::ops::CoerceUnsized<Unique<U>> for Unique<T> {}

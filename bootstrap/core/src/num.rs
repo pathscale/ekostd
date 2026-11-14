@@ -878,6 +878,34 @@ macro_rules! float_impl {
 float_impl!(f32, u32, 4, 0x8000_0000_u32, 0x7f80_0000_u32, 0x007f_ffff_u32, 3.14159265358979323846_f32);
 float_impl!(f64, u64, 8, 0x8000_0000_0000_0000_u64, 0x7ff0_0000_0000_0000_u64, 0x000f_ffff_ffff_ffff_u64, 3.14159265358979323846_f64);
 
+impl f32 {
+    pub const RADIX: u32 = 2;
+    pub const MANTISSA_DIGITS: u32 = 24;
+    pub const DIGITS: u32 = 6;
+    pub const EPSILON: f32 = 1.19209290e-07_f32;
+    pub const MIN: f32 = -3.40282347e+38_f32;
+    pub const MIN_POSITIVE: f32 = 1.17549435e-38_f32;
+    pub const MAX: f32 = 3.40282347e+38_f32;
+    pub const MIN_EXP: i32 = -125;
+    pub const MAX_EXP: i32 = 128;
+    pub const MIN_10_EXP: i32 = -37;
+    pub const MAX_10_EXP: i32 = 38;
+}
+
+impl f64 {
+    pub const RADIX: u32 = 2;
+    pub const MANTISSA_DIGITS: u32 = 53;
+    pub const DIGITS: u32 = 15;
+    pub const EPSILON: f64 = 2.2204460492503131e-16_f64;
+    pub const MIN: f64 = -1.7976931348623157e+308_f64;
+    pub const MIN_POSITIVE: f64 = 2.2250738585072014e-308_f64;
+    pub const MAX: f64 = 1.7976931348623157e+308_f64;
+    pub const MIN_EXP: i32 = -1021;
+    pub const MAX_EXP: i32 = 1024;
+    pub const MIN_10_EXP: i32 = -307;
+    pub const MAX_10_EXP: i32 = 308;
+}
+
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct Wrapping<T>(pub T);

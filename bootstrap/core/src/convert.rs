@@ -238,7 +238,10 @@ macro_rules! impl_try_from_signed {
 }
 // Same-width or wider targets only, so the one way to fail is a negative value.
 impl_try_from_signed!(i8 => u8, i16 => u16, i32 => u32, i64 => u64, i128 => u128, isize => usize,
-    i32 => usize, i64 => usize, i32 => u64, isize => u64);
+    i32 => usize, i64 => usize, i32 => u64, isize => u64,
+    i8 => u16, i8 => u32, i8 => u64, i8 => u128, i8 => usize,
+    i16 => u32, i16 => u64, i16 => u128, i16 => usize,
+    i32 => u128, i64 => u128, isize => u128);
 
 impl TryFromIntError {
     pub(crate) const fn new() -> Self { TryFromIntError(()) }
@@ -248,6 +251,9 @@ impl_from_int!(u64 => i128);
 
 impl_try_from_upper_bounded!(
     u32 => i32, u64 => i32, u64 => i64, usize => i32, usize => i64, usize => isize, u128 => i128,
+    u8 => i8, u16 => i8, u16 => i16, u16 => isize, u32 => i8, u32 => i16, u32 => isize,
+    u64 => i8, u64 => i16, u64 => isize, u128 => i8, u128 => i16, u128 => i32, u128 => i64, u128 => isize,
+    usize => i8, usize => i16, usize => i128,
 );
 
 /// Narrowing between signed types: the value must lie within the target's whole range.
@@ -270,6 +276,11 @@ macro_rules! impl_try_from_both_bounded {
 impl_try_from_both_bounded!(
     i16 => i8, i32 => i8, i32 => i16, i64 => i8, i64 => i16, i64 => i32,
     i128 => i32, i128 => i64, isize => i32,
+    i16 => u8, i32 => u8, i32 => u16, i64 => u8, i64 => u16, i64 => u32,
+    i128 => u8, i128 => u16, i128 => u32, i128 => u64, i128 => usize,
+    isize => u8, isize => u16, isize => u32,
+    i32 => isize, i64 => isize, i128 => i8, i128 => i16, i128 => isize,
+    isize => i8, isize => i16, isize => i64, isize => i128,
 );
 
 impl crate::cmp::PartialEq for Infallible {

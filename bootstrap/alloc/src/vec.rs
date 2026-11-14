@@ -335,3 +335,85 @@ unsafe impl<T: Sync> Sync for Vec<T> {}
 impl<T> AsMut<Vec<T>> for Vec<T> { fn as_mut(&mut self) -> &mut Vec<T> { self } }
 impl<T> AsRef<Vec<T>> for Vec<T> { fn as_ref(&self) -> &Vec<T> { self } }
 impl<'a, T: Copy + 'a> core::iter::Extend<&'a T> for Vec<T> { fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) { for item in iter { self.push(*item); } } }
+
+impl<T> Vec<T> {
+    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain<'_, T> {
+        let len = self.length;
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(&n) => n,
+            core::ops::Bound::Excluded(&n) => n + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(&n) => n + 1,
+            core::ops::Bound::Excluded(&n) => n,
+            core::ops::Bound::Unbounded => len,
+        };
+        assert!(start <= end && end <= len);
+        self.length = start;
+        Drain {
+            vec: self as *mut Vec<T>,
+            idx: start,
+            end,
+            tail_start: end,
+            tail_len: len - end,
+            _marker: core::marker::PhantomData,
+        }
+    }
+}
+
+pub struct Drain<'a, T: 'a> {
+    vec: *mut Vec<T>,
+    idx: usize,
+    end: usize,
+    tail_start: usize,
+    tail_len: usize,
+    _marker: core::marker::PhantomData<&'a mut Vec<T>>,
+}
+
+impl<T> Iterator for Drain<'_, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.idx >= self.end {
+            return None;
+        }
+        let i = self.idx;
+        self.idx += 1;
+        Some(unsafe { (*self.vec).pointer.as_ptr().add(i).read() })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.end - self.idx;
+        (n, Some(n))
+    }
+}
+
+impl<T> DoubleEndedIterator for Drain<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.idx >= self.end {
+            return None;
+        }
+        self.end -= 1;
+        Some(unsafe { (*self.vec).pointer.as_ptr().add(self.end).read() })
+    }
+}
+
+impl<T> ExactSizeIterator for Drain<'_, T> {}
+
+impl<T> Drop for Drain<'_, T> {
+    fn drop(&mut self) {
+        unsafe {
+            let p = (*self.vec).pointer.as_ptr();
+            while self.idx < self.end {
+                ptr::drop_in_place(p.add(self.idx));
+                self.idx += 1;
+            }
+            if self.tail_len > 0 {
+                let dst = (*self.vec).length;
+                if self.tail_start != dst {
+                    ptr::copy(p.add(self.tail_start), p.add(dst), self.tail_len);
+                }
+                (*self.vec).length = dst + self.tail_len;
+            }
+        }
+    }
+}

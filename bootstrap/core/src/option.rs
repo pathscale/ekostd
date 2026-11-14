@@ -136,6 +136,13 @@ impl<T> Option<T> {
     pub fn is_some_and<F: FnOnce(T) -> bool>(self, f: F) -> bool {
         match self { Some(x) => f(x), None => false }
     }
+
+    pub fn zip<U>(self, other: Option<U>) -> Option<(T, U)> {
+        match (self, other) {
+            (Some(a), Some(b)) => Some((a, b)),
+            _ => None,
+        }
+    }
 }
 
 impl<'a, T> Option<&'a T> {
