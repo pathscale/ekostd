@@ -542,6 +542,24 @@ impl<A: Step> Iterator for RangeInclusive<A> {
         }
     }
 }
+impl<A: Step> DoubleEndedIterator for RangeInclusive<A> {
+    #[inline]
+    fn next_back(&mut self) -> Option<A> {
+        if self.exhausted || self.start > self.end {
+            self.exhausted = true;
+            None
+        } else {
+            let v = self.end;
+            if self.start == self.end {
+                self.exhausted = true;
+            } else {
+                self.end = Step::backward_one(self.end);
+            }
+            Some(v)
+        }
+    }
+}
+impl<A: Step> FusedIterator for RangeInclusive<A> {}
 
 pub struct StepBy<I> { iter: I, step: usize, first: bool }
 impl<I: Iterator> Iterator for StepBy<I> {

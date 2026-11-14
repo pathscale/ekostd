@@ -877,3 +877,101 @@ macro_rules! float_impl {
 
 float_impl!(f32, u32, 4, 0x8000_0000_u32, 0x7f80_0000_u32, 0x007f_ffff_u32, 3.14159265358979323846_f32);
 float_impl!(f64, u64, 8, 0x8000_0000_0000_0000_u64, 0x7ff0_0000_0000_0000_u64, 0x000f_ffff_ffff_ffff_u64, 3.14159265358979323846_f64);
+
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Wrapping<T>(pub T);
+
+impl<T: crate::fmt::Debug> crate::fmt::Debug for Wrapping<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+macro_rules! wrapping_impl {
+    ($($t:ty)*) => {$(
+        impl crate::ops::Add for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn add(self, rhs: Self) -> Self { Wrapping(self.0.wrapping_add(rhs.0)) }
+        }
+        impl crate::ops::AddAssign for Wrapping<$t> {
+            #[inline]
+            fn add_assign(&mut self, rhs: Self) { *self = *self + rhs; }
+        }
+        impl crate::ops::Sub for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn sub(self, rhs: Self) -> Self { Wrapping(self.0.wrapping_sub(rhs.0)) }
+        }
+        impl crate::ops::SubAssign for Wrapping<$t> {
+            #[inline]
+            fn sub_assign(&mut self, rhs: Self) { *self = *self - rhs; }
+        }
+        impl crate::ops::Mul for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn mul(self, rhs: Self) -> Self { Wrapping(self.0.wrapping_mul(rhs.0)) }
+        }
+        impl crate::ops::MulAssign for Wrapping<$t> {
+            #[inline]
+            fn mul_assign(&mut self, rhs: Self) { *self = *self * rhs; }
+        }
+        impl crate::ops::Neg for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn neg(self) -> Self { Wrapping(self.0.wrapping_neg()) }
+        }
+        impl crate::ops::Not for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn not(self) -> Self { Wrapping(!self.0) }
+        }
+        impl crate::ops::BitAnd for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn bitand(self, rhs: Self) -> Self { Wrapping(self.0 & rhs.0) }
+        }
+        impl crate::ops::BitAndAssign for Wrapping<$t> {
+            #[inline]
+            fn bitand_assign(&mut self, rhs: Self) { *self = *self & rhs; }
+        }
+        impl crate::ops::BitOr for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn bitor(self, rhs: Self) -> Self { Wrapping(self.0 | rhs.0) }
+        }
+        impl crate::ops::BitOrAssign for Wrapping<$t> {
+            #[inline]
+            fn bitor_assign(&mut self, rhs: Self) { *self = *self | rhs; }
+        }
+        impl crate::ops::BitXor for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn bitxor(self, rhs: Self) -> Self { Wrapping(self.0 ^ rhs.0) }
+        }
+        impl crate::ops::BitXorAssign for Wrapping<$t> {
+            #[inline]
+            fn bitxor_assign(&mut self, rhs: Self) { *self = *self ^ rhs; }
+        }
+        impl crate::ops::Shl<usize> for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn shl(self, rhs: usize) -> Self { Wrapping(self.0.wrapping_shl(rhs as u32)) }
+        }
+        impl crate::ops::ShlAssign<usize> for Wrapping<$t> {
+            #[inline]
+            fn shl_assign(&mut self, rhs: usize) { *self = *self << rhs; }
+        }
+        impl crate::ops::Shr<usize> for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn shr(self, rhs: usize) -> Self { Wrapping(self.0.wrapping_shr(rhs as u32)) }
+        }
+        impl crate::ops::ShrAssign<usize> for Wrapping<$t> {
+            #[inline]
+            fn shr_assign(&mut self, rhs: usize) { *self = *self >> rhs; }
+        }
+    )*};
+}
+wrapping_impl!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);

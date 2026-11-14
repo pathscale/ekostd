@@ -42,6 +42,7 @@ pub mod aarch64 {
         uint64x1_t: [u64; 1], align 8;
         uint8x16_t: [u8; 16], align 16;
         uint16x8_t: [u16; 8], align 16;
+        int16x8_t: [i16; 8], align 16;
         uint64x2_t: [u64; 2], align 16;
     }
 
@@ -57,6 +58,7 @@ pub mod aarch64 {
 
     pub fn vdup_n_u8(value: u8) -> uint8x8_t { uint8x8_t([value; 8]) }
     pub fn vdupq_n_u8(value: u8) -> uint8x16_t { uint8x16_t([value; 16]) }
+    pub fn vdupq_n_s16(value: i16) -> int16x8_t { int16x8_t([value; 8]) }
 
     /// Reads 8 bytes. `ptr` need not be aligned.
     pub unsafe fn vld1_u8(ptr: *const u8) -> uint8x8_t {
@@ -120,4 +122,40 @@ pub mod aarch64 {
     /// Called as `vgetq_lane_u64(v, lane)`.
     #[rustc_legacy_const_generics(1)]
     pub fn vgetq_lane_u64<const LANE: i32>(v: uint64x2_t) -> u64 { v.0[LANE as usize] }
+
+    pub fn vaddl_u8(a: uint8x8_t, b: uint8x8_t) -> uint16x8_t {
+        lanes!(8, uint16x8_t, |i| (a.0[i] as u16) + (b.0[i] as u16))
+    }
+    pub fn vaddq_s16(a: int16x8_t, b: int16x8_t) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i].wrapping_add(b.0[i]))
+    }
+    pub fn vmull_u8(a: uint8x8_t, b: uint8x8_t) -> uint16x8_t {
+        lanes!(8, uint16x8_t, |i| (a.0[i] as u16) * (b.0[i] as u16))
+    }
+    pub fn vmlal_u8(a: uint16x8_t, b: uint8x8_t, c: uint8x8_t) -> uint16x8_t {
+        lanes!(8, uint16x8_t, |i| a.0[i].wrapping_add((b.0[i] as u16) * (c.0[i] as u16)))
+    }
+    pub fn vmlaq_n_s16(a: int16x8_t, b: int16x8_t, c: i16) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i].wrapping_add(b.0[i].wrapping_mul(c)))
+    }
+    pub fn vmlsq_n_s16(a: int16x8_t, b: int16x8_t, c: i16) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i].wrapping_sub(b.0[i].wrapping_mul(c)))
+    }
+    pub fn vqmovun_s16(a: int16x8_t) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| if a.0[i] <= 0 { 0 } else if a.0[i] >= 255 { 255 } else { a.0[i] as u8 })
+    }
+    pub fn vreinterpretq_s16_u16(a: uint16x8_t) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i] as i16)
+    }
+    pub fn vrhadd_u8(a: uint8x8_t, b: uint8x8_t) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| (((a.0[i] as u16) + (b.0[i] as u16) + 1) >> 1) as u8)
+    }
+    #[rustc_legacy_const_generics(1)]
+    pub fn vrshrn_n_u16<const N: i32>(a: uint16x8_t) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| (((a.0[i] as u32) + (1u32 << ((N - 1) as u32))) >> (N as u32)) as u8)
+    }
+    #[rustc_legacy_const_generics(1)]
+    pub fn vshrq_n_s16<const N: i32>(a: int16x8_t) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i] >> (N as i16))
+    }
 }
