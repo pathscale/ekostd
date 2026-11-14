@@ -41,6 +41,18 @@ pub struct Command {
     overrides_buf: Vec<u8>,
     overrides_offsets: Vec<usize>,
     overrides_key_lens: Vec<usize>,
+    invalid_input: bool,
+}
+
+fn contains_byte(bytes: &[u8], needle: u8) -> bool {
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == needle {
+            return true;
+        }
+        i += 1;
+    }
+    false
 }
 
 fn push_nul_entry(buf: &mut Vec<u8>, offsets: &mut Vec<usize>, bytes: &[u8]) {
@@ -192,9 +204,21 @@ fn step_path_candidate(
     }
 }
 
-fn candidates(program: &[u8], buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
+fn candidates(
+    program: &[u8],
+    overridden_path: Option<&[u8]>,
+    buf: &mut Vec<u8>,
+    offsets: &mut Vec<usize>,
+) {
     if has_slash(program) {
         push_nul_entry(buf, offsets, program);
+        return;
+    }
+    if let Some(path) = overridden_path {
+        let mut pos = 0usize;
+        while pos < path.len() {
+            pos = step_path_candidate(path, pos, program, buf, offsets);
+        }
         return;
     }
     if let Some(path) = crate::env::var_os("PATH") {
@@ -206,21 +230,26 @@ fn candidates(program: &[u8], buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
     }
 }
 
-fn build_ptr_table(buf: &[u8], offsets: &[usize], table: &mut Vec<usize>) {
+fn build_ptr_table(buf: &[u8], offsets: &[usize], table: &mut Vec<*const libc::c_char>) {
     let count = offsets.len();
-    let base = buf.as_ptr() as usize;
+    let base = buf.as_ptr();
     let mut i = 0usize;
     while i < count {
-        table.push(base + offsets[i]);
+        table.push(unsafe { base.add(offsets[i]).cast() });
         i += 1;
     }
-    table.push(0);
+    table.push(core::ptr::null());
 }
 
-unsafe fn exec_one_candidate(tries_buf: &[u8], offset: usize, argv: &[usize], envp: &[usize]) {
+unsafe fn exec_one_candidate(
+    tries_buf: &[u8],
+    offset: usize,
+    argv: &[*const libc::c_char],
+    envp: &[*const libc::c_char],
+) {
     let try_ptr: *const libc::c_char = unsafe { tries_buf.as_ptr().add(offset).cast() };
     unsafe {
-        libc::execve(try_ptr, argv.as_ptr().cast(), envp.as_ptr().cast());
+        libc::execve(try_ptr, argv.as_ptr(), envp.as_ptr());
     }
 }
 
@@ -229,8 +258,8 @@ unsafe fn exec_child(
     err_write: libc::c_int,
     tries_buf: &[u8],
     tries_offsets: &[usize],
-    argv: &[usize],
-    envp: &[usize],
+    argv: &[*const libc::c_char],
+    envp: &[*const libc::c_char],
 ) -> libc::c_int {
     unsafe {
         // Its own process group, so that killing it kills what it started. A compiler
@@ -283,8 +312,10 @@ unsafe fn exec_child(
 impl Command {
     /// Name a program.
     pub fn new(program: impl AsRef<Path>) -> Command {
+        let prog_bytes = program.as_ref().as_bytes();
         Command {
-            program: program.as_ref().as_bytes().to_vec(),
+            invalid_input: prog_bytes.is_empty() || contains_byte(prog_bytes, 0),
+            program: prog_bytes.to_vec(),
             args_buf: Vec::new(),
             args_offsets: Vec::new(),
             overrides_buf: Vec::new(),
@@ -295,7 +326,12 @@ impl Command {
 
     /// Add one argument.
     pub fn arg(mut self, arg: impl AsRef<[u8]>) -> Command {
-        push_nul_entry(&mut self.args_buf, &mut self.args_offsets, arg.as_ref());
+        let bytes = arg.as_ref();
+        if contains_byte(bytes, 0) {
+            self.invalid_input = true;
+        } else {
+            push_nul_entry(&mut self.args_buf, &mut self.args_offsets, bytes);
+        }
         self
     }
 
@@ -306,7 +342,7 @@ impl Command {
         A: AsRef<[u8]>,
     {
         for arg in args {
-            push_nul_entry(&mut self.args_buf, &mut self.args_offsets, arg.as_ref());
+            self = self.arg(arg);
         }
         self
     }
@@ -318,13 +354,42 @@ impl Command {
     /// keeps the last, as a shell would.
     pub fn env(mut self, key: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Command {
         let key_bytes = key.as_ref();
+        let val_bytes = value.as_ref();
+        if key_bytes.is_empty()
+            || contains_byte(key_bytes, 0)
+            || contains_byte(key_bytes, b'=')
+            || contains_byte(val_bytes, 0)
+        {
+            self.invalid_input = true;
+            return self;
+        }
         self.overrides_offsets.push(self.overrides_buf.len());
         self.overrides_key_lens.push(key_bytes.len() + 1);
         self.overrides_buf.extend_from_slice(key_bytes);
         self.overrides_buf.push(b'=');
-        self.overrides_buf.extend_from_slice(value.as_ref());
+        self.overrides_buf.extend_from_slice(val_bytes);
         self.overrides_buf.push(0);
         self
+    }
+
+    fn overridden_value(&self, wanted_key: &[u8]) -> Option<&[u8]> {
+        let mut idx = self.overrides_offsets.len();
+        while idx > 0 {
+            idx -= 1;
+            let start = self.overrides_offsets[idx];
+            let key_len = self.overrides_key_lens[idx];
+            if key_len == wanted_key.len() + 1
+                && crate::path::bytes_equal(&self.overrides_buf[start..start + wanted_key.len()], wanted_key)
+            {
+                let end = if idx + 1 < self.overrides_offsets.len() {
+                    self.overrides_offsets[idx + 1]
+                } else {
+                    self.overrides_buf.len()
+                };
+                return Some(&self.overrides_buf[start + key_len..end - 1]);
+            }
+        }
+        None
     }
 
     fn build_argv_buf(&self, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
@@ -344,12 +409,20 @@ impl Command {
     /// `None` only if the fork or a pipe failed. A program that cannot be found is not that
     /// case: the child starts, every candidate `execve` fails, and it exits 127.
     pub fn spawn(self) -> Option<Child> {
+        if self.invalid_input {
+            return None;
+        }
         let mut out = Pipe::new()?;
         let mut err = Pipe::new()?;
 
         let mut tries_buf = Vec::new();
         let mut tries_offsets = Vec::new();
-        candidates(&self.program, &mut tries_buf, &mut tries_offsets);
+        candidates(
+            &self.program,
+            self.overridden_value(b"PATH"),
+            &mut tries_buf,
+            &mut tries_offsets,
+        );
         if tries_offsets.is_empty() {
             return None;
         }
