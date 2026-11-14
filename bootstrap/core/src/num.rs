@@ -26,6 +26,9 @@ macro_rules! integer {
             pub const MAX: Self = if $signed { !(Self::MIN) } else { !0 };
             pub const BITS: u32 = $bits;
 
+            pub const fn min_value() -> Self { Self::MIN }
+            pub const fn max_value() -> Self { Self::MAX }
+
             pub const fn wrapping_add(self, rhs: Self) -> Self { add_with_overflow(self, rhs).0 }
             pub const fn wrapping_sub(self, rhs: Self) -> Self { sub_with_overflow(self, rhs).0 }
             pub const fn wrapping_mul(self, rhs: Self) -> Self { mul_with_overflow(self, rhs).0 }
@@ -197,6 +200,25 @@ macro_rules! integer {
                     None => Self::MAX,
                 }
             }
+            pub const fn overflowing_pow(self, mut exp: u32) -> (Self, bool) {
+                let mut base = self;
+                let mut acc: Self = 1;
+                let mut overflown = false;
+                while exp > 0 {
+                    if (exp & 1) == 1 {
+                        let (next, r) = acc.overflowing_mul(base);
+                        acc = next;
+                        overflown |= r;
+                    }
+                    exp /= 2;
+                    if exp > 0 {
+                        let (next, r) = base.overflowing_mul(base);
+                        base = next;
+                        overflown |= r;
+                    }
+                }
+                (acc, overflown)
+            }
         }
     };
 }
@@ -259,6 +281,10 @@ macro_rules! unsigned {
             pub const fn wrapping_rem_euclid(self, rhs: Self) -> Self { self % rhs }
             pub const fn wrapping_div(self, rhs: Self) -> Self { self / rhs }
             pub const fn wrapping_rem(self, rhs: Self) -> Self { self % rhs }
+            pub const fn overflowing_div(self, rhs: Self) -> (Self, bool) { (self / rhs, false) }
+            pub const fn overflowing_rem(self, rhs: Self) -> (Self, bool) { (self % rhs, false) }
+            pub const fn overflowing_div_euclid(self, rhs: Self) -> (Self, bool) { (self / rhs, false) }
+            pub const fn overflowing_rem_euclid(self, rhs: Self) -> (Self, bool) { (self % rhs, false) }
         }
     };
 }
@@ -365,6 +391,9 @@ macro_rules! signed_abs {
             /// Absolute value. `MIN` has none and wraps to itself.
             pub const fn abs(self) -> Self { if self < 0 { (0 as $t).wrapping_sub(self) } else { self } }
             pub const fn wrapping_abs(self) -> Self { if self < 0 { self.wrapping_neg() } else { self } }
+            pub const fn overflowing_abs(self) -> (Self, bool) {
+                if self == Self::MIN { (Self::MIN, true) } else if self < 0 { (-self, false) } else { (self, false) }
+            }
             pub const fn checked_abs(self) -> Option<Self> {
                 if self == Self::MIN { None } else if self < 0 { Some(-self) } else { Some(self) }
             }
@@ -436,6 +465,18 @@ macro_rules! signed_abs {
                 } else {
                     r
                 }
+            }
+            pub const fn overflowing_div(self, rhs: Self) -> (Self, bool) {
+                if self == Self::MIN && rhs == -1 { (Self::MIN, true) } else { (self / rhs, false) }
+            }
+            pub const fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
+                if self == Self::MIN && rhs == -1 { (0, true) } else { (self % rhs, false) }
+            }
+            pub const fn overflowing_div_euclid(self, rhs: Self) -> (Self, bool) {
+                if self == Self::MIN && rhs == -1 { (Self::MIN, true) } else { (self.div_euclid(rhs), false) }
+            }
+            pub const fn overflowing_rem_euclid(self, rhs: Self) -> (Self, bool) {
+                if self == Self::MIN && rhs == -1 { (0, true) } else { (self.rem_euclid(rhs), false) }
             }
         }
     )*};

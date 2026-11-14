@@ -1,22 +1,27 @@
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "RangeFull"]
 pub struct RangeFull;
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "Range"]
 pub struct Range<Idx> {
     pub start: Idx,
     pub end: Idx,
 }
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "RangeFrom"]
 pub struct RangeFrom<Idx> {
     pub start: Idx,
 }
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "RangeTo"]
 pub struct RangeTo<Idx> {
     pub end: Idx,
 }
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "RangeInclusive"]
 pub struct RangeInclusive<Idx> {
     pub(crate) start: Idx,
@@ -39,41 +44,166 @@ impl<Idx> RangeInclusive<Idx> {
     }
 }
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 #[lang = "RangeToInclusive"]
 pub struct RangeToInclusive<Idx> {
     pub end: Idx,
 }
 
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
 pub enum Bound<T> {
     Included(T),
     Excluded(T),
     Unbounded,
 }
 
+impl<T> Bound<T> {
+    #[inline]
+    pub const fn as_ref(&self) -> Bound<&T> {
+        match *self {
+            Bound::Included(ref x) => Bound::Included(x),
+            Bound::Excluded(ref x) => Bound::Excluded(x),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+
+    #[inline]
+    pub const fn as_mut(&mut self) -> Bound<&mut T> {
+        match *self {
+            Bound::Included(ref mut x) => Bound::Included(x),
+            Bound::Excluded(ref mut x) => Bound::Excluded(x),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+
+    #[inline]
+    pub fn map<U, F: crate::ops::FnOnce(T) -> U>(self, f: F) -> Bound<U> {
+        match self {
+            Bound::Included(x) => Bound::Included(f(x)),
+            Bound::Excluded(x) => Bound::Excluded(f(x)),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+}
+
+impl<T: crate::clone::Clone> Bound<&T> {
+    #[inline]
+    pub fn cloned(self) -> Bound<T> {
+        match self {
+            Bound::Included(x) => Bound::Included(x.clone()),
+            Bound::Excluded(x) => Bound::Excluded(x.clone()),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+}
+
+impl<T: crate::marker::Copy> Bound<&T> {
+    #[inline]
+    pub const fn copied(self) -> Bound<T> {
+        match self {
+            Bound::Included(&x) => Bound::Included(x),
+            Bound::Excluded(&x) => Bound::Excluded(x),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+}
+
 pub trait RangeBounds<T: ?Sized> {
     fn start_bound(&self) -> Bound<&T>;
     fn end_bound(&self) -> Bound<&T>;
+
+    fn contains<U>(&self, item: &U) -> bool
+    where
+        T: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<T>,
+    {
+        (match self.start_bound() {
+            Bound::Included(start) => start <= item,
+            Bound::Excluded(start) => start < item,
+            Bound::Unbounded => true,
+        }) && (match self.end_bound() {
+            Bound::Included(end) => item <= end,
+            Bound::Excluded(end) => item < end,
+            Bound::Unbounded => true,
+        })
+    }
 }
 
-impl<Idx: crate::clone::Clone> crate::clone::Clone for Range<Idx> {
-    fn clone(&self) -> Self { Range { start: self.start.clone(), end: self.end.clone() } }
+impl<T: ?Sized> RangeBounds<T> for RangeFull {
+    fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
+    fn end_bound(&self) -> Bound<&T> { Bound::Unbounded }
 }
-impl<Idx: crate::cmp::PartialEq> crate::cmp::PartialEq for Range<Idx> {
-    fn eq(&self, other: &Self) -> bool { self.start == other.start && self.end == other.end }
+
+impl<T> RangeBounds<T> for RangeFrom<T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(&self.start) }
+    fn end_bound(&self) -> Bound<&T> { Bound::Unbounded }
 }
-impl<Idx: crate::cmp::Eq> crate::cmp::Eq for Range<Idx> {}
-impl<Idx: crate::fmt::Debug> crate::fmt::Debug for Range<Idx> {
-    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
-        match crate::fmt::Debug::fmt(&self.start, f) {
-            crate::result::Result::Ok(()) => {}
-            error => return error,
+
+impl<T> RangeBounds<T> for RangeTo<T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
+    fn end_bound(&self) -> Bound<&T> { Bound::Excluded(&self.end) }
+}
+
+impl<T> RangeBounds<T> for Range<T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(&self.start) }
+    fn end_bound(&self) -> Bound<&T> { Bound::Excluded(&self.end) }
+}
+
+impl<T> RangeBounds<T> for RangeInclusive<T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(&self.start) }
+    fn end_bound(&self) -> Bound<&T> {
+        if self.exhausted {
+            Bound::Excluded(&self.end)
+        } else {
+            Bound::Included(&self.end)
         }
-        match f.write_str("..") {
-            crate::result::Result::Ok(()) => {}
-            error => return error,
-        }
-        crate::fmt::Debug::fmt(&self.end, f)
     }
+}
+
+impl<T> RangeBounds<T> for RangeToInclusive<T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
+    fn end_bound(&self) -> Bound<&T> { Bound::Included(&self.end) }
+}
+
+impl<T> RangeBounds<T> for (Bound<T>, Bound<T>) {
+    fn start_bound(&self) -> Bound<&T> { self.0.as_ref() }
+    fn end_bound(&self) -> Bound<&T> { self.1.as_ref() }
+}
+
+impl<'a, T: ?Sized + 'a> RangeBounds<T> for (Bound<&'a T>, Bound<&'a T>) {
+    fn start_bound(&self) -> Bound<&T> { self.0 }
+    fn end_bound(&self) -> Bound<&T> { self.1 }
+}
+
+impl<T: ?Sized> RangeBounds<T> for RangeFrom<&T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(self.start) }
+    fn end_bound(&self) -> Bound<&T> { Bound::Unbounded }
+}
+
+impl<T: ?Sized> RangeBounds<T> for RangeTo<&T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
+    fn end_bound(&self) -> Bound<&T> { Bound::Excluded(self.end) }
+}
+
+impl<T: ?Sized> RangeBounds<T> for Range<&T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(self.start) }
+    fn end_bound(&self) -> Bound<&T> { Bound::Excluded(self.end) }
+}
+
+impl<T: ?Sized> RangeBounds<T> for RangeInclusive<&T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Included(self.start) }
+    fn end_bound(&self) -> Bound<&T> {
+        if self.exhausted {
+            Bound::Excluded(self.end)
+        } else {
+            Bound::Included(self.end)
+        }
+    }
+}
+
+impl<T: ?Sized> RangeBounds<T> for RangeToInclusive<&T> {
+    fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
+    fn end_bound(&self) -> Bound<&T> { Bound::Included(self.end) }
 }
 impl<Idx: crate::cmp::PartialOrd> Range<Idx> {
     pub fn contains(&self, item: &Idx) -> bool { *item >= self.start && *item < self.end }

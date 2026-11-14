@@ -352,23 +352,21 @@ impl<T> Vec<T> {
         assert!(start <= end && end <= len);
         self.length = start;
         Drain {
-            vec: self as *mut Vec<T>,
+            vec: self,
             idx: start,
             end,
             tail_start: end,
             tail_len: len - end,
-            _marker: core::marker::PhantomData,
         }
     }
 }
 
 pub struct Drain<'a, T: 'a> {
-    vec: *mut Vec<T>,
+    vec: &'a mut Vec<T>,
     idx: usize,
     end: usize,
     tail_start: usize,
     tail_len: usize,
-    _marker: core::marker::PhantomData<&'a mut Vec<T>>,
 }
 
 impl<T> Iterator for Drain<'_, T> {
