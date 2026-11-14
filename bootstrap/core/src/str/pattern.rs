@@ -87,3 +87,39 @@ impl<F: FnMut(char) -> bool> Pattern for F {
         if (*self)(character) { Some(len) } else { None }
     }
 }
+
+impl Pattern for &[char] {
+    fn find_in(&mut self, haystack: &str, from: usize) -> Option<(usize, usize)> {
+        (|c: char| self.contains(&c)).find_in(haystack, from)
+    }
+    fn prefix_len(&mut self, haystack: &str) -> Option<usize> {
+        (|c: char| self.contains(&c)).prefix_len(haystack)
+    }
+    fn suffix_len(&mut self, haystack: &str) -> Option<usize> {
+        (|c: char| self.contains(&c)).suffix_len(haystack)
+    }
+}
+
+impl<const N: usize> Pattern for &[char; N] {
+    fn find_in(&mut self, haystack: &str, from: usize) -> Option<(usize, usize)> {
+        self.as_slice().find_in(haystack, from)
+    }
+    fn prefix_len(&mut self, haystack: &str) -> Option<usize> {
+        self.as_slice().prefix_len(haystack)
+    }
+    fn suffix_len(&mut self, haystack: &str) -> Option<usize> {
+        self.as_slice().suffix_len(haystack)
+    }
+}
+
+impl<const N: usize> Pattern for [char; N] {
+    fn find_in(&mut self, haystack: &str, from: usize) -> Option<(usize, usize)> {
+        self.as_slice().find_in(haystack, from)
+    }
+    fn prefix_len(&mut self, haystack: &str) -> Option<usize> {
+        self.as_slice().prefix_len(haystack)
+    }
+    fn suffix_len(&mut self, haystack: &str) -> Option<usize> {
+        self.as_slice().suffix_len(haystack)
+    }
+}

@@ -187,7 +187,7 @@ macro_rules! scalar_neg_ops {
     )* };
 }
 
-/// The remainder operators, on the integers only: no crate in the graph takes a floating-point remainder.
+/// The remainder operators across integers and floats.
 macro_rules! scalar_rem_ops {
     ($($ty:ty),* $(,)?) => { $(
         impl Rem for $ty {
@@ -203,7 +203,7 @@ macro_rules! scalar_rem_ops {
 }
 
 scalar_binary_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
-scalar_rem_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+scalar_rem_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);
 scalar_bit_assign_ops!(bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_shift_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_neg_ops!(i8, i16, i32, i64, i128, isize, f32, f64);
@@ -275,4 +275,4 @@ macro_rules! scalar_ref_ops {
         }
     )* };
 }
-scalar_ref_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+scalar_ref_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64);

@@ -97,6 +97,53 @@ macro_rules! integer {
             pub const fn checked_shr(self, rhs: u32) -> Option<Self> {
                 if rhs < $bits { Some(self >> (rhs as $t)) } else { None }
             }
+            pub const fn count_ones(self) -> u32 { ctpop(self) }
+            pub const fn count_zeros(self) -> u32 { (!self).count_ones() }
+            pub const fn leading_zeros(self) -> u32 { ctlz(self) }
+            pub const fn trailing_zeros(self) -> u32 { cttz(self) }
+            pub const fn leading_ones(self) -> u32 { (!self).leading_zeros() }
+            pub const fn trailing_ones(self) -> u32 { (!self).trailing_zeros() }
+            pub const fn to_be(self) -> Self {
+                #[cfg(target_endian = "big")] { self }
+                #[cfg(not(target_endian = "big"))] { self.swap_bytes() }
+            }
+            pub const fn to_le(self) -> Self {
+                #[cfg(target_endian = "little")] { self }
+                #[cfg(not(target_endian = "little"))] { self.swap_bytes() }
+            }
+            pub const fn from_be(x: Self) -> Self {
+                #[cfg(target_endian = "big")] { x }
+                #[cfg(not(target_endian = "big"))] { x.swap_bytes() }
+            }
+            pub const fn from_le(x: Self) -> Self {
+                #[cfg(target_endian = "little")] { x }
+                #[cfg(not(target_endian = "little"))] { x.swap_bytes() }
+            }
+            pub const fn checked_ilog2(self) -> Option<u32> {
+                if self <= 0 { None } else { Some(Self::BITS - 1 - self.leading_zeros()) }
+            }
+            pub const fn ilog2(self) -> u32 {
+                match self.checked_ilog2() { Some(v) => v, None => crate::intrinsics::abort() }
+            }
+            pub const fn checked_ilog(self, base: Self) -> Option<u32> {
+                if self <= 0 || base <= 1 { return None; }
+                let mut n = self;
+                let mut log = 0u32;
+                while n >= base {
+                    n /= base;
+                    log += 1;
+                }
+                Some(log)
+            }
+            pub const fn ilog(self, base: Self) -> u32 {
+                match self.checked_ilog(base) { Some(v) => v, None => crate::intrinsics::abort() }
+            }
+            pub const fn checked_ilog10(self) -> Option<u32> {
+                if self <= 0 { None } else { self.checked_ilog(10) }
+            }
+            pub const fn ilog10(self) -> u32 {
+                match self.checked_ilog10() { Some(v) => v, None => crate::intrinsics::abort() }
+            }
             pub const fn overflowing_add(self, rhs: Self) -> (Self, bool) { add_with_overflow(self, rhs) }
             pub const fn overflowing_sub(self, rhs: Self) -> (Self, bool) { sub_with_overflow(self, rhs) }
             pub const fn overflowing_mul(self, rhs: Self) -> (Self, bool) { mul_with_overflow(self, rhs) }
@@ -159,6 +206,18 @@ macro_rules! unsigned {
         integer!($t, $bits, false);
         impl $t {
             pub const fn is_power_of_two(self) -> bool { self != 0 && (self & self.wrapping_sub(1)) == 0 }
+            pub const fn checked_next_power_of_two(self) -> Option<Self> {
+                if self <= 1 { return Some(1); }
+                let mut n: Self = 1;
+                while n < self {
+                    if n > Self::MAX / 2 { return None; }
+                    n *= 2;
+                }
+                Some(n)
+            }
+            pub const fn wrapping_next_power_of_two(self) -> Self {
+                match self.checked_next_power_of_two() { Some(v) => v, None => 0 }
+            }
             pub const fn next_power_of_two(self) -> Self {
                 if self <= 1 { return 1; }
                 let mut n: Self = 1;
@@ -168,18 +227,13 @@ macro_rules! unsigned {
                 }
                 n
             }
+            pub const fn abs_diff(self, other: Self) -> Self {
+                if self >= other { self - other } else { other - self }
+            }
             /// Division rounded towards positive infinity.
             pub const fn div_ceil(self, rhs: Self) -> Self {
                 let quotient = self / rhs;
                 if self % rhs != 0 { quotient + 1 } else { quotient }
-            }
-            pub const fn rotate_left(self, n: u32) -> Self {
-                let n = n & ($bits - 1);
-                if n == 0 { self } else { (self << (n as $t)) | (self >> (($bits - n) as $t)) }
-            }
-            pub const fn rotate_right(self, n: u32) -> Self {
-                let n = n & ($bits - 1);
-                if n == 0 { self } else { (self >> (n as $t)) | (self << (($bits - n) as $t)) }
             }
             /// Whether `self` is a whole multiple of `rhs`. Only zero is a multiple of zero.
             pub const fn is_multiple_of(self, rhs: Self) -> bool { if rhs == 0 { self == 0 } else { self % rhs == 0 } }
@@ -193,9 +247,6 @@ macro_rules! unsigned {
                 let rest = self % rhs;
                 if rest == 0 { Some(self) } else { self.checked_add(rhs - rest) }
             }
-            pub const fn count_ones(self) -> u32 { ctpop(self) }
-            pub const fn leading_zeros(self) -> u32 { ctlz(self) }
-            pub const fn trailing_zeros(self) -> u32 { cttz(self) }
             pub const fn overflowing_neg(self) -> (Self, bool) { (self.wrapping_neg(), self != 0) }
             pub const fn checked_neg(self) -> Option<Self> { if self == 0 { Some(0) } else { None } }
             pub const fn checked_div(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self / rhs) } }
@@ -249,6 +300,36 @@ macro_rules! bytes {
             pub const fn from_ne_bytes(bytes: [u8; $n]) -> Self {
                 Self::from_le_bytes(bytes)
             }
+            pub const fn rotate_left(self, n: u32) -> Self {
+                let u = self as $u;
+                let bits = Self::BITS;
+                let n = n & (bits - 1);
+                (if n == 0 { u } else { (u << (n as $u)) | (u >> ((bits - n) as $u)) }) as Self
+            }
+            pub const fn rotate_right(self, n: u32) -> Self {
+                let u = self as $u;
+                let bits = Self::BITS;
+                let n = n & (bits - 1);
+                (if n == 0 { u } else { (u >> (n as $u)) | (u << ((bits - n) as $u)) }) as Self
+            }
+            pub const fn reverse_bits(self) -> Self {
+                let mut x = self.swap_bytes() as $u;
+                let mut mask1: $u = 0;
+                let mut mask2: $u = 0;
+                let mut mask4: $u = 0;
+                let mut i = 0;
+                while i < $n {
+                    let shift = (i * 8) as $u;
+                    mask1 |= (0x55 as $u) << shift;
+                    mask2 |= (0x33 as $u) << shift;
+                    mask4 |= (0x0f as $u) << shift;
+                    i += 1;
+                }
+                x = ((x >> 1) & mask1) | ((x & mask1) << 1);
+                x = ((x >> 2) & mask2) | ((x & mask2) << 2);
+                x = ((x >> 4) & mask4) | ((x & mask4) << 4);
+                x as Self
+            }
         }
     };
 }
@@ -278,6 +359,9 @@ macro_rules! signed_abs {
         impl $t {
             /// Absolute value as the unsigned type, where `MIN` fits.
             pub const fn unsigned_abs(self) -> $u { if self < 0 { (0 as $u).wrapping_sub(self as $u) } else { self as $u } }
+            pub const fn abs_diff(self, other: Self) -> $u {
+                if self >= other { (self as $u).wrapping_sub(other as $u) } else { (other as $u).wrapping_sub(self as $u) }
+            }
             /// Absolute value. `MIN` has none and wraps to itself.
             pub const fn abs(self) -> Self { if self < 0 { (0 as $t).wrapping_sub(self) } else { self } }
             pub const fn wrapping_abs(self) -> Self { if self < 0 { self.wrapping_neg() } else { self } }
@@ -468,3 +552,128 @@ macro_rules! nonzero_traits {
     )*};
 }
 nonzero_traits!(NonZeroU8, u8; NonZeroU16, u16; NonZeroU32, u32; NonZeroU64, u64; NonZeroU128, u128; NonZeroUsize, usize);
+
+macro_rules! float_impl {
+    ($t:ty, $u:ty, $bytes:expr, $sign_mask:expr, $exp_mask:expr, $mant_mask:expr, $pi:expr) => {
+        impl $t {
+            pub const INFINITY: Self = 1.0 / 0.0;
+            pub const NEG_INFINITY: Self = -1.0 / 0.0;
+            pub const NAN: Self = 0.0 / 0.0;
+
+            #[inline(always)]
+            pub const fn to_bits(self) -> $u {
+                unsafe { crate::intrinsics::transmute(self) }
+            }
+            #[inline(always)]
+            pub const fn from_bits(v: $u) -> Self {
+                unsafe { crate::intrinsics::transmute(v) }
+            }
+            #[inline(always)]
+            pub const fn is_nan(self) -> bool {
+                self != self
+            }
+            #[inline(always)]
+            pub const fn is_infinite(self) -> bool {
+                (self.to_bits() & !$sign_mask) == $exp_mask
+            }
+            #[inline(always)]
+            pub const fn is_finite(self) -> bool {
+                (self.to_bits() & $exp_mask) != $exp_mask
+            }
+            #[inline(always)]
+            pub const fn is_sign_positive(self) -> bool {
+                (self.to_bits() & $sign_mask) == 0
+            }
+            #[inline(always)]
+            pub const fn is_sign_negative(self) -> bool {
+                (self.to_bits() & $sign_mask) != 0
+            }
+            #[inline]
+            pub const fn classify(self) -> FpCategory {
+                let b = self.to_bits();
+                let exp = b & $exp_mask;
+                let mant = b & $mant_mask;
+                if exp == $exp_mask {
+                    if mant == 0 { FpCategory::Infinite } else { FpCategory::Nan }
+                } else if exp == 0 {
+                    if mant == 0 { FpCategory::Zero } else { FpCategory::Subnormal }
+                } else {
+                    FpCategory::Normal
+                }
+            }
+            #[inline(always)]
+            pub const fn is_normal(self) -> bool {
+                let exp = self.to_bits() & $exp_mask;
+                exp != 0 && exp != $exp_mask
+            }
+            #[inline(always)]
+            pub const fn is_subnormal(self) -> bool {
+                let b = self.to_bits();
+                (b & $exp_mask) == 0 && (b & $mant_mask) != 0
+            }
+            #[inline(always)]
+            pub const fn abs(self) -> Self {
+                Self::from_bits(self.to_bits() & !$sign_mask)
+            }
+            #[inline(always)]
+            pub const fn copysign(self, sign: Self) -> Self {
+                Self::from_bits((self.to_bits() & !$sign_mask) | (sign.to_bits() & $sign_mask))
+            }
+            #[inline(always)]
+            pub const fn signum(self) -> Self {
+                if self.is_nan() { Self::NAN } else { (1.0 as Self).copysign(self) }
+            }
+            #[inline]
+            pub const fn min(self, other: Self) -> Self {
+                if self.is_nan() { other } else if other.is_nan() { self } else if self < other { self } else { other }
+            }
+            #[inline]
+            pub const fn max(self, other: Self) -> Self {
+                if self.is_nan() { other } else if other.is_nan() { self } else if self > other { self } else { other }
+            }
+            #[inline]
+            pub const fn clamp(self, min: Self, max: Self) -> Self {
+                if min > max { crate::intrinsics::abort(); }
+                let mut x = self;
+                if x < min { x = min; }
+                if x > max { x = max; }
+                x
+            }
+            #[inline(always)]
+            pub const fn to_degrees(self) -> Self {
+                self * (180.0 / $pi)
+            }
+            #[inline(always)]
+            pub const fn to_radians(self) -> Self {
+                self * ($pi / 180.0)
+            }
+            #[inline(always)]
+            pub const fn to_be_bytes(self) -> [u8; $bytes] {
+                self.to_bits().to_be_bytes()
+            }
+            #[inline(always)]
+            pub const fn to_le_bytes(self) -> [u8; $bytes] {
+                self.to_bits().to_le_bytes()
+            }
+            #[inline(always)]
+            pub const fn to_ne_bytes(self) -> [u8; $bytes] {
+                self.to_bits().to_ne_bytes()
+            }
+            #[inline(always)]
+            pub const fn from_be_bytes(bytes: [u8; $bytes]) -> Self {
+                Self::from_bits(<$u>::from_be_bytes(bytes))
+            }
+            #[inline(always)]
+            pub const fn from_le_bytes(bytes: [u8; $bytes]) -> Self {
+                Self::from_bits(<$u>::from_le_bytes(bytes))
+            }
+            #[inline(always)]
+            pub const fn from_ne_bytes(bytes: [u8; $bytes]) -> Self {
+                Self::from_bits(<$u>::from_ne_bytes(bytes))
+            }
+        }
+    };
+}
+
+float_impl!(f32, u32, 4, 0x8000_0000_u32, 0x7f80_0000_u32, 0x007f_ffff_u32, 3.14159265358979323846_f32);
+float_impl!(f64, u64, 8, 0x8000_0000_0000_0000_u64, 0x7ff0_0000_0000_0000_u64, 0x000f_ffff_ffff_ffff_u64, 3.14159265358979323846_f64);

@@ -598,6 +598,60 @@ macro_rules! from_str_int {
 }
 from_str_int!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct ParseBoolError;
+
+impl crate::fmt::Debug for ParseBoolError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("ParseBoolError")
+    }
+}
+
+impl crate::fmt::Display for ParseBoolError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("provided string was not `true` or `false`")
+    }
+}
+
+impl FromStr for bool {
+    type Err = ParseBoolError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            _ => Err(ParseBoolError),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct ParseCharError {
+    _private: (),
+}
+
+impl crate::fmt::Debug for ParseCharError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("ParseCharError")
+    }
+}
+
+impl crate::fmt::Display for ParseCharError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("failed to parse char")
+    }
+}
+
+impl FromStr for char {
+    type Err = ParseCharError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut chars = s.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => Ok(c),
+            _ => Err(ParseCharError { _private: () }),
+        }
+    }
+}
+
 impl str {
     pub fn parse<F: FromStr>(&self) -> Result<F, F::Err> { F::from_str(self) }
     /// Equal when ASCII letters are compared without regard to case.

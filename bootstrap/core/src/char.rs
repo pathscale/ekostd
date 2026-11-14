@@ -1,3 +1,5 @@
+pub use crate::str::ParseCharError;
+
 pub const fn from_u32(i: u32) -> Option<char> {
     char::from_u32(i)
 }
