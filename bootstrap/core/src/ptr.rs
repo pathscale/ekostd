@@ -580,6 +580,52 @@ impl<T: PointeeSized> *const T {
     {
         unsafe { copy_nonoverlapping(self, dst, count) }
     }
+
+    #[inline(always)]
+    pub unsafe fn read_volatile(self) -> T
+    where
+        T: Sized,
+    {
+        unsafe { read_volatile(self) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_add(self, count: usize) -> Self {
+        unsafe { from_raw_parts(self.cast::<u8>().add(count) as *const (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_sub(self, count: usize) -> Self {
+        unsafe { from_raw_parts(self.cast::<u8>().sub(count) as *const (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_offset(self, count: isize) -> Self {
+        unsafe { from_raw_parts(self.cast::<u8>().offset(count) as *const (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_add(self, count: usize) -> Self {
+        from_raw_parts(self.cast::<u8>().wrapping_add(count) as *const (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_sub(self, count: usize) -> Self {
+        from_raw_parts(self.cast::<u8>().wrapping_sub(count) as *const (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_offset(self, count: isize) -> Self {
+        from_raw_parts(self.cast::<u8>().wrapping_offset(count) as *const (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub fn is_aligned(self) -> bool
+    where
+        T: Sized,
+    {
+        (self as usize) & (crate::mem::align_of::<T>() - 1) == 0
+    }
 }
 
 impl<T: PointeeSized> *mut T {
@@ -774,6 +820,84 @@ impl<T: PointeeSized> *mut T {
         T: Sized,
     {
         unsafe { write_bytes(self, val, count) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn write_unaligned(self, val: T)
+    where
+        T: Sized,
+    {
+        unsafe { write_unaligned(self, val) }
+    }
+
+    #[inline(always)]
+    pub unsafe fn write_volatile(self, val: T)
+    where
+        T: Sized,
+    {
+        unsafe { write_volatile(self, val) }
+    }
+
+    #[inline(always)]
+    pub unsafe fn read_volatile(self) -> T
+    where
+        T: Sized,
+    {
+        unsafe { read_volatile(self) }
+    }
+
+    #[inline(always)]
+    pub unsafe fn replace(self, src: T) -> T
+    where
+        T: Sized,
+    {
+        unsafe { crate::mem::replace(&mut *self, src) }
+    }
+
+    #[inline(always)]
+    pub unsafe fn swap(self, with: *mut T)
+    where
+        T: Sized,
+    {
+        unsafe { crate::mem::swap(&mut *self, &mut *with) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_add(self, count: usize) -> Self {
+        unsafe { from_raw_parts_mut(self.cast::<u8>().add(count) as *mut (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_sub(self, count: usize) -> Self {
+        unsafe { from_raw_parts_mut(self.cast::<u8>().sub(count) as *mut (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const unsafe fn byte_offset(self, count: isize) -> Self {
+        unsafe { from_raw_parts_mut(self.cast::<u8>().offset(count) as *mut (), metadata(self)) }
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_add(self, count: usize) -> Self {
+        from_raw_parts_mut(self.cast::<u8>().wrapping_add(count) as *mut (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_sub(self, count: usize) -> Self {
+        from_raw_parts_mut(self.cast::<u8>().wrapping_sub(count) as *mut (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub const fn wrapping_byte_offset(self, count: isize) -> Self {
+        from_raw_parts_mut(self.cast::<u8>().wrapping_offset(count) as *mut (), metadata(self))
+    }
+
+    #[inline(always)]
+    pub fn is_aligned(self) -> bool
+    where
+        T: Sized,
+    {
+        (self as usize) & (crate::mem::align_of::<T>() - 1) == 0
     }
 }
 
