@@ -112,3 +112,27 @@ impl<H: Hasher + Default> BuildHasher for BuildHasherDefault<H> {
 impl<A: Hash, B: Hash> Hash for (A, B) {
     fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); self.1.hash(state); }
 }
+
+macro_rules! fnptr_hash_impls {
+    (@impl $ty:ty, $($arg:ident),*) => {
+        impl<Ret, $($arg),*> Hash for $ty {
+            fn hash<HS: Hasher>(&self, state: &mut HS) {
+                (*self as *const () as usize).hash(state);
+            }
+        }
+    };
+    (@one $($arg:ident),*) => {
+        fnptr_hash_impls!(@impl fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_hash_impls!(@impl unsafe fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_hash_impls!(@impl extern "C" fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_hash_impls!(@impl unsafe extern "C" fn($($arg),*) -> Ret, $($arg),*);
+    };
+    () => {
+        fnptr_hash_impls!(@one);
+    };
+    ($first:ident $(, $rest:ident)*) => {
+        fnptr_hash_impls!(@one $first $(, $rest)*);
+        fnptr_hash_impls!($($rest),*);
+    };
+}
+fnptr_hash_impls!(A, B, C, D, E, F, G, H, I, J, K, L);

@@ -296,7 +296,7 @@ pub mod f64 {
 }
 
 pub use crate::panic::panicking;
-pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error, global_allocator, test};
+pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, module_path, stringify, concat, include_str, include_bytes, derive, compile_error, global_allocator, test};
 
 #[prelude_import]
 #[allow(unused_imports)]

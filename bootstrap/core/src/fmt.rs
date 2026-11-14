@@ -32,9 +32,18 @@ impl<'a> Formatter<'a> {
     pub fn write_str(&mut self, s: &str) -> Result { self.writer.write_str(s) }
     pub fn write_char(&mut self, c: char) -> Result { self.writer.write_char(c) }
     pub fn write_fmt(&mut self, args: Arguments<'_>) -> Result { write(self.writer, args) }
-    pub fn debug_map(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
-    pub fn debug_set(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
-    pub fn debug_list(&mut self) -> DebugList<'_, 'a> { DebugList { fmt: self } }
+    pub fn debug_map(&mut self) -> DebugMap<'_, 'a> {
+        let failed = self.write_str("{").is_err();
+        DebugMap { fmt: self, failed, fields: false, has_key: false }
+    }
+    pub fn debug_set(&mut self) -> DebugSet<'_, 'a> {
+        let failed = self.write_str("{").is_err();
+        DebugSet { fmt: self, failed, fields: false }
+    }
+    pub fn debug_list(&mut self) -> DebugList<'_, 'a> {
+        let failed = self.write_str("[").is_err();
+        DebugList { fmt: self, failed, fields: false }
+    }
     pub fn debug_tuple_field1_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug) -> Result {
         attempt!(self.write_str(name));
         attempt!(self.write_str("("));
@@ -89,10 +98,93 @@ impl<'a> Formatter<'a> {
         self.write_str(" }")
     }
 }
-pub struct DebugList<'b, 'a: 'b> { fmt: &'b mut Formatter<'a> }
+pub struct DebugList<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
 impl<'b, 'a: 'b> DebugList<'b, 'a> {
-    pub fn entries<I>(&mut self, _entries: I) -> &mut Self { self }
-    pub fn finish(&mut self) -> Result { self.fmt.write_str("{..}") }
+    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            let prefix = if self.fields { ", " } else { "" };
+            self.failed = self.fmt.write_str(prefix).is_err() || entry.fmt(self.fmt).is_err();
+        }
+        self.fields = true;
+        self
+    }
+    pub fn entries<D: Debug, I: crate::iter::IntoIterator<Item = D>>(&mut self, entries: I) -> &mut Self {
+        for entry in entries {
+            self.entry(&entry);
+        }
+        self
+    }
+    pub fn finish_non_exhaustive(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(if self.fields { ", ..]" } else { "..]" })
+    }
+    pub fn finish(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str("]")
+    }
+}
+
+pub struct DebugSet<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+impl<'b, 'a: 'b> DebugSet<'b, 'a> {
+    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            let prefix = if self.fields { ", " } else { "" };
+            self.failed = self.fmt.write_str(prefix).is_err() || entry.fmt(self.fmt).is_err();
+        }
+        self.fields = true;
+        self
+    }
+    pub fn entries<D: Debug, I: crate::iter::IntoIterator<Item = D>>(&mut self, entries: I) -> &mut Self {
+        for entry in entries {
+            self.entry(&entry);
+        }
+        self
+    }
+    pub fn finish_non_exhaustive(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(if self.fields { ", ..}" } else { "..}" })
+    }
+    pub fn finish(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str("}")
+    }
+}
+
+pub struct DebugMap<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool, has_key: bool }
+impl<'b, 'a: 'b> DebugMap<'b, 'a> {
+    pub fn key(&mut self, key: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            let prefix = if self.fields { ", " } else { "" };
+            self.failed = self.fmt.write_str(prefix).is_err() || key.fmt(self.fmt).is_err();
+        }
+        self.fields = true;
+        self.has_key = true;
+        self
+    }
+    pub fn value(&mut self, value: &dyn Debug) -> &mut Self {
+        if !self.failed {
+            self.failed = self.fmt.write_str(": ").is_err() || value.fmt(self.fmt).is_err();
+        }
+        self.has_key = false;
+        self
+    }
+    pub fn entry(&mut self, key: &dyn Debug, value: &dyn Debug) -> &mut Self {
+        self.key(key).value(value)
+    }
+    pub fn entries<K: Debug, V: Debug, I: crate::iter::IntoIterator<Item = (K, V)>>(&mut self, entries: I) -> &mut Self {
+        for (k, v) in entries {
+            self.entry(&k, &v);
+        }
+        self
+    }
+    pub fn finish_non_exhaustive(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(if self.fields { ", ..}" } else { "..}" })
+    }
+    pub fn finish(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str("}")
+    }
 }
 #[rustc_diagnostic_item = "Display"]
 pub trait Display { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
@@ -435,6 +527,10 @@ impl<'b, 'a: 'b> DebugTuple<'b, 'a> {
         attempt!(self.fmt.write_str(if first { "(" } else { ", " }));
         value.fmt(self.fmt)
     }
+    pub fn finish_non_exhaustive(&mut self) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(if self.fields { ", ..)" } else { "(..)" })
+    }
     pub fn finish(&mut self) -> Result {
         if self.failed { return Err(Error); }
         if self.fields { self.fmt.write_str(")") } else { Ok(()) }
@@ -735,3 +831,56 @@ impl LowerExp for f64 {
 impl UpperExp for f64 {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self, false, b'E', false, f) }
 }
+
+macro_rules! fnptr_fmt_impls {
+    (@one $($arg:ident),*) => {
+        impl<Ret, $($arg),*> Pointer for fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(&(*self as *const ()), f)
+            }
+        }
+        impl<Ret, $($arg),*> Debug for fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(self, f)
+            }
+        }
+        impl<Ret, $($arg),*> Pointer for unsafe fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(&(*self as *const ()), f)
+            }
+        }
+        impl<Ret, $($arg),*> Debug for unsafe fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(self, f)
+            }
+        }
+        impl<Ret, $($arg),*> Pointer for extern "C" fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(&(*self as *const ()), f)
+            }
+        }
+        impl<Ret, $($arg),*> Debug for extern "C" fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(self, f)
+            }
+        }
+        impl<Ret, $($arg),*> Pointer for unsafe extern "C" fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(&(*self as *const ()), f)
+            }
+        }
+        impl<Ret, $($arg),*> Debug for unsafe extern "C" fn($($arg),*) -> Ret {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                Pointer::fmt(self, f)
+            }
+        }
+    };
+    () => {
+        fnptr_fmt_impls!(@one);
+    };
+    ($first:ident $(, $rest:ident)*) => {
+        fnptr_fmt_impls!(@one $first $(, $rest)*);
+        fnptr_fmt_impls!($($rest),*);
+    };
+}
+fnptr_fmt_impls!(A, B, C, D, E, F, G, H, I, J, K, L);

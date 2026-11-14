@@ -77,5 +77,97 @@ impl Duration {
     pub const fn saturating_sub(self, rhs: Self) -> Self {
         match self.checked_sub(rhs) { Some(value) => value, None => Self::ZERO }
     }
+    pub const fn checked_mul(self, rhs: u32) -> Option<Self> {
+        let total_nanos = (self.nanos as u64) * (rhs as u64);
+        let extra_secs = total_nanos / 1_000_000_000;
+        let nanos = (total_nanos % 1_000_000_000) as u32;
+        match self.secs.checked_mul(rhs as u64) {
+            Some(secs) => match secs.checked_add(extra_secs) {
+                Some(total_secs) => Some(Self { secs: total_secs, nanos }),
+                None => None,
+            },
+            None => None,
+        }
+    }
+    pub const fn checked_div(self, rhs: u32) -> Option<Self> {
+        if rhs == 0 {
+            return None;
+        }
+        let secs = self.secs / (rhs as u64);
+        let carry = self.secs - secs * (rhs as u64);
+        let extra_nanos = carry * 1_000_000_000 / (rhs as u64);
+        let nanos = (self.nanos as u64) / (rhs as u64) + extra_nanos;
+        let secs = secs + nanos / 1_000_000_000;
+        let nanos = (nanos % 1_000_000_000) as u32;
+        Some(Self { secs, nanos })
+    }
 }
 impl Default for Duration { fn default() -> Self { Self::ZERO } }
+
+impl crate::fmt::Debug for Duration {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Duration")
+            .field("secs", &self.secs)
+            .field("nanos", &self.nanos)
+            .finish()
+    }
+}
+
+impl crate::ops::Add for Duration {
+    type Output = Duration;
+    fn add(self, rhs: Duration) -> Duration {
+        self.checked_add(rhs).expect("overflow when adding durations")
+    }
+}
+
+impl crate::ops::AddAssign for Duration {
+    fn add_assign(&mut self, rhs: Duration) {
+        *self = *self + rhs;
+    }
+}
+
+impl crate::ops::Sub for Duration {
+    type Output = Duration;
+    fn sub(self, rhs: Duration) -> Duration {
+        self.checked_sub(rhs).expect("overflow when subtracting durations")
+    }
+}
+
+impl crate::ops::SubAssign for Duration {
+    fn sub_assign(&mut self, rhs: Duration) {
+        *self = *self - rhs;
+    }
+}
+
+impl crate::ops::Mul<u32> for Duration {
+    type Output = Duration;
+    fn mul(self, rhs: u32) -> Duration {
+        self.checked_mul(rhs).expect("overflow when multiplying duration by scalar")
+    }
+}
+
+impl crate::ops::Mul<Duration> for u32 {
+    type Output = Duration;
+    fn mul(self, rhs: Duration) -> Duration {
+        rhs * self
+    }
+}
+
+impl crate::ops::MulAssign<u32> for Duration {
+    fn mul_assign(&mut self, rhs: u32) {
+        *self = *self * rhs;
+    }
+}
+
+impl crate::ops::Div<u32> for Duration {
+    type Output = Duration;
+    fn div(self, rhs: u32) -> Duration {
+        self.checked_div(rhs).expect("divided a Duration by zero")
+    }
+}
+
+impl crate::ops::DivAssign<u32> for Duration {
+    fn div_assign(&mut self, rhs: u32) {
+        *self = *self / rhs;
+    }
+}

@@ -91,6 +91,8 @@ pub macro column($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro file($($tokens:tt)*) {}
 #[rustc_builtin_macro]
+pub macro module_path($($tokens:tt)*) {}
+#[rustc_builtin_macro]
 pub macro stringify($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro concat($($tokens:tt)*) {}

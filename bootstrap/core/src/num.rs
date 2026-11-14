@@ -379,6 +379,8 @@ macro_rules! nonzero {
 }
 nonzero!(NonZeroU8, u8); nonzero!(NonZeroU16, u16); nonzero!(NonZeroU32, u32);
 nonzero!(NonZeroU64, u64); nonzero!(NonZeroU128, u128); nonzero!(NonZeroUsize, usize);
+nonzero!(NonZeroI8, i8); nonzero!(NonZeroI16, i16); nonzero!(NonZeroI32, i32);
+nonzero!(NonZeroI64, i64); nonzero!(NonZeroI128, i128); nonzero!(NonZeroIsize, isize);
 
 macro_rules! signed_abs {
     ($($t:ty, $u:ty);*) => {$(
@@ -746,14 +748,34 @@ pub enum FpCategory {
     Normal,
 }
 
-macro_rules! nonzero_traits {
+macro_rules! nonzero_unsigned_bounds {
     ($($name:ident, $t:ty);*) => {$(
         impl $name {
             /// The smallest value: one.
             pub const MIN: Self = Self(1);
+            /// The largest value.
+            pub const MAX: Self = Self(<$t>::MAX);
             /// The sum, held at the largest value when it would not fit.
             pub const fn saturating_add(self, other: $t) -> Self { Self(self.0.saturating_add(other)) }
         }
+    )*};
+}
+nonzero_unsigned_bounds!(NonZeroU8, u8; NonZeroU16, u16; NonZeroU32, u32; NonZeroU64, u64; NonZeroU128, u128; NonZeroUsize, usize);
+
+macro_rules! nonzero_signed_bounds {
+    ($($name:ident, $t:ty);*) => {$(
+        impl $name {
+            /// The smallest value.
+            pub const MIN: Self = Self(<$t>::MIN);
+            /// The largest value.
+            pub const MAX: Self = Self(<$t>::MAX);
+        }
+    )*};
+}
+nonzero_signed_bounds!(NonZeroI8, i8; NonZeroI16, i16; NonZeroI32, i32; NonZeroI64, i64; NonZeroI128, i128; NonZeroIsize, isize);
+
+macro_rules! nonzero_traits {
+    ($($name:ident, $t:ty);*) => {$(
         impl crate::marker::Copy for $name {}
         impl crate::clone::Clone for $name { fn clone(&self) -> Self { *self } }
         impl crate::cmp::PartialEq for $name { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
@@ -776,6 +798,15 @@ macro_rules! nonzero_traits {
         impl crate::fmt::LowerHex for $name {
             fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::LowerHex::fmt(&self.0, f) }
         }
+        impl crate::fmt::UpperHex for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::UpperHex::fmt(&self.0, f) }
+        }
+        impl crate::fmt::Binary for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Binary::fmt(&self.0, f) }
+        }
+        impl crate::fmt::Octal for $name {
+            fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Octal::fmt(&self.0, f) }
+        }
         impl crate::convert::From<$name> for $t { fn from(value: $name) -> $t { value.0 } }
         impl crate::convert::TryFrom<$t> for $name {
             type Error = crate::convert::TryFromIntError;
@@ -788,7 +819,10 @@ macro_rules! nonzero_traits {
         }
     )*};
 }
-nonzero_traits!(NonZeroU8, u8; NonZeroU16, u16; NonZeroU32, u32; NonZeroU64, u64; NonZeroU128, u128; NonZeroUsize, usize);
+nonzero_traits!(
+    NonZeroU8, u8; NonZeroU16, u16; NonZeroU32, u32; NonZeroU64, u64; NonZeroU128, u128; NonZeroUsize, usize;
+    NonZeroI8, i8; NonZeroI16, i16; NonZeroI32, i32; NonZeroI64, i64; NonZeroI128, i128; NonZeroIsize, isize
+);
 
 macro_rules! float_impl {
     ($t:ty, $u:ty, $bytes:expr, $sign_mask:expr, $exp_mask:expr, $mant_mask:expr, $pi:expr) => {

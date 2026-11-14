@@ -282,3 +282,38 @@ impl<A: PartialEq, B: PartialEq, C: PartialEq> PartialEq for (A, B, C) {
     fn eq(&self, other: &(A, B, C)) -> bool { self.0 == other.0 && self.1 == other.1 && self.2 == other.2 }
 }
 impl<A: Eq, B: Eq, C: Eq> Eq for (A, B, C) {}
+
+macro_rules! fnptr_cmp_impls {
+    (@impl $ty:ty, $($arg:ident),*) => {
+        impl<Ret, $($arg),*> PartialEq for $ty {
+            fn eq(&self, other: &Self) -> bool {
+                (*self as *const () as usize) == (*other as *const () as usize)
+            }
+        }
+        impl<Ret, $($arg),*> Eq for $ty {}
+        impl<Ret, $($arg),*> PartialOrd for $ty {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl<Ret, $($arg),*> Ord for $ty {
+            fn cmp(&self, other: &Self) -> Ordering {
+                (*self as *const () as usize).cmp(&(*other as *const () as usize))
+            }
+        }
+    };
+    (@one $($arg:ident),*) => {
+        fnptr_cmp_impls!(@impl fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_cmp_impls!(@impl unsafe fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_cmp_impls!(@impl extern "C" fn($($arg),*) -> Ret, $($arg),*);
+        fnptr_cmp_impls!(@impl unsafe extern "C" fn($($arg),*) -> Ret, $($arg),*);
+    };
+    () => {
+        fnptr_cmp_impls!(@one);
+    };
+    ($first:ident $(, $rest:ident)*) => {
+        fnptr_cmp_impls!(@one $first $(, $rest)*);
+        fnptr_cmp_impls!($($rest),*);
+    };
+}
+fnptr_cmp_impls!(A, B, C, D, E, F, G, H, I, J, K, L);
