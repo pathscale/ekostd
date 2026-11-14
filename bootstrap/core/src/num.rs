@@ -32,6 +32,7 @@ macro_rules! integer {
             /// Shift with the amount taken modulo the width, so it cannot overflow.
             pub const fn wrapping_shl(self, rhs: u32) -> Self { self << ((rhs & ($bits - 1)) as $t) }
             pub const fn wrapping_shr(self, rhs: u32) -> Self { self >> ((rhs & ($bits - 1)) as $t) }
+            pub const fn wrapping_neg(self) -> Self { (0 as Self).wrapping_sub(self) }
             pub const fn checked_add(self, rhs: Self) -> Option<Self> {
                 let (value, overflow) = add_with_overflow(self, rhs);
                 if overflow { None } else { Some(value) }
@@ -93,7 +94,14 @@ macro_rules! integer {
             pub const fn checked_shl(self, rhs: u32) -> Option<Self> {
                 if rhs < $bits { Some(self << (rhs as $t)) } else { None }
             }
+            pub const fn checked_shr(self, rhs: u32) -> Option<Self> {
+                if rhs < $bits { Some(self >> (rhs as $t)) } else { None }
+            }
             pub const fn overflowing_add(self, rhs: Self) -> (Self, bool) { add_with_overflow(self, rhs) }
+            pub const fn overflowing_sub(self, rhs: Self) -> (Self, bool) { sub_with_overflow(self, rhs) }
+            pub const fn overflowing_mul(self, rhs: Self) -> (Self, bool) { mul_with_overflow(self, rhs) }
+            pub const fn overflowing_shl(self, rhs: u32) -> (Self, bool) { (self.wrapping_shl(rhs), rhs >= $bits) }
+            pub const fn overflowing_shr(self, rhs: u32) -> (Self, bool) { (self.wrapping_shr(rhs), rhs >= $bits) }
             pub const fn clamp(self, min: Self, max: Self) -> Self {
                 if self < min { min } else if self > max { max } else { self }
             }
@@ -145,6 +153,10 @@ macro_rules! unsigned {
             pub const fn count_ones(self) -> u32 { ctpop(self) }
             pub const fn leading_zeros(self) -> u32 { ctlz(self) }
             pub const fn trailing_zeros(self) -> u32 { cttz(self) }
+            pub const fn overflowing_neg(self) -> (Self, bool) { (self.wrapping_neg(), self != 0) }
+            pub const fn checked_neg(self) -> Option<Self> { if self == 0 { Some(0) } else { None } }
+            pub const fn checked_div(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self / rhs) } }
+            pub const fn checked_rem(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self % rhs) } }
         }
     };
 }
@@ -217,6 +229,22 @@ macro_rules! signed_abs {
             pub const fn unsigned_abs(self) -> $u { if self < 0 { (0 as $u).wrapping_sub(self as $u) } else { self as $u } }
             /// Absolute value. `MIN` has none and wraps to itself.
             pub const fn abs(self) -> Self { if self < 0 { (0 as $t).wrapping_sub(self) } else { self } }
+            pub const fn wrapping_abs(self) -> Self { if self < 0 { self.wrapping_neg() } else { self } }
+            pub const fn checked_abs(self) -> Option<Self> {
+                if self == Self::MIN { None } else if self < 0 { Some(-self) } else { Some(self) }
+            }
+            pub const fn overflowing_neg(self) -> (Self, bool) {
+                if self == Self::MIN { (Self::MIN, true) } else { (-self, false) }
+            }
+            pub const fn checked_neg(self) -> Option<Self> {
+                if self == Self::MIN { None } else { Some(-self) }
+            }
+            pub const fn checked_div(self, rhs: Self) -> Option<Self> {
+                if rhs == 0 || (self == Self::MIN && rhs == -1) { None } else { Some(self / rhs) }
+            }
+            pub const fn checked_rem(self, rhs: Self) -> Option<Self> {
+                if rhs == 0 || (self == Self::MIN && rhs == -1) { None } else { Some(self % rhs) }
+            }
         }
     )*};
 }
@@ -253,6 +281,20 @@ impl u8 {
     pub const fn to_ascii_uppercase(&self) -> u8 { if *self >= b'a' && *self <= b'z' { *self - 32 } else { *self } }
     pub const fn to_ascii_lowercase(&self) -> u8 { if *self >= b'A' && *self <= b'Z' { *self + 32 } else { *self } }
     pub const fn eq_ignore_ascii_case(&self, other: &u8) -> bool { self.to_ascii_lowercase() == other.to_ascii_lowercase() }
+    pub const fn is_ascii(&self) -> bool { *self <= 0x7f }
+    pub const fn is_ascii_alphabetic(&self) -> bool { (*self >= b'A' && *self <= b'Z') || (*self >= b'a' && *self <= b'z') }
+    pub const fn is_ascii_uppercase(&self) -> bool { *self >= b'A' && *self <= b'Z' }
+    pub const fn is_ascii_lowercase(&self) -> bool { *self >= b'a' && *self <= b'z' }
+    pub const fn is_ascii_alphanumeric(&self) -> bool { self.is_ascii_alphabetic() || self.is_ascii_digit() }
+    pub const fn is_ascii_hexdigit(&self) -> bool {
+        self.is_ascii_digit() || (*self >= b'a' && *self <= b'f') || (*self >= b'A' && *self <= b'F')
+    }
+    pub const fn is_ascii_whitespace(&self) -> bool {
+        *self == b' ' || *self == b'\t' || *self == b'\n' || *self == b'\r' || *self == 0x0c
+    }
+    pub const fn is_ascii_control(&self) -> bool { *self <= 0x1f || *self == 0x7f }
+    pub const fn is_ascii_graphic(&self) -> bool { *self >= 0x21 && *self <= 0x7e }
+    pub const fn is_ascii_punctuation(&self) -> bool { self.is_ascii_graphic() && !self.is_ascii_alphanumeric() }
 }
 
 impl bool {
@@ -264,6 +306,15 @@ impl bool {
 
 impl u8 {
     pub const fn is_ascii_digit(&self) -> bool { *self >= b'0' && *self <= b'9' }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum FpCategory {
+    Nan,
+    Infinite,
+    Zero,
+    Subnormal,
+    Normal,
 }
 
 macro_rules! nonzero_traits {
