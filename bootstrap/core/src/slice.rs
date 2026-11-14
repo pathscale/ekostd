@@ -777,6 +777,39 @@ impl<T> [T] {
         }
     }
 
+    fn reverse_range(&mut self, mut start: usize, mut end: usize) {
+        while start < end {
+            end -= 1;
+            if start < end {
+                self.swap(start, end);
+                start += 1;
+            }
+        }
+    }
+
+    /// Rotates the slice in-place such that the first `mid` elements move to the end.
+    pub fn rotate_left(&mut self, mid: usize) {
+        let len = self.len();
+        if mid > len {
+            crate::panic::panic_nounwind("slice::rotate_left: mid > len");
+        }
+        if mid == 0 || mid == len {
+            return;
+        }
+        self.reverse_range(0, mid);
+        self.reverse_range(mid, len);
+        self.reverse_range(0, len);
+    }
+
+    /// Rotates the slice in-place such that the last `k` elements move to the front.
+    pub fn rotate_right(&mut self, k: usize) {
+        let len = self.len();
+        if k > len {
+            crate::panic::panic_nounwind("slice::rotate_right: k > len");
+        }
+        self.rotate_left(len - k);
+    }
+
     /// Consecutive pieces of `size` elements; the last one holds what is left and may be shorter.
     pub fn chunks(&self, size: usize) -> Chunks<'_, T> {
         if size == 0 { crate::intrinsics::abort(); }

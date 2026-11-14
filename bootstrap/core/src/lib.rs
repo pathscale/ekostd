@@ -202,6 +202,125 @@ pub mod future {
         #[lang = "poll"]
         fn poll(self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<Self::Output>;
     }
+
+    /// A future that is immediately ready with a value.
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct Ready<T>(crate::option::Option<T>);
+
+    impl<T> crate::marker::Unpin for Ready<T> {}
+
+    impl<T: crate::clone::Clone> crate::clone::Clone for Ready<T> {
+        #[inline]
+        fn clone(&self) -> Self {
+            Ready(self.0.clone())
+        }
+    }
+
+    impl<T: crate::fmt::Debug> crate::fmt::Debug for Ready<T> {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.debug_tuple("Ready").field(&self.0).finish()
+        }
+    }
+
+    impl<T> Future for Ready<T> {
+        type Output = T;
+
+        #[inline]
+        fn poll(mut self: crate::pin::Pin<&mut Self>, _cx: &mut crate::task::Context<'_>) -> crate::task::Poll<T> {
+            crate::task::Poll::Ready(self.0.take().expect("`Ready` polled after completion"))
+        }
+    }
+
+    impl<T> Ready<T> {
+        /// Consumes the `Ready`, returning the wrapped value.
+        #[inline]
+        pub fn into_inner(self) -> T {
+            self.0.expect("`Ready` polled after completion")
+        }
+    }
+
+    /// Creates a future that is immediately ready with a value.
+    #[inline]
+    pub fn ready<T>(t: T) -> Ready<T> {
+        Ready(crate::option::Option::Some(t))
+    }
+
+    /// A future that never resolves, representing a computation that never finishes.
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct Pending<T> {
+        _data: crate::marker::PhantomData<fn() -> T>,
+    }
+
+    /// Creates a future which never resolves, representing a computation that never finishes.
+    #[inline]
+    pub fn pending<T>() -> Pending<T> {
+        Pending { _data: crate::marker::PhantomData }
+    }
+
+    impl<T> Future for Pending<T> {
+        type Output = T;
+
+        #[inline]
+        fn poll(self: crate::pin::Pin<&mut Self>, _cx: &mut crate::task::Context<'_>) -> crate::task::Poll<T> {
+            crate::task::Poll::Pending
+        }
+    }
+
+    impl<T> crate::clone::Clone for Pending<T> {
+        #[inline]
+        fn clone(&self) -> Self {
+            pending()
+        }
+    }
+
+    impl<T> crate::marker::Copy for Pending<T> {}
+
+    impl<T> crate::fmt::Debug for Pending<T> {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.debug_struct("Pending").finish()
+        }
+    }
+
+    impl<T> crate::default::Default for Pending<T> {
+        #[inline]
+        fn default() -> Self {
+            pending()
+        }
+    }
+
+    /// A future that wraps a function returning `Poll`.
+    #[must_use = "futures do nothing unless you `.await` or poll them"]
+    pub struct PollFn<F> {
+        f: F,
+    }
+
+    /// Creates a new future wrapping around a function returning `Poll`.
+    #[inline]
+    pub fn poll_fn<T, F>(f: F) -> PollFn<F>
+    where
+        F: crate::ops::FnMut(&mut crate::task::Context<'_>) -> crate::task::Poll<T>,
+    {
+        PollFn { f }
+    }
+
+    impl<F: crate::fmt::Debug> crate::fmt::Debug for PollFn<F> {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.debug_struct("PollFn").field("f", &self.f).finish()
+        }
+    }
+
+    impl<T, F> Future for PollFn<F>
+    where
+        F: crate::ops::FnMut(&mut crate::task::Context<'_>) -> crate::task::Poll<T>,
+    {
+        type Output = T;
+
+        #[inline]
+        fn poll(mut self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<T> {
+            let this = unsafe { self.get_unchecked_mut() };
+            (this.f)(cx)
+        }
+    }
 }
 
 pub mod error {

@@ -344,6 +344,12 @@ impl<T: PointeeSized> PartialOrd for NonNull<T> {
         self.as_ptr().partial_cmp(&other.as_ptr())
     }
 }
+impl<T: PointeeSized> crate::hash::Hash for NonNull<T> {
+    #[inline(always)]
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) {
+        self.as_ptr().hash(state);
+    }
+}
 impl<T: PointeeSized> From<&mut T> for NonNull<T> {
     #[inline(always)]
     fn from(r: &mut T) -> Self {

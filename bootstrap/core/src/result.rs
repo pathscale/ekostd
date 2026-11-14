@@ -99,6 +99,14 @@ impl<T, E> Result<T, E> {
         match self { Ok(value) => op(value), Err(err) => Err(err) }
     }
 
+    pub fn or<F>(self, res: Result<T, F>) -> Result<T, F> {
+        match self { Ok(value) => Ok(value), Err(_) => res }
+    }
+
+    pub fn or_else<F, O: FnOnce(E) -> Result<T, F>>(self, op: O) -> Result<T, F> {
+        match self { Ok(value) => Ok(value), Err(err) => op(err) }
+    }
+
     pub const fn map<U, F>(self, f: F) -> Result<U, E>
     where
         F: [const] FnOnce(T) -> U + [const] Destruct,
@@ -144,6 +152,44 @@ const impl<T, E, F: [const] From<E>> FromResidual<Result<Infallible, E>> for Res
             Err(err) => Err(F::from(err)),
             Ok(never) => match never {},
         }
+    }
+}
+
+impl<T, E> Result<&T, E> {
+    pub const fn copied(self) -> Result<T, E>
+    where
+        T: Copy,
+    {
+        match self { Ok(&t) => Ok(t), Err(err) => Err(err) }
+    }
+
+    pub fn cloned(self) -> Result<T, E>
+    where
+        T: Clone,
+    {
+        match self { Ok(t) => Ok(t.clone()), Err(err) => Err(err) }
+    }
+}
+
+impl<T, E> Result<&mut T, E> {
+    pub const fn copied(self) -> Result<T, E>
+    where
+        T: Copy,
+    {
+        match self { Ok(&mut t) => Ok(t), Err(err) => Err(err) }
+    }
+
+    pub fn cloned(self) -> Result<T, E>
+    where
+        T: Clone,
+    {
+        match self { Ok(t) => Ok(t.clone()), Err(err) => Err(err) }
+    }
+}
+
+impl<T, E> Result<Result<T, E>, E> {
+    pub fn flatten(self) -> Result<T, E> {
+        match self { Ok(inner) => inner, Err(err) => Err(err) }
     }
 }
 
