@@ -50,6 +50,8 @@ pub trait Iterator {
     fn skip(self, n: usize) -> Skip<Self> where Self: Sized { Skip { iter: self, n } }
     /// Adds up every item.
     fn sum<S: Sum<Self::Item>>(self) -> S where Self: Sized { S::sum(self) }
+    /// Multiplies every item.
+    fn product<P: Product<Self::Item>>(self) -> P where Self: Sized { P::product(self) }
     /// Every `step`th item, starting with the first. `step` must not be zero.
     fn step_by(self, step: usize) -> StepBy<Self> where Self: Sized {
         if step == 0 { crate::panic::panic_nounwind("step_by: step must be non-zero"); }
@@ -405,6 +407,49 @@ impl<A, F: FnMut() -> A> Iterator for RepeatWith<F> {
 }
 pub fn repeat_with<A, F: FnMut() -> A>(repeater: F) -> RepeatWith<F> { RepeatWith { repeater } }
 
+pub struct RepeatN<T> {
+    element: Option<T>,
+    count: usize,
+}
+impl<T: Clone> Clone for RepeatN<T> {
+    fn clone(&self) -> Self {
+        Self { element: self.element.clone(), count: self.count }
+    }
+}
+impl<T: crate::fmt::Debug> crate::fmt::Debug for RepeatN<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("RepeatN")
+    }
+}
+impl<T: Clone> Iterator for RepeatN<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        if self.count > 0 {
+            self.count -= 1;
+            if self.count == 0 {
+                self.element.take()
+            } else {
+                self.element.clone()
+            }
+        } else {
+            None
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.count, Some(self.count))
+    }
+}
+impl<T: Clone> ExactSizeIterator for RepeatN<T> {
+    fn len(&self) -> usize { self.count }
+}
+impl<T: Clone> DoubleEndedIterator for RepeatN<T> {
+    fn next_back(&mut self) -> Option<T> { self.next() }
+}
+pub fn repeat_n<T: Clone>(element: T, count: usize) -> RepeatN<T> {
+    let element = if count == 0 { None } else { Some(element) };
+    RepeatN { element, count }
+}
+
 impl<T> IntoIterator for Option<T> {
     type Item = T;
     type IntoIter = Once<T>;
@@ -529,6 +574,44 @@ macro_rules! integer_sum {
     )*};
 }
 integer_sum!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+macro_rules! float_sum {
+    ($($t:ty)*) => {$(
+        impl Sum for $t {
+            fn sum<I: Iterator<Item = $t>>(mut iter: I) -> $t {
+                let mut total: $t = 0.0;
+                loop { match iter.next() { Some(item) => total += item, None => return total } }
+            }
+        }
+    )*};
+}
+float_sum!(f32 f64);
+
+/// Types that can be made by multiplying an iterator. `Iterator::product` goes through this.
+pub trait Product<A = Self>: Sized {
+    fn product<I: Iterator<Item = A>>(iter: I) -> Self;
+}
+macro_rules! integer_product {
+    ($($t:ty)*) => {$(
+        impl Product for $t {
+            fn product<I: Iterator<Item = $t>>(mut iter: I) -> $t {
+                let mut total: $t = 1;
+                loop { match iter.next() { Some(item) => total *= item, None => return total } }
+            }
+        }
+    )*};
+}
+integer_product!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+macro_rules! float_product {
+    ($($t:ty)*) => {$(
+        impl Product for $t {
+            fn product<I: Iterator<Item = $t>>(mut iter: I) -> $t {
+                let mut total: $t = 1.0;
+                loop { match iter.next() { Some(item) => total *= item, None => return total } }
+            }
+        }
+    )*};
+}
+float_product!(f32 f64);
 
 /// The items of every iterable `f` produces, one iterable after the other.
 pub struct FlatMap<I, U: IntoIterator, F> { iter: I, f: F, front: Option<U::IntoIter> }

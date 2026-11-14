@@ -99,6 +99,10 @@ pub trait Display { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait Debug { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait LowerHex { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait UpperHex { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
+pub trait Binary { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
+pub trait Octal { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
+pub trait LowerExp { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
+pub trait UpperExp { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait Pointer { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 
 impl Debug for () {
@@ -165,6 +169,8 @@ pub mod rt {
     enum Kind<'a> {
         Display(&'a dyn Display), Debug(&'a dyn Debug),
         LowerHex(&'a dyn LowerHex), UpperHex(&'a dyn UpperHex),
+        Binary(&'a dyn Binary), Octal(&'a dyn Octal),
+        LowerExp(&'a dyn LowerExp), UpperExp(&'a dyn UpperExp),
         Pointer(&'a dyn Pointer), Count(usize),
     }
     impl<'a> Argument<'a> {
@@ -172,12 +178,18 @@ pub mod rt {
         pub const fn new_debug<T: Debug>(v: &'a T) -> Self { Self { kind: Kind::Debug(v) } }
         pub const fn new_lower_hex<T: LowerHex>(v: &'a T) -> Self { Self { kind: Kind::LowerHex(v) } }
         pub const fn new_upper_hex<T: UpperHex>(v: &'a T) -> Self { Self { kind: Kind::UpperHex(v) } }
+        pub const fn new_binary<T: Binary>(v: &'a T) -> Self { Self { kind: Kind::Binary(v) } }
+        pub const fn new_octal<T: Octal>(v: &'a T) -> Self { Self { kind: Kind::Octal(v) } }
+        pub const fn new_lower_exp<T: LowerExp>(v: &'a T) -> Self { Self { kind: Kind::LowerExp(v) } }
+        pub const fn new_upper_exp<T: UpperExp>(v: &'a T) -> Self { Self { kind: Kind::UpperExp(v) } }
         pub const fn new_pointer<T: Pointer>(v: &'a T) -> Self { Self { kind: Kind::Pointer(v) } }
         pub const fn from_usize(v: &'a usize) -> Self { Self { kind: Kind::Count(*v) } }
         pub(super) fn format(&self, f: &mut Formatter<'_>) -> Result {
             match &self.kind {
                 Kind::Display(v) => Display::fmt(*v, f), Kind::Debug(v) => Debug::fmt(*v, f),
                 Kind::LowerHex(v) => LowerHex::fmt(*v, f), Kind::UpperHex(v) => UpperHex::fmt(*v, f),
+                Kind::Binary(v) => Binary::fmt(*v, f), Kind::Octal(v) => Octal::fmt(*v, f),
+                Kind::LowerExp(v) => LowerExp::fmt(*v, f), Kind::UpperExp(v) => UpperExp::fmt(*v, f),
                 Kind::Pointer(v) => Pointer::fmt(*v, f), Kind::Count(_) => Err(Error),
             }
         }
@@ -317,6 +329,7 @@ macro_rules! reference {
     };
 }
 reference!(Display); reference!(Debug); reference!(LowerHex); reference!(UpperHex);
+reference!(Binary); reference!(Octal); reference!(LowerExp); reference!(UpperExp);
 macro_rules! integer {
     ($t:ty, $u:ty, $signed:expr) => {
         impl Display for $t {
@@ -334,6 +347,12 @@ macro_rules! integer {
         }
         impl UpperHex for $t {
             fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 16, true, f) }
+        }
+        impl Binary for $t {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 2, false, f) }
+        }
+        impl Octal for $t {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 8, false, f) }
         }
     };
 }
@@ -466,3 +485,7 @@ impl<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
 impl Debug for ! {
     fn fmt(&self, _f: &mut Formatter<'_>) -> Result { match *self {} }
 }
+impl LowerExp for f32 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
+impl UpperExp for f32 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
+impl LowerExp for f64 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
+impl UpperExp for f64 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }

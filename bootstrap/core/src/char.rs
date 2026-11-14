@@ -1,3 +1,11 @@
+pub const fn from_u32(i: u32) -> Option<char> {
+    char::from_u32(i)
+}
+
+pub const unsafe fn from_u32_unchecked(i: u32) -> char {
+    unsafe { char::from_u32_unchecked(i) }
+}
+
 impl char {
     pub const MAX: char = '\u{10ffff}';
 

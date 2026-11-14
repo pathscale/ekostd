@@ -55,8 +55,143 @@ pub mod task {
         #[lang = "Pending"]
         Pending,
     }
+
+    #[derive(Copy, Clone)]
+    pub struct RawWakerVTable {
+        clone: unsafe fn(*const ()) -> RawWaker,
+        wake: unsafe fn(*const ()),
+        wake_by_ref: unsafe fn(*const ()),
+        drop: unsafe fn(*const ()),
+    }
+
+    impl PartialEq for RawWakerVTable {
+        fn eq(&self, other: &Self) -> bool {
+            self.clone as usize == other.clone as usize
+                && self.wake as usize == other.wake as usize
+                && self.wake_by_ref as usize == other.wake_by_ref as usize
+                && self.drop as usize == other.drop as usize
+        }
+    }
+    impl Eq for RawWakerVTable {}
+    impl crate::fmt::Debug for RawWakerVTable {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.write_str("RawWakerVTable")
+        }
+    }
+
+    impl RawWakerVTable {
+        pub const fn new(
+            clone: unsafe fn(*const ()) -> RawWaker,
+            wake: unsafe fn(*const ()),
+            wake_by_ref: unsafe fn(*const ()),
+            drop: unsafe fn(*const ()),
+        ) -> Self {
+            Self { clone, wake, wake_by_ref, drop }
+        }
+    }
+
+    #[derive(PartialEq, Eq)]
+    pub struct RawWaker {
+        data: *const (),
+        vtable: &'static RawWakerVTable,
+    }
+    impl crate::fmt::Debug for RawWaker {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.write_str("RawWaker")
+        }
+    }
+
+    impl RawWaker {
+        pub const fn new(data: *const (), vtable: &'static RawWakerVTable) -> Self {
+            Self { data, vtable }
+        }
+    }
+
+    #[repr(transparent)]
+    pub struct Waker {
+        waker: RawWaker,
+    }
+
+    unsafe impl Send for Waker {}
+    unsafe impl Sync for Waker {}
+
+    unsafe fn noop_clone(_: *const ()) -> RawWaker {
+        RawWaker::new(crate::ptr::null(), &NOOP_VTABLE)
+    }
+
+    unsafe fn noop(_: *const ()) {}
+
+    static NOOP_VTABLE: RawWakerVTable = RawWakerVTable::new(noop_clone, noop, noop, noop);
+    static NOOP_WAKER: Waker = unsafe { Waker::from_raw(RawWaker::new(crate::ptr::null(), &NOOP_VTABLE)) };
+
+    impl Waker {
+        pub const unsafe fn from_raw(waker: RawWaker) -> Waker {
+            Waker { waker }
+        }
+
+        pub fn wake(self) {
+            unsafe { (self.waker.vtable.wake)(self.waker.data) };
+            crate::mem::forget(self);
+        }
+
+        pub fn wake_by_ref(&self) {
+            unsafe { (self.waker.vtable.wake_by_ref)(self.waker.data) };
+        }
+
+        pub fn will_wake(&self, other: &Waker) -> bool {
+            self.waker == other.waker
+        }
+
+        pub const fn data(&self) -> *const () {
+            self.waker.data
+        }
+
+        pub const fn vtable(&self) -> &'static RawWakerVTable {
+            self.waker.vtable
+        }
+
+        pub const fn noop() -> &'static Waker {
+            &NOOP_WAKER
+        }
+    }
+
+    impl Clone for Waker {
+        fn clone(&self) -> Self {
+            unsafe { Waker::from_raw((self.waker.vtable.clone)(self.waker.data)) }
+        }
+    }
+
+    impl Drop for Waker {
+        fn drop(&mut self) {
+            unsafe { (self.waker.vtable.drop)(self.waker.data) };
+        }
+    }
+
+    impl crate::fmt::Debug for Waker {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.write_str("Waker")
+        }
+    }
+
     pub struct Context<'a> {
-        _marker: crate::marker::PhantomData<&'a ()>,
+        waker: &'a Waker,
+        _marker: crate::marker::PhantomData<fn(&'a ()) -> &'a ()>,
+    }
+
+    impl<'a> Context<'a> {
+        pub const fn from_waker(waker: &'a Waker) -> Context<'a> {
+            Context { waker, _marker: crate::marker::PhantomData }
+        }
+
+        pub const fn waker(&self) -> &'a Waker {
+            self.waker
+        }
+    }
+
+    impl crate::fmt::Debug for Context<'_> {
+        fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+            f.write_str("Context")
+        }
     }
 }
 
@@ -87,6 +222,56 @@ macro_rules! legacy_int_module {
     )*};
 }
 legacy_int_module!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+pub mod f32 {
+    pub const RADIX: u32 = 2;
+    pub const MANTISSA_DIGITS: u32 = 24;
+    pub const DIGITS: u32 = 6;
+    pub const EPSILON: f32 = 1.19209290e-07_f32;
+    pub const MIN: f32 = -3.40282347e+38_f32;
+    pub const MIN_POSITIVE: f32 = 1.17549435e-38_f32;
+    pub const MAX: f32 = 3.40282347e+38_f32;
+    pub const MIN_EXP: i32 = -125;
+    pub const MAX_EXP: i32 = 128;
+    pub const INFINITY: f32 = 1.0_f32 / 0.0_f32;
+    pub const NEG_INFINITY: f32 = -1.0_f32 / 0.0_f32;
+    pub const NAN: f32 = 0.0_f32 / 0.0_f32;
+    pub mod consts {
+        pub const PI: f32 = 3.14159265358979323846_f32;
+        pub const TAU: f32 = 6.28318530717958647692_f32;
+        pub const FRAC_PI_2: f32 = 1.57079632679489661923_f32;
+        pub const FRAC_PI_4: f32 = 0.78539816339744830961_f32;
+        pub const E: f32 = 2.71828182845904523536_f32;
+        pub const LN_2: f32 = 0.69314718055994530941_f32;
+        pub const LN_10: f32 = 2.30258509299404568401_f32;
+        pub const SQRT_2: f32 = 1.41421356237309504880_f32;
+    }
+}
+
+pub mod f64 {
+    pub const RADIX: u32 = 2;
+    pub const MANTISSA_DIGITS: u32 = 53;
+    pub const DIGITS: u32 = 15;
+    pub const EPSILON: f64 = 2.2204460492503131e-16_f64;
+    pub const MIN: f64 = -1.7976931348623157e+308_f64;
+    pub const MIN_POSITIVE: f64 = 2.2250738585072014e-308_f64;
+    pub const MAX: f64 = 1.7976931348623157e+308_f64;
+    pub const MIN_EXP: i32 = -1021;
+    pub const MAX_EXP: i32 = 1024;
+    pub const INFINITY: f64 = 1.0_f64 / 0.0_f64;
+    pub const NEG_INFINITY: f64 = -1.0_f64 / 0.0_f64;
+    pub const NAN: f64 = 0.0_f64 / 0.0_f64;
+    pub mod consts {
+        pub const PI: f64 = 3.14159265358979323846_f64;
+        pub const TAU: f64 = 6.28318530717958647692_f64;
+        pub const FRAC_PI_2: f64 = 1.57079632679489661923_f64;
+        pub const FRAC_PI_4: f64 = 0.78539816339744830961_f64;
+        pub const E: f64 = 2.71828182845904523536_f64;
+        pub const LN_2: f64 = 0.69314718055994530941_f64;
+        pub const LN_10: f64 = 2.30258509299404568401_f64;
+        pub const SQRT_2: f64 = 1.41421356237309504880_f64;
+    }
+}
 
 pub use crate::panic::panicking;
 pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, stringify, concat, include_str, include_bytes, derive, compile_error, global_allocator, test};
