@@ -1,4 +1,5 @@
 use crate::marker::{Copy, Destruct, PointeeSized, Sized};
+pub use crate::macros::builtin::Clone;
 
 #[lang = "clone"]
 #[rustc_diagnostic_item = "Clone"]

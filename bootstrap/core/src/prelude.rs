@@ -14,9 +14,7 @@ pub mod v1 {
         debug_assert_ne, derive, env, global_allocator, file, format_args, include_bytes, include_str, line, matches,
         option_env, panic, stringify, test, todo, unimplemented, unreachable, write, writeln,
     };
-    pub use crate::macros::builtin::{
-        Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd,
-    };
+    pub use crate::macros::builtin::{Debug, Hash};
 }
 
 pub mod rust_2015 { pub use super::v1::*; }

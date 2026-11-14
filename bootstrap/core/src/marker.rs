@@ -1,4 +1,5 @@
 use crate::clone::Clone;
+pub use crate::macros::builtin::Copy;
 
 #[lang = "structural_peq"]
 pub trait StructuralPartialEq {}

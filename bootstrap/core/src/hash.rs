@@ -1,6 +1,7 @@
 use crate::default::Default;
 use crate::marker::PointeeSized;
 use crate::marker::PhantomData;
+pub use crate::macros::builtin::Hash;
 
 pub trait Hasher {
     fn finish(&self) -> u64;

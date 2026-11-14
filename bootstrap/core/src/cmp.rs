@@ -1,6 +1,7 @@
 use crate::clone::Clone;
 use crate::marker::{Copy, Destruct, PointeeSized, Sized};
 use crate::option::Option::{self, None, Some};
+pub use crate::macros::builtin::{Eq, Ord, PartialEq, PartialOrd};
 
 #[lang = "eq"]
 #[rustc_diagnostic_item = "PartialEq"]

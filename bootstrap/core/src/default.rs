@@ -1,4 +1,5 @@
 use crate::marker::{PhantomData, PointeeSized, Sized};
+pub use crate::macros::builtin::Default;
 
 pub const trait Default: Sized {
     fn default() -> Self;

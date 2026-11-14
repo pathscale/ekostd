@@ -1,4 +1,5 @@
 //! Allocation-free formatting for the bootstrap runtime.
+pub use crate::macros::builtin::Debug;
 pub struct Error;
 impl Copy for Error {}
 impl Clone for Error { fn clone(&self) -> Self { *self } }
