@@ -79,21 +79,48 @@ extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
     core::ptr::null_mut()
 }
 
-pub(crate) struct RawMutex(core::cell::UnsafeCell<libc::pthread_mutex_t>);
+pub(crate) struct RawMutex(core::sync::atomic::AtomicPtr<libc::pthread_mutex_t>);
 
 impl RawMutex {
     const fn new() -> Self {
-        Self(core::cell::UnsafeCell::new(libc::PTHREAD_MUTEX_INITIALIZER))
+        Self(core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()))
     }
 
     pub(crate) fn get(&self) -> *mut libc::pthread_mutex_t {
-        self.0.get()
+        let ptr = self.0.load(core::sync::atomic::Ordering::Acquire);
+        if !ptr.is_null() {
+            return ptr;
+        }
+        self.init_slow()
+    }
+
+    #[cold]
+    fn init_slow(&self) -> *mut libc::pthread_mutex_t {
+        let boxed = Box::into_raw(Box::new(libc::PTHREAD_MUTEX_INITIALIZER));
+        match self.0.compare_exchange(
+            core::ptr::null_mut(),
+            boxed,
+            core::sync::atomic::Ordering::Release,
+            core::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => boxed,
+            Err(existing) => {
+                unsafe { drop(Box::from_raw(boxed)) };
+                existing
+            }
+        }
     }
 }
 
 impl Drop for RawMutex {
     fn drop(&mut self) {
-        unsafe { libc::pthread_mutex_destroy(self.0.get()) };
+        let ptr = *self.0.get_mut();
+        if !ptr.is_null() {
+            unsafe {
+                libc::pthread_mutex_destroy(ptr);
+                drop(Box::from_raw(ptr));
+            }
+        }
     }
 }
 
@@ -362,7 +389,7 @@ impl<T: 'static> ThreadLocal<T> {
 /// sleep rather than poll, because the thing it is waiting for is a compile that may take a
 /// minute, and a poll loop over that is a core spent asking.
 pub struct Condvar {
-    inner: core::cell::UnsafeCell<libc::pthread_cond_t>,
+    inner: core::sync::atomic::AtomicPtr<libc::pthread_cond_t>,
     /// How many threads are inside `wait`.
     ///
     /// `pthread_cond_signal` cannot tell you whether it woke anybody: POSIX gives no way to ask
@@ -379,8 +406,33 @@ unsafe impl Sync for Condvar {}
 impl Condvar {
     pub const fn new() -> Condvar {
         Condvar {
-            inner: core::cell::UnsafeCell::new(libc::PTHREAD_COND_INITIALIZER),
+            inner: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             waiters: core::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn raw(&self) -> *mut libc::pthread_cond_t {
+        let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
+        if !ptr.is_null() {
+            return ptr;
+        }
+        self.init_slow()
+    }
+
+    #[cold]
+    fn init_slow(&self) -> *mut libc::pthread_cond_t {
+        let boxed = Box::into_raw(Box::new(libc::PTHREAD_COND_INITIALIZER));
+        match self.inner.compare_exchange(
+            core::ptr::null_mut(),
+            boxed,
+            core::sync::atomic::Ordering::Release,
+            core::sync::atomic::Ordering::Acquire,
+        ) {
+            Ok(_) => boxed,
+            Err(existing) => {
+                unsafe { drop(Box::from_raw(boxed)) };
+                existing
+            }
         }
     }
 
@@ -401,7 +453,7 @@ impl Condvar {
         // Counted while the mutex is held, which is what makes `notify_one`'s answer exact for a
         // notifier that holds the same mutex. See `waiters`.
         self.waiters.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-        unsafe { libc::pthread_cond_wait(self.inner.get(), mutex.inner.get()) };
+        unsafe { libc::pthread_cond_wait(self.raw(), mutex.inner.get()) };
         self.waiters.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
         Guard { mutex }
     }
@@ -414,14 +466,20 @@ impl Condvar {
     /// `false` means nobody had entered `wait` yet, not that nobody ever will.
     pub fn notify_one(&self) -> bool {
         let had_waiter = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed) > 0;
-        unsafe { libc::pthread_cond_signal(self.inner.get()) };
+        let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
+        if !ptr.is_null() {
+            unsafe { libc::pthread_cond_signal(ptr) };
+        }
         had_waiter
     }
 
     /// Wake all of them. Returns how many were waiting.
     pub fn notify_all(&self) -> usize {
         let waiting = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed);
-        unsafe { libc::pthread_cond_broadcast(self.inner.get()) };
+        let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
+        if !ptr.is_null() {
+            unsafe { libc::pthread_cond_broadcast(ptr) };
+        }
         waiting
     }
 }
@@ -440,7 +498,13 @@ impl Default for Condvar {
 
 impl Drop for Condvar {
     fn drop(&mut self) {
-        unsafe { libc::pthread_cond_destroy(self.inner.get()) };
+        let ptr = *self.inner.get_mut();
+        if !ptr.is_null() {
+            unsafe {
+                libc::pthread_cond_destroy(ptr);
+                drop(Box::from_raw(ptr));
+            }
+        }
     }
 }
 
@@ -607,34 +671,233 @@ impl<T, F: FnOnce() -> T> core::ops::Deref for LazyLock<T, F> {
     }
 }
 
-/// A reader-writer lock over `pthread_rwlock_t`.
+const RW_WRITER_BIT: u32 = 1 << 31;
+const RW_WAITERS_BIT: u32 = 1 << 30;
+const RW_READER_MASK: u32 = 0x3fff_ffff;
+
+#[cfg(target_os = "macos")]
+mod ulock {
+    use core::ffi::{c_int, c_void};
+    use core::sync::atomic::AtomicU32;
+
+    const UL_COMPARE_AND_WAIT: u32 = 1;
+    const ULF_WAKE_ALL: u32 = 0x0000_0100;
+    const ULF_NO_ERRNO: u32 = 0x0100_0000;
+
+    unsafe extern "C" {
+        fn __ulock_wait(operation: u32, addr: *mut c_void, value: u64, timeout: u32) -> c_int;
+        fn __ulock_wake(operation: u32, addr: *mut c_void, wake_value: u64) -> c_int;
+    }
+
+    pub(super) fn wait(addr: &AtomicU32, expected: u32, timeout_us: u32) {
+        unsafe {
+            __ulock_wait(
+                UL_COMPARE_AND_WAIT | ULF_NO_ERRNO,
+                core::ptr::from_ref(addr).cast_mut().cast(),
+                expected as u64,
+                timeout_us,
+            );
+        }
+    }
+
+    pub(super) fn wake_all(addr: &AtomicU32) {
+        unsafe {
+            __ulock_wake(
+                UL_COMPARE_AND_WAIT | ULF_WAKE_ALL | ULF_NO_ERRNO,
+                core::ptr::from_ref(addr).cast_mut().cast(),
+                0,
+            );
+        }
+    }
+}
+
+/// A move-safe, pure-atomic reader-writer lock.
+///
+/// Reader-preferring on the fast path: recursive `.read()` calls on the same thread never deadlock
+/// against a waiting writer, and the lock has no address-sensitive OS state so moving it by value
+/// before or after use is always sound.
 pub struct RwLock<T: ?Sized> {
-    raw: core::cell::UnsafeCell<libc::pthread_rwlock_t>,
+    state: core::sync::atomic::AtomicU32,
     value: core::cell::UnsafeCell<T>,
 }
 
 unsafe impl<T: ?Sized + Send> Send for RwLock<T> {}
 unsafe impl<T: ?Sized + Send + Sync> Sync for RwLock<T> {}
 
+impl<T: Default> Default for RwLock<T> {
+    fn default() -> Self {
+        RwLock::new(T::default())
+    }
+}
+
+impl<T: ?Sized> core::fmt::Debug for RwLock<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("RwLock { .. }")
+    }
+}
+
 impl<T> RwLock<T> {
     /// An unlocked lock.
     pub const fn new(value: T) -> RwLock<T> {
         RwLock {
-            raw: core::cell::UnsafeCell::new(libc::PTHREAD_RWLOCK_INITIALIZER),
+            state: core::sync::atomic::AtomicU32::new(0),
             value: core::cell::UnsafeCell::new(value),
+        }
+    }
+
+    /// Consume the lock and return the inner value.
+    pub fn into_inner(self) -> T {
+        self.value.into_inner()
+    }
+}
+
+impl<T: ?Sized> RwLock<T> {
+    /// Try to take a shared read lock without blocking.
+    pub fn try_read(&self) -> Option<ReadGuard<'_, T>> {
+        use core::sync::atomic::Ordering;
+        let mut s = self.state.load(Ordering::Relaxed);
+        loop {
+            if (s & RW_WRITER_BIT) != 0 {
+                return None;
+            }
+            let readers = s & RW_READER_MASK;
+            assert!(readers < RW_READER_MASK, "RwLock reader count overflow");
+            match self.state.compare_exchange_weak(
+                s,
+                s + 1,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(ReadGuard { lock: self }),
+                Err(next) => s = next,
+            }
         }
     }
 
     /// Take a shared read lock.
     pub fn read(&self) -> ReadGuard<'_, T> {
-        unsafe { libc::pthread_rwlock_rdlock(self.raw.get()) };
-        ReadGuard { lock: self }
+        use core::sync::atomic::Ordering;
+        let mut s = self.state.load(Ordering::Relaxed);
+        let mut spins = 0u32;
+        loop {
+            if (s & RW_WRITER_BIT) == 0 {
+                let readers = s & RW_READER_MASK;
+                assert!(readers < RW_READER_MASK, "RwLock reader count overflow");
+                match self.state.compare_exchange_weak(
+                    s,
+                    s + 1,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => return ReadGuard { lock: self },
+                    Err(next) => {
+                        s = next;
+                        continue;
+                    }
+                }
+            }
+            if spins < 64 {
+                spins += 1;
+                core::hint::spin_loop();
+                s = self.state.load(Ordering::Relaxed);
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                if (s & RW_WAITERS_BIT) == 0 {
+                    match self.state.compare_exchange_weak(
+                        s,
+                        s | RW_WAITERS_BIT,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => s |= RW_WAITERS_BIT,
+                        Err(next) => {
+                            s = next;
+                            continue;
+                        }
+                    }
+                }
+                ulock::wait(&self.state, s, 1000);
+            }
+            #[cfg(not(target_os = "macos"))]
+            unsafe {
+                libc::sched_yield();
+            }
+            s = self.state.load(Ordering::Relaxed);
+        }
+    }
+
+    /// Try to take the exclusive write lock without blocking.
+    pub fn try_write(&self) -> Option<WriteGuard<'_, T>> {
+        use core::sync::atomic::Ordering;
+        let mut s = self.state.load(Ordering::Relaxed);
+        loop {
+            if (s & (RW_WRITER_BIT | RW_READER_MASK)) != 0 {
+                return None;
+            }
+            match self.state.compare_exchange_weak(
+                s,
+                s | RW_WRITER_BIT,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(WriteGuard { lock: self }),
+                Err(next) => s = next,
+            }
+        }
     }
 
     /// Take the exclusive write lock.
     pub fn write(&self) -> WriteGuard<'_, T> {
-        unsafe { libc::pthread_rwlock_wrlock(self.raw.get()) };
-        WriteGuard { lock: self }
+        use core::sync::atomic::Ordering;
+        let mut s = self.state.load(Ordering::Relaxed);
+        let mut spins = 0u32;
+        loop {
+            if (s & (RW_WRITER_BIT | RW_READER_MASK)) == 0 {
+                match self.state.compare_exchange_weak(
+                    s,
+                    s | RW_WRITER_BIT,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => return WriteGuard { lock: self },
+                    Err(next) => {
+                        s = next;
+                        continue;
+                    }
+                }
+            }
+            if spins < 64 {
+                spins += 1;
+                core::hint::spin_loop();
+                s = self.state.load(Ordering::Relaxed);
+                continue;
+            }
+            #[cfg(target_os = "macos")]
+            {
+                if (s & RW_WAITERS_BIT) == 0 {
+                    match self.state.compare_exchange_weak(
+                        s,
+                        s | RW_WAITERS_BIT,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    ) {
+                        Ok(_) => s |= RW_WAITERS_BIT,
+                        Err(next) => {
+                            s = next;
+                            continue;
+                        }
+                    }
+                }
+                ulock::wait(&self.state, s, 1000);
+            }
+            #[cfg(not(target_os = "macos"))]
+            unsafe {
+                libc::sched_yield();
+            }
+            s = self.state.load(Ordering::Relaxed);
+        }
     }
 
     /// The value, when the lock is owned uniquely and cannot be held.
@@ -657,7 +920,13 @@ impl<T: ?Sized> core::ops::Deref for ReadGuard<'_, T> {
 
 impl<T: ?Sized> Drop for ReadGuard<'_, T> {
     fn drop(&mut self) {
-        unsafe { libc::pthread_rwlock_unlock(self.lock.raw.get()) };
+        use core::sync::atomic::Ordering;
+        let prev = self.lock.state.fetch_sub(1, Ordering::Release);
+        if (prev & RW_READER_MASK) == 1 && (prev & RW_WAITERS_BIT) != 0 {
+            self.lock.state.fetch_and(!RW_WAITERS_BIT, Ordering::Relaxed);
+            #[cfg(target_os = "macos")]
+            ulock::wake_all(&self.lock.state);
+        }
     }
 }
 
@@ -681,7 +950,12 @@ impl<T: ?Sized> core::ops::DerefMut for WriteGuard<'_, T> {
 
 impl<T: ?Sized> Drop for WriteGuard<'_, T> {
     fn drop(&mut self) {
-        unsafe { libc::pthread_rwlock_unlock(self.lock.raw.get()) };
+        use core::sync::atomic::Ordering;
+        let prev = self.lock.state.fetch_and(!(RW_WRITER_BIT | RW_WAITERS_BIT), Ordering::Release);
+        if (prev & RW_WAITERS_BIT) != 0 {
+            #[cfg(target_os = "macos")]
+            ulock::wake_all(&self.lock.state);
+        }
     }
 }
 
@@ -1157,4 +1431,143 @@ macro_rules! scoped_thread_local {
         $(#[$attr])*
         $vis static $name: $crate::thread::ScopedKey<$ty> = $crate::thread::ScopedKey::new();
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::sync::Arc;
+    use alloc::vec::Vec;
+    use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn rwlock_basic_and_move_after_use() {
+        let lock = RwLock::new(10u32);
+        assert_eq!(*lock.read(), 10);
+        assert!(lock.try_read().is_some());
+        {
+            let r1 = lock.read();
+            let r2 = lock.read();
+            assert_eq!(*r1, 10);
+            assert_eq!(*r2, 10);
+            assert!(lock.try_write().is_none());
+        }
+        {
+            let mut w = lock.write();
+            *w = 20;
+            assert!(lock.try_read().is_none());
+            assert!(lock.try_write().is_none());
+        }
+        // Move by value after lock has been used.
+        let mut vec = Vec::new();
+        vec.push(lock);
+        vec.reserve(64);
+        let moved = vec.pop().unwrap();
+        assert_eq!(*moved.read(), 20);
+        let mut moved = moved;
+        *moved.get_mut() = 30;
+        assert_eq!(moved.into_inner(), 30);
+    }
+
+    #[test]
+    fn rwlock_recursive_read_with_waiting_writer_does_not_deadlock() {
+        let lock = Arc::new(RwLock::new(42u32));
+        let writer_waiting = Arc::new(AtomicBool::new(false));
+        let writer_done = Arc::new(AtomicBool::new(false));
+
+        let r1 = lock.read();
+        assert_eq!(*r1, 42);
+
+        let lock2 = Arc::clone(&lock);
+        let ww = Arc::clone(&writer_waiting);
+        let wd = Arc::clone(&writer_done);
+        let handle = spawn(move || {
+            ww.store(true, Ordering::Release);
+            let mut w = lock2.write();
+            *w = 99;
+            wd.store(true, Ordering::Release);
+        })
+        .unwrap();
+
+        while !writer_waiting.load(Ordering::Acquire) {
+            unsafe { libc::sched_yield() };
+        }
+        // Give writer a moment to enter wait state on the lock.
+        for _ in 0..200 {
+            unsafe { libc::sched_yield() };
+        }
+
+        // Recursive read on the thread already holding r1 must succeed even with a waiting writer.
+        let r2 = lock.read();
+        assert_eq!(*r2, 42);
+        drop(r2);
+        drop(r1);
+
+        handle.join().unwrap();
+        assert!(writer_done.load(Ordering::Acquire));
+        assert_eq!(*lock.read(), 99);
+    }
+
+    #[test]
+    fn rwlock_multithreaded_contention() {
+        let lock = Arc::new(RwLock::new(0usize));
+        let iters = 200usize;
+        let threads = 4usize;
+
+        let mut handles = Vec::new();
+        for _ in 0..threads {
+            let l = Arc::clone(&lock);
+            handles.push(
+                spawn(move || {
+                    for i in 0..iters {
+                        if i % 4 == 0 {
+                            let mut w = l.write();
+                            *w += 1;
+                        } else {
+                            let r = l.read();
+                            let _ = *r;
+                        }
+                    }
+                })
+                .unwrap(),
+            );
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(*lock.read(), threads * (iters / 4));
+    }
+
+    #[test]
+    fn mutex_and_condvar_move_after_use() {
+        let m = Mutex::new(0u32);
+        *m.lock() = 1;
+        let cv = Condvar::new();
+        assert!(!cv.notify_one());
+
+        // Move both after use.
+        let mut pair = Some((m, cv));
+        let (m2, cv2) = pair.take().unwrap();
+        let shared = Arc::new((m2, cv2, AtomicUsize::new(0)));
+
+        let s2 = Arc::clone(&shared);
+        let h = spawn(move || {
+            let mut g = s2.0.lock();
+            while *g == 1 {
+                g = s2.1.wait(g);
+            }
+            assert_eq!(*g, 2);
+            s2.2.store(1, Ordering::Release);
+        })
+        .unwrap();
+
+        while shared.2.load(Ordering::Acquire) == 0 {
+            let mut g = shared.0.lock();
+            *g = 2;
+            shared.1.notify_all();
+            drop(g);
+            unsafe { libc::sched_yield() };
+        }
+        h.join().unwrap();
+    }
 }
