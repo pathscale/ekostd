@@ -486,7 +486,252 @@ impl<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
 impl Debug for ! {
     fn fmt(&self, _f: &mut Formatter<'_>) -> Result { match *self {} }
 }
-impl LowerExp for f32 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
-impl UpperExp for f32 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
-impl LowerExp for f64 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
-impl UpperExp for f64 { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("<float>") } }
+const DEC_DIGITS: &[u8] = b"0123456789";
+
+fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Formatter<'_>) -> Result {
+    if val.is_nan() {
+        return f.write_str("NaN");
+    }
+    let mut buf = [0u8; 64];
+    let mut pos: usize = 0;
+    if val.is_sign_negative() {
+        buf[pos] = b'-';
+        pos += 1;
+    }
+    let mut x = val.abs();
+    if x.is_infinite() {
+        buf[pos] = b'i';
+        buf[pos + 1] = b'n';
+        buf[pos + 2] = b'f';
+        pos += 3;
+        return f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) });
+    }
+    if x == 0.0 {
+        buf[pos] = b'0';
+        pos += 1;
+        if exp_char != 0 {
+            buf[pos] = exp_char;
+            buf[pos + 1] = b'0';
+            pos += 2;
+        } else if debug {
+            buf[pos] = b'.';
+            buf[pos + 1] = b'0';
+            pos += 2;
+        }
+        return f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) });
+    }
+
+    let mut exp10: i32 = 0;
+    let mut step = 0usize;
+    while step < 24 {
+        if x < 1e16 {
+            break;
+        }
+        x /= 1e16;
+        exp10 += 16;
+        step += 1;
+    }
+    let mut step2 = 0usize;
+    while step2 < 24 {
+        if x >= 1e-15 {
+            break;
+        }
+        x *= 1e16;
+        exp10 -= 16;
+        step2 += 1;
+    }
+    let mut step3 = 0usize;
+    while step3 < 20 {
+        if x < 10.0 {
+            break;
+        }
+        x /= 10.0;
+        exp10 += 1;
+        step3 += 1;
+    }
+    let mut step4 = 0usize;
+    while step4 < 20 {
+        if x >= 1.0 {
+            break;
+        }
+        x *= 10.0;
+        exp10 -= 1;
+        step4 += 1;
+    }
+
+    let ndigits: usize = if is_f32 { 7 } else { 15 };
+    let mut digits = [0usize; 16];
+    let mut i = 0usize;
+    while i <= ndigits {
+        let mut d: usize = 0;
+        while d < 9 {
+            if x < ((d + 1) as f64) {
+                break;
+            }
+            d += 1;
+        }
+        digits[i] = d;
+        x = (x - (d as f64)) * 10.0;
+        i += 1;
+    }
+
+    if digits[ndigits] >= 5 {
+        let mut carry: usize = 1;
+        let mut j = ndigits;
+        while j > 0 {
+            if carry == 0 {
+                break;
+            }
+            j -= 1;
+            let sum = digits[j] + carry;
+            if sum >= 10 {
+                digits[j] = sum - 10;
+                carry = 1;
+            } else {
+                digits[j] = sum;
+                carry = 0;
+            }
+        }
+        if carry > 0 {
+            digits[0] = 1;
+            let mut k = 1usize;
+            while k < ndigits {
+                digits[k] = 0;
+                k += 1;
+            }
+            exp10 += 1;
+        }
+    }
+
+    let mut len = ndigits;
+    while len > 1 {
+        if digits[len - 1] != 0 {
+            break;
+        }
+        len -= 1;
+    }
+
+    let use_exp = exp_char != 0 || exp10 < -4 || exp10 >= (ndigits as i32);
+    if use_exp {
+        let ec = if exp_char != 0 { exp_char } else { b'e' };
+        buf[pos] = DEC_DIGITS[digits[0]];
+        pos += 1;
+        if len > 1 {
+            buf[pos] = b'.';
+            pos += 1;
+            let mut k = 1usize;
+            while k < len {
+                buf[pos] = DEC_DIGITS[digits[k]];
+                pos += 1;
+                k += 1;
+            }
+        }
+        buf[pos] = ec;
+        pos += 1;
+        let mut e_abs: usize = if exp10 < 0 {
+            buf[pos] = b'-';
+            pos += 1;
+            (-exp10) as usize
+        } else {
+            exp10 as usize
+        };
+        let mut e_buf = [0u8; 8];
+        let mut e_len: usize = 0;
+        let mut es = 0usize;
+        while es < 8 {
+            e_buf[e_len] = DEC_DIGITS[e_abs % 10];
+            e_len += 1;
+            e_abs /= 10;
+            if e_abs == 0 {
+                break;
+            }
+            es += 1;
+        }
+        while e_len > 0 {
+            e_len -= 1;
+            buf[pos] = e_buf[e_len];
+            pos += 1;
+        }
+    } else if exp10 < 0 {
+        buf[pos] = b'0';
+        pos += 1;
+        buf[pos] = b'.';
+        pos += 1;
+        let mut z = (-exp10 - 1) as usize;
+        while z > 0 {
+            buf[pos] = b'0';
+            pos += 1;
+            z -= 1;
+        }
+        let mut k = 0;
+        while k < len {
+            buf[pos] = DEC_DIGITS[digits[k]];
+            pos += 1;
+            k += 1;
+        }
+    } else {
+        let int_digits = (exp10 as usize) + 1;
+        if int_digits >= len {
+            let mut k = 0;
+            while k < len {
+                buf[pos] = DEC_DIGITS[digits[k]];
+                pos += 1;
+                k += 1;
+            }
+            let mut z = int_digits - len;
+            while z > 0 {
+                buf[pos] = b'0';
+                pos += 1;
+                z -= 1;
+            }
+            if debug {
+                buf[pos] = b'.';
+                pos += 1;
+                buf[pos] = b'0';
+                pos += 1;
+            }
+        } else {
+            let mut k = 0;
+            while k < int_digits {
+                buf[pos] = DEC_DIGITS[digits[k]];
+                pos += 1;
+                k += 1;
+            }
+            buf[pos] = b'.';
+            pos += 1;
+            while k < len {
+                buf[pos] = DEC_DIGITS[digits[k]];
+                pos += 1;
+                k += 1;
+            }
+        }
+    }
+
+    f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) })
+}
+
+impl Display for f32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self as f64, true, 0, false, f) }
+}
+impl Debug for f32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self as f64, true, 0, true, f) }
+}
+impl LowerExp for f32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self as f64, true, b'e', false, f) }
+}
+impl UpperExp for f32 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self as f64, true, b'E', false, f) }
+}
+
+impl Display for f64 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self, false, 0, false, f) }
+}
+impl Debug for f64 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self, false, 0, true, f) }
+}
+impl LowerExp for f64 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self, false, b'e', false, f) }
+}
+impl UpperExp for f64 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { fmt_float_f64(*self, false, b'E', false, f) }
+}

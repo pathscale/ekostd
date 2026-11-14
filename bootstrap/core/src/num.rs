@@ -447,6 +447,202 @@ pub enum IntErrorKind { Empty, InvalidDigit, PosOverflow, NegOverflow, Zero }
 impl crate::marker::Copy for IntErrorKind {}
 impl crate::clone::Clone for IntErrorKind { fn clone(&self) -> Self { *self } }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum FloatErrorKind {
+    Empty,
+    Invalid,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct ParseFloatError {
+    kind: FloatErrorKind,
+}
+impl ParseFloatError {
+    const fn text(&self) -> &'static str {
+        match self.kind {
+            FloatErrorKind::Empty => "cannot parse float from empty string",
+            FloatErrorKind::Invalid => "invalid float literal",
+        }
+    }
+}
+impl crate::fmt::Display for ParseFloatError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str(self.text()) }
+}
+impl crate::fmt::Debug for ParseFloatError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("ParseFloatError").field("kind", &self.text()).finish()
+    }
+}
+
+pub(crate) fn parse_f64(s: &str) -> crate::result::Result<f64, ParseFloatError> {
+    let bytes = s.as_bytes();
+    if bytes.is_empty() {
+        return crate::result::Result::Err(ParseFloatError { kind: FloatErrorKind::Empty });
+    }
+    let mut i: usize = 0;
+    let mut neg = false;
+    if bytes[i] == b'-' {
+        neg = true;
+        i += 1;
+    } else if bytes[i] == b'+' {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return crate::result::Result::Err(ParseFloatError { kind: FloatErrorKind::Invalid });
+    }
+    let rest = unsafe { crate::str::from_utf8_unchecked(&bytes[i..]) };
+    if rest.eq_ignore_ascii_case("inf") || rest.eq_ignore_ascii_case("infinity") {
+        return crate::result::Result::Ok(if neg { f64::NEG_INFINITY } else { f64::INFINITY });
+    }
+    if rest.eq_ignore_ascii_case("nan") {
+        return crate::result::Result::Ok(if neg { -f64::NAN } else { f64::NAN });
+    }
+
+    let mut mant: u64 = 0;
+    let mut mant_digits: usize = 0;
+    let mut has_digits = false;
+    let mut exp10: i32 = 0;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < b'0' {
+            break;
+        }
+        if b > b'9' {
+            break;
+        }
+        has_digits = true;
+        let d = (b - b'0') as u64;
+        if mant_digits < 19 {
+            if mant != 0 || d != 0 {
+                mant = mant * 10 + d;
+                mant_digits += 1;
+            }
+        } else {
+            exp10 += 1;
+        }
+        i += 1;
+    }
+
+    if i < bytes.len() && bytes[i] == b'.' {
+        i += 1;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b < b'0' {
+                break;
+            }
+            if b > b'9' {
+                break;
+            }
+            has_digits = true;
+            let d = (b - b'0') as u64;
+            if mant_digits < 19 {
+                if mant != 0 || d != 0 {
+                    mant = mant * 10 + d;
+                    mant_digits += 1;
+                }
+                exp10 -= 1;
+            }
+            i += 1;
+        }
+    }
+
+    if !has_digits {
+        return crate::result::Result::Err(ParseFloatError { kind: FloatErrorKind::Invalid });
+    }
+
+    if i < bytes.len() && (bytes[i] == b'e' || bytes[i] == b'E') {
+        i += 1;
+        let mut exp_neg = false;
+        if i < bytes.len() {
+            if bytes[i] == b'-' {
+                exp_neg = true;
+                i += 1;
+            } else if bytes[i] == b'+' {
+                i += 1;
+            }
+        }
+        if i >= bytes.len() || bytes[i] < b'0' || bytes[i] > b'9' {
+            return crate::result::Result::Err(ParseFloatError { kind: FloatErrorKind::Invalid });
+        }
+        let mut exp_val: i32 = 0;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b < b'0' {
+                break;
+            }
+            if b > b'9' {
+                break;
+            }
+            let d = (b - b'0') as i32;
+            if exp_val < 10000 {
+                exp_val = exp_val * 10 + d;
+            }
+            i += 1;
+        }
+        if exp_neg {
+            exp10 -= exp_val;
+        } else {
+            exp10 += exp_val;
+        }
+    }
+
+    if i != bytes.len() {
+        return crate::result::Result::Err(ParseFloatError { kind: FloatErrorKind::Invalid });
+    }
+
+    if mant == 0 {
+        return crate::result::Result::Ok(if neg { -0.0 } else { 0.0 });
+    }
+
+    let mut val = mant as f64;
+    if exp10 > 308 {
+        val = f64::INFINITY;
+    } else if exp10 < -340 {
+        val = 0.0;
+    } else {
+        let mut e = exp10;
+        let mut s1 = 0usize;
+        while s1 < 24 {
+            if e < 16 {
+                break;
+            }
+            val *= 1e16;
+            e -= 16;
+            s1 += 1;
+        }
+        let mut s2 = 0usize;
+        while s2 < 16 {
+            if e <= 0 {
+                break;
+            }
+            val *= 10.0;
+            e -= 1;
+            s2 += 1;
+        }
+        let mut s3 = 0usize;
+        while s3 < 24 {
+            if e > -16 {
+                break;
+            }
+            val /= 1e16;
+            e += 16;
+            s3 += 1;
+        }
+        let mut s4 = 0usize;
+        while s4 < 16 {
+            if e >= 0 {
+                break;
+            }
+            val /= 10.0;
+            e += 1;
+            s4 += 1;
+        }
+    }
+
+    crate::result::Result::Ok(if neg { -val } else { val })
+}
+
 pub struct ParseIntError { kind: IntErrorKind }
 impl ParseIntError {
     pub const fn kind(&self) -> &IntErrorKind { &self.kind }
@@ -622,6 +818,10 @@ macro_rules! float_impl {
             #[inline(always)]
             pub const fn signum(self) -> Self {
                 if self.is_nan() { Self::NAN } else { (1.0 as Self).copysign(self) }
+            }
+            #[inline(always)]
+            pub const fn recip(self) -> Self {
+                1.0 / self
             }
             #[inline]
             pub const fn min(self, other: Self) -> Self {

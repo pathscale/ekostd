@@ -598,6 +598,24 @@ macro_rules! from_str_int {
 }
 from_str_int!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
 
+pub use crate::num::ParseFloatError;
+
+impl FromStr for f32 {
+    type Err = ParseFloatError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match crate::num::parse_f64(s) {
+            Ok(v) => Ok(v as f32),
+            Err(e) => Err(e),
+        }
+    }
+}
+impl FromStr for f64 {
+    type Err = ParseFloatError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        crate::num::parse_f64(s)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct ParseBoolError;
 

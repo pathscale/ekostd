@@ -571,6 +571,12 @@ macro_rules! integer_sum {
                 loop { match iter.next() { Some(item) => total += item, None => return total } }
             }
         }
+        impl<'a> Sum<&'a $t> for $t {
+            fn sum<I: Iterator<Item = &'a $t>>(mut iter: I) -> $t {
+                let mut total: $t = 0;
+                loop { match iter.next() { Some(item) => total += *item, None => return total } }
+            }
+        }
     )*};
 }
 integer_sum!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
@@ -580,6 +586,12 @@ macro_rules! float_sum {
             fn sum<I: Iterator<Item = $t>>(mut iter: I) -> $t {
                 let mut total: $t = 0.0;
                 loop { match iter.next() { Some(item) => total += item, None => return total } }
+            }
+        }
+        impl<'a> Sum<&'a $t> for $t {
+            fn sum<I: Iterator<Item = &'a $t>>(mut iter: I) -> $t {
+                let mut total: $t = 0.0;
+                loop { match iter.next() { Some(item) => total += *item, None => return total } }
             }
         }
     )*};
@@ -598,6 +610,12 @@ macro_rules! integer_product {
                 loop { match iter.next() { Some(item) => total *= item, None => return total } }
             }
         }
+        impl<'a> Product<&'a $t> for $t {
+            fn product<I: Iterator<Item = &'a $t>>(mut iter: I) -> $t {
+                let mut total: $t = 1;
+                loop { match iter.next() { Some(item) => total *= *item, None => return total } }
+            }
+        }
     )*};
 }
 integer_product!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
@@ -607,6 +625,12 @@ macro_rules! float_product {
             fn product<I: Iterator<Item = $t>>(mut iter: I) -> $t {
                 let mut total: $t = 1.0;
                 loop { match iter.next() { Some(item) => total *= item, None => return total } }
+            }
+        }
+        impl<'a> Product<&'a $t> for $t {
+            fn product<I: Iterator<Item = &'a $t>>(mut iter: I) -> $t {
+                let mut total: $t = 1.0;
+                loop { match iter.next() { Some(item) => total *= *item, None => return total } }
             }
         }
     )*};

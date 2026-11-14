@@ -110,6 +110,9 @@ impl_from_int!(
     i16 => i32, i16 => i64, i16 => i128, i16 => isize,
     i32 => i64, i32 => i128,
     i64 => i128,
+    i8 => f32, i16 => f32, u8 => f32, u16 => f32,
+    i8 => f64, i16 => f64, i32 => f64, u8 => f64, u16 => f64, u32 => f64,
+    f32 => f64,
 );
 
 macro_rules! impl_try_from_upper_bounded {
