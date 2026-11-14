@@ -203,6 +203,17 @@ pub trait DoubleEndedIterator: Iterator {
     fn rfind<P: FnMut(&Self::Item) -> bool>(&mut self, mut predicate: P) -> Option<Self::Item> where Self: Sized {
         while let Some(x) = self.next_back() { if predicate(&x) { return Some(x); } } None
     }
+    fn rfold<B, F>(mut self, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+        F: FnMut(B, Self::Item) -> B,
+    {
+        let mut accum = init;
+        while let Some(x) = self.next_back() {
+            accum = f(accum, x);
+        }
+        accum
+    }
 }
 impl<I: DoubleEndedIterator + ?Sized> DoubleEndedIterator for &mut I {
     fn next_back(&mut self) -> Option<I::Item> { (**self).next_back() }

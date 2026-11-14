@@ -112,16 +112,13 @@ pub mod aarch64 {
     }
 
     /// Each 16-bit lane shifted right by `N` and narrowed to its low 8 bits. Called as `vshrn_n_u16(a, n)`.
-    #[rustc_legacy_const_generics(1)]
-    pub fn vshrn_n_u16<const N: i32>(a: uint16x8_t) -> uint8x8_t {
-        lanes!(8, uint8x8_t, |i| (a.0[i] >> (N as u16)) as u8)
+    pub unsafe fn vshrn_n_u16(a: uint16x8_t, n: i32) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| (a.0[i] >> (n as u16)) as u8)
     }
     /// Called as `vget_lane_u64(v, 0)`.
-    #[rustc_legacy_const_generics(1)]
-    pub fn vget_lane_u64<const LANE: i32>(v: uint64x1_t) -> u64 { v.0[LANE as usize] }
+    pub unsafe fn vget_lane_u64(v: uint64x1_t, lane: i32) -> u64 { v.0[lane as usize] }
     /// Called as `vgetq_lane_u64(v, lane)`.
-    #[rustc_legacy_const_generics(1)]
-    pub fn vgetq_lane_u64<const LANE: i32>(v: uint64x2_t) -> u64 { v.0[LANE as usize] }
+    pub unsafe fn vgetq_lane_u64(v: uint64x2_t, lane: i32) -> u64 { v.0[lane as usize] }
 
     pub fn vaddl_u8(a: uint8x8_t, b: uint8x8_t) -> uint16x8_t {
         lanes!(8, uint16x8_t, |i| (a.0[i] as u16) + (b.0[i] as u16))
@@ -150,12 +147,44 @@ pub mod aarch64 {
     pub fn vrhadd_u8(a: uint8x8_t, b: uint8x8_t) -> uint8x8_t {
         lanes!(8, uint8x8_t, |i| (((a.0[i] as u16) + (b.0[i] as u16) + 1) >> 1) as u8)
     }
-    #[rustc_legacy_const_generics(1)]
-    pub fn vrshrn_n_u16<const N: i32>(a: uint16x8_t) -> uint8x8_t {
-        lanes!(8, uint8x8_t, |i| (((a.0[i] as u32) + (1u32 << ((N - 1) as u32))) >> (N as u32)) as u8)
+    pub unsafe fn vrshrn_n_u16(a: uint16x8_t, n: i32) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| (((a.0[i] as u32) + (1u32 << ((n - 1) as u32))) >> (n as u32)) as u8)
     }
-    #[rustc_legacy_const_generics(1)]
-    pub fn vshrq_n_s16<const N: i32>(a: int16x8_t) -> int16x8_t {
-        lanes!(8, int16x8_t, |i| a.0[i] >> (N as i16))
+    pub unsafe fn vshrq_n_s16(a: int16x8_t, n: i32) -> int16x8_t {
+        lanes!(8, int16x8_t, |i| a.0[i] >> (n as i16))
+    }
+
+    pub unsafe fn veorq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| a.0[i] ^ b.0[i])
+    }
+    pub unsafe fn vmovq_n_u8(value: u8) -> uint8x16_t {
+        uint8x16_t([value; 16])
+    }
+    pub unsafe fn vqsubq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| if a.0[i] > b.0[i] { a.0[i] - b.0[i] } else { 0 })
+    }
+    pub unsafe fn vqtbl1q_u8(t: uint8x16_t, idx: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| {
+            let j = idx.0[i] as usize;
+            if j < 16 { t.0[j] } else { 0 }
+        })
+    }
+    pub unsafe fn vmaxvq_u8(a: uint8x16_t) -> u8 {
+        let mut m = 0u8;
+        let mut i = 0;
+        while i < 16 {
+            if a.0[i] > m { m = a.0[i]; }
+            i += 1;
+        }
+        m
+    }
+    pub unsafe fn vshrq_n_u8(a: uint8x16_t, n: i32) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| a.0[i] >> (n as u32))
+    }
+    pub unsafe fn vextq_u8(a: uint8x16_t, b: uint8x16_t, n: i32) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| {
+            let k = (n as usize) + i;
+            if k < 16 { a.0[k] } else { b.0[k - 16] }
+        })
     }
 }
