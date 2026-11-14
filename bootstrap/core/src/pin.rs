@@ -34,3 +34,10 @@ impl<P: Copy> Copy for Pin<P> {}
 impl<P: crate::clone::Clone> crate::clone::Clone for Pin<P> {
     fn clone(&self) -> Self { Self { pointer: self.pointer.clone() } }
 }
+
+/// Pins a value on the stack.
+pub macro pin($value:expr $(,)?) {
+    $crate::pin::Pin {
+        pointer: &mut { $value },
+    }
+}

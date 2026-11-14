@@ -157,3 +157,7 @@ pub const unsafe fn size_of_val<T: ?Sized>(value: *const T) -> usize;
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn align_of_val<T: ?Sized>(value: *const T) -> usize;
+
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const fn type_id<T: ?Sized + 'static>() -> crate::any::TypeId;

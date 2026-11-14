@@ -22,6 +22,12 @@ impl Ord for Duration {
         }
     }
 }
+impl crate::hash::Hash for Duration {
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) {
+        self.secs.hash(state);
+        self.nanos.hash(state);
+    }
+}
 
 impl Duration {
     pub const ZERO: Self = Self { secs: 0, nanos: 0 };

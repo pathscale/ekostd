@@ -200,6 +200,14 @@ pub trait Extend<A> { fn extend<T: IntoIterator<Item = A>>(&mut self, iter: T); 
 
 pub trait DoubleEndedIterator: Iterator {
     fn next_back(&mut self) -> Option<Self::Item>;
+    #[inline]
+    fn nth_back(&mut self, mut n: usize) -> Option<Self::Item> {
+        while n > 0 {
+            self.next_back()?;
+            n -= 1;
+        }
+        self.next_back()
+    }
     fn rfind<P: FnMut(&Self::Item) -> bool>(&mut self, mut predicate: P) -> Option<Self::Item> where Self: Sized {
         while let Some(x) = self.next_back() { if predicate(&x) { return Some(x); } } None
     }

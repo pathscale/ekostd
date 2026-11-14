@@ -1,6 +1,18 @@
 //! Fixed-size arrays.
 pub use crate::convert::TryFromSliceError;
 
+#[inline]
+pub const fn from_ref<T>(s: &T) -> &[T; 1] {
+    // SAFETY: `[T; 1]` has identical layout to `T`.
+    unsafe { &*(s as *const T as *const [T; 1]) }
+}
+
+#[inline]
+pub const fn from_mut<T>(s: &mut T) -> &mut [T; 1] {
+    // SAFETY: `[T; 1]` has identical layout to `T`.
+    unsafe { &mut *(s as *mut T as *mut [T; 1]) }
+}
+
 impl<T, const N: usize> [T; N] {
     /// Applies `f` to each element in order and collects the results.
     ///

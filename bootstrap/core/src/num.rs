@@ -272,6 +272,7 @@ macro_rules! unsigned {
             pub const fn overflowing_neg(self) -> (Self, bool) { (self.wrapping_neg(), self != 0) }
             pub const fn checked_neg(self) -> Option<Self> { if self == 0 { Some(0) } else { None } }
             pub const fn checked_div(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self / rhs) } }
+            pub const fn saturating_div(self, rhs: Self) -> Self { self / rhs }
             pub const fn checked_rem(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self % rhs) } }
             pub const fn div_euclid(self, rhs: Self) -> Self { self / rhs }
             pub const fn rem_euclid(self, rhs: Self) -> Self { self % rhs }
@@ -399,14 +400,23 @@ macro_rules! signed_abs {
             pub const fn checked_abs(self) -> Option<Self> {
                 if self == Self::MIN { None } else if self < 0 { Some(-self) } else { Some(self) }
             }
+            pub const fn saturating_abs(self) -> Self {
+                if self == Self::MIN { Self::MAX } else if self < 0 { -self } else { self }
+            }
             pub const fn overflowing_neg(self) -> (Self, bool) {
                 if self == Self::MIN { (Self::MIN, true) } else { (-self, false) }
             }
             pub const fn checked_neg(self) -> Option<Self> {
                 if self == Self::MIN { None } else { Some(-self) }
             }
+            pub const fn saturating_neg(self) -> Self {
+                if self == Self::MIN { Self::MAX } else { -self }
+            }
             pub const fn checked_div(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::MIN && rhs == -1) { None } else { Some(self / rhs) }
+            }
+            pub const fn saturating_div(self, rhs: Self) -> Self {
+                if self == Self::MIN && rhs == -1 { Self::MAX } else { self / rhs }
             }
             pub const fn checked_rem(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::MIN && rhs == -1) { None } else { Some(self % rhs) }
