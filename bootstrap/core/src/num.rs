@@ -107,6 +107,49 @@ macro_rules! integer {
             }
             pub const fn max(self, other: Self) -> Self { if self < other { other } else { self } }
             pub const fn min(self, other: Self) -> Self { if self < other { self } else { other } }
+            pub const fn pow(self, mut exp: u32) -> Self {
+                let mut base = self;
+                let mut acc: Self = 1;
+                while exp > 0 {
+                    if (exp & 1) == 1 { acc = acc * base; }
+                    exp >>= 1;
+                    if exp > 0 { base = base * base; }
+                }
+                acc
+            }
+            pub const fn checked_pow(self, mut exp: u32) -> Option<Self> {
+                let mut base = self;
+                let mut acc: Self = 1;
+                while exp > 0 {
+                    if (exp & 1) == 1 {
+                        let Some(next) = acc.checked_mul(base) else { return None; };
+                        acc = next;
+                    }
+                    exp >>= 1;
+                    if exp > 0 {
+                        let Some(next) = base.checked_mul(base) else { return None; };
+                        base = next;
+                    }
+                }
+                Some(acc)
+            }
+            pub const fn wrapping_pow(self, mut exp: u32) -> Self {
+                let mut base = self;
+                let mut acc: Self = 1;
+                while exp > 0 {
+                    if (exp & 1) == 1 { acc = acc.wrapping_mul(base); }
+                    exp >>= 1;
+                    if exp > 0 { base = base.wrapping_mul(base); }
+                }
+                acc
+            }
+            pub const fn saturating_pow(self, exp: u32) -> Self {
+                match self.checked_pow(exp) {
+                    Some(v) => v,
+                    None if $signed && self < 0 && (exp & 1) == 1 => Self::MIN,
+                    None => Self::MAX,
+                }
+            }
         }
     };
 }
@@ -157,6 +200,14 @@ macro_rules! unsigned {
             pub const fn checked_neg(self) -> Option<Self> { if self == 0 { Some(0) } else { None } }
             pub const fn checked_div(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self / rhs) } }
             pub const fn checked_rem(self, rhs: Self) -> Option<Self> { if rhs == 0 { None } else { Some(self % rhs) } }
+            pub const fn div_euclid(self, rhs: Self) -> Self { self / rhs }
+            pub const fn rem_euclid(self, rhs: Self) -> Self { self % rhs }
+            pub const fn checked_div_euclid(self, rhs: Self) -> Option<Self> { self.checked_div(rhs) }
+            pub const fn checked_rem_euclid(self, rhs: Self) -> Option<Self> { self.checked_rem(rhs) }
+            pub const fn wrapping_div_euclid(self, rhs: Self) -> Self { self / rhs }
+            pub const fn wrapping_rem_euclid(self, rhs: Self) -> Self { self % rhs }
+            pub const fn wrapping_div(self, rhs: Self) -> Self { self / rhs }
+            pub const fn wrapping_rem(self, rhs: Self) -> Self { self % rhs }
         }
     };
 }
@@ -244,6 +295,63 @@ macro_rules! signed_abs {
             }
             pub const fn checked_rem(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::MIN && rhs == -1) { None } else { Some(self % rhs) }
+            }
+            pub const fn signum(self) -> Self {
+                if self < 0 { -1 } else if self > 0 { 1 } else { 0 }
+            }
+            pub const fn is_positive(self) -> bool { self > 0 }
+            pub const fn is_negative(self) -> bool { self < 0 }
+            pub const fn wrapping_div(self, rhs: Self) -> Self {
+                if self == Self::MIN && rhs == -1 { Self::MIN } else { self / rhs }
+            }
+            pub const fn wrapping_rem(self, rhs: Self) -> Self {
+                if self == Self::MIN && rhs == -1 { 0 } else { self % rhs }
+            }
+            pub const fn wrapping_div_euclid(self, rhs: Self) -> Self {
+                let q = self.wrapping_div(rhs);
+                if self.wrapping_rem(rhs) < 0 {
+                    if rhs > 0 { q.wrapping_sub(1) } else { q.wrapping_add(1) }
+                } else {
+                    q
+                }
+            }
+            pub const fn wrapping_rem_euclid(self, rhs: Self) -> Self {
+                let r = self.wrapping_rem(rhs);
+                if r < 0 {
+                    if rhs < 0 { r.wrapping_sub(rhs) } else { r.wrapping_add(rhs) }
+                } else {
+                    r
+                }
+            }
+            pub const fn checked_div_euclid(self, rhs: Self) -> Option<Self> {
+                if rhs == 0 || (self == Self::MIN && rhs == -1) {
+                    None
+                } else {
+                    Some(self.wrapping_div_euclid(rhs))
+                }
+            }
+            pub const fn checked_rem_euclid(self, rhs: Self) -> Option<Self> {
+                if rhs == 0 || (self == Self::MIN && rhs == -1) {
+                    None
+                } else {
+                    Some(self.wrapping_rem_euclid(rhs))
+                }
+            }
+            pub const fn div_euclid(self, rhs: Self) -> Self {
+                let q = self / rhs;
+                if self % rhs < 0 {
+                    if rhs > 0 { q - 1 } else { q + 1 }
+                } else {
+                    q
+                }
+            }
+            pub const fn rem_euclid(self, rhs: Self) -> Self {
+                let r = self % rhs;
+                if r < 0 {
+                    if rhs < 0 { r - rhs } else { r + rhs }
+                } else {
+                    r
+                }
             }
         }
     )*};

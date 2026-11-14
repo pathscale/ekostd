@@ -233,6 +233,8 @@ pub mod f32 {
     pub const MAX: f32 = 3.40282347e+38_f32;
     pub const MIN_EXP: i32 = -125;
     pub const MAX_EXP: i32 = 128;
+    pub const MIN_10_EXP: i32 = -37;
+    pub const MAX_10_EXP: i32 = 38;
     pub const INFINITY: f32 = 1.0_f32 / 0.0_f32;
     pub const NEG_INFINITY: f32 = -1.0_f32 / 0.0_f32;
     pub const NAN: f32 = 0.0_f32 / 0.0_f32;
@@ -240,11 +242,20 @@ pub mod f32 {
         pub const PI: f32 = 3.14159265358979323846_f32;
         pub const TAU: f32 = 6.28318530717958647692_f32;
         pub const FRAC_PI_2: f32 = 1.57079632679489661923_f32;
+        pub const FRAC_PI_3: f32 = 1.04719755119659774615_f32;
         pub const FRAC_PI_4: f32 = 0.78539816339744830961_f32;
+        pub const FRAC_PI_6: f32 = 0.52359877559829887308_f32;
+        pub const FRAC_PI_8: f32 = 0.39269908169872415481_f32;
+        pub const FRAC_1_PI: f32 = 0.31830988618379067154_f32;
+        pub const FRAC_2_PI: f32 = 0.63661977236758134308_f32;
+        pub const FRAC_2_SQRT_PI: f32 = 1.12837916709551257390_f32;
         pub const E: f32 = 2.71828182845904523536_f32;
+        pub const LOG2_E: f32 = 1.44269504088896340736_f32;
+        pub const LOG10_E: f32 = 0.43429448190325182765_f32;
         pub const LN_2: f32 = 0.69314718055994530941_f32;
         pub const LN_10: f32 = 2.30258509299404568401_f32;
         pub const SQRT_2: f32 = 1.41421356237309504880_f32;
+        pub const FRAC_1_SQRT_2: f32 = 0.70710678118654752440_f32;
     }
 }
 
@@ -258,6 +269,8 @@ pub mod f64 {
     pub const MAX: f64 = 1.7976931348623157e+308_f64;
     pub const MIN_EXP: i32 = -1021;
     pub const MAX_EXP: i32 = 1024;
+    pub const MIN_10_EXP: i32 = -307;
+    pub const MAX_10_EXP: i32 = 308;
     pub const INFINITY: f64 = 1.0_f64 / 0.0_f64;
     pub const NEG_INFINITY: f64 = -1.0_f64 / 0.0_f64;
     pub const NAN: f64 = 0.0_f64 / 0.0_f64;
@@ -265,11 +278,20 @@ pub mod f64 {
         pub const PI: f64 = 3.14159265358979323846_f64;
         pub const TAU: f64 = 6.28318530717958647692_f64;
         pub const FRAC_PI_2: f64 = 1.57079632679489661923_f64;
+        pub const FRAC_PI_3: f64 = 1.04719755119659774615_f64;
         pub const FRAC_PI_4: f64 = 0.78539816339744830961_f64;
+        pub const FRAC_PI_6: f64 = 0.52359877559829887308_f64;
+        pub const FRAC_PI_8: f64 = 0.39269908169872415481_f64;
+        pub const FRAC_1_PI: f64 = 0.31830988618379067154_f64;
+        pub const FRAC_2_PI: f64 = 0.63661977236758134308_f64;
+        pub const FRAC_2_SQRT_PI: f64 = 1.12837916709551257390_f64;
         pub const E: f64 = 2.71828182845904523536_f64;
+        pub const LOG2_E: f64 = 1.44269504088896340736_f64;
+        pub const LOG10_E: f64 = 0.43429448190325182765_f64;
         pub const LN_2: f64 = 0.69314718055994530941_f64;
         pub const LN_10: f64 = 2.30258509299404568401_f64;
         pub const SQRT_2: f64 = 1.41421356237309504880_f64;
+        pub const FRAC_1_SQRT_2: f64 = 0.70710678118654752440_f64;
     }
 }
 
