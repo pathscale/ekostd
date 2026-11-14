@@ -1,7 +1,7 @@
 use crate::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use crate::iter::{DoubleEndedIterator, ExactSizeIterator, IntoIterator, Iterator};
 use crate::marker::{Copy, PhantomData, PointeeSized, Sized};
-use crate::ops::{Index, IndexMut, Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
+use crate::ops::{Bound, Index, IndexMut, Range, RangeBounds, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive};
 use crate::option::Option::{self, None, Some};
 use crate::ptr;
 use crate::result::Result::{self, Err, Ok};
@@ -783,6 +783,55 @@ impl<T> [T] {
         Chunks { rest: self, size }
     }
 
+    /// As `chunks`, lending each piece mutably.
+    pub fn chunks_mut(&mut self, size: usize) -> ChunksMut<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        ChunksMut { rest: self, size }
+    }
+
+    /// Consecutive pieces of `size` elements from the end; the last one yielded may be shorter.
+    pub fn rchunks(&self, size: usize) -> RChunks<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        RChunks { rest: self, size }
+    }
+
+    /// Consecutive pieces of `size` elements from the end; what does not fill a piece is the remainder.
+    pub fn rchunks_exact(&self, size: usize) -> RChunksExact<'_, T> {
+        if size == 0 { crate::intrinsics::abort(); }
+        let rem = self.len() % size;
+        let (remainder, rest) = self.split_at(rem);
+        RChunksExact { rest, remainder, size }
+    }
+
+    /// Copies elements from `src` range to `dest` index within the slice.
+    pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dest: usize)
+    where
+        T: Copy,
+    {
+        let len = self.len();
+        let start = match src.start_bound() {
+            crate::ops::Bound::Included(&s) => s,
+            crate::ops::Bound::Excluded(&s) => s.checked_add(1).unwrap_or_else(|| crate::intrinsics::abort()),
+            crate::ops::Bound::Unbounded => 0,
+        };
+        let end = match src.end_bound() {
+            crate::ops::Bound::Included(&e) => e.checked_add(1).unwrap_or_else(|| crate::intrinsics::abort()),
+            crate::ops::Bound::Excluded(&e) => e,
+            crate::ops::Bound::Unbounded => len,
+        };
+        if start > end || end > len {
+            crate::intrinsics::abort();
+        }
+        let count = end - start;
+        if dest > len - count {
+            crate::intrinsics::abort();
+        }
+        unsafe {
+            let ptr = self.as_mut_ptr();
+            crate::ptr::copy(ptr.add(start), ptr.add(dest), count);
+        }
+    }
+
     /// Consecutive pieces of exactly `size` elements; what does not fill a piece is the remainder.
     pub fn chunks_exact(&self, size: usize) -> ChunksExact<'_, T> {
         if size == 0 { crate::intrinsics::abort(); }
@@ -1022,6 +1071,78 @@ impl<'a, T> Iterator for ChunksExactMut<'a, T> {
     }
 }
 impl<T> ExactSizeIterator for ChunksExactMut<'_, T> {}
+
+pub struct ChunksMut<'a, T: 'a> {
+    rest: &'a mut [T],
+    size: usize,
+}
+impl<'a, T> Iterator for ChunksMut<'a, T> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let whole = crate::mem::replace(&mut self.rest, &mut []);
+        let at = if self.size < whole.len() { self.size } else { whole.len() };
+        let (piece, rest) = whole.split_at_mut(at);
+        self.rest = rest;
+        Some(piece)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = (self.rest.len() + self.size - 1) / self.size;
+        (n, Some(n))
+    }
+}
+impl<T> ExactSizeIterator for ChunksMut<'_, T> {}
+
+pub struct RChunks<'a, T: 'a> {
+    rest: &'a [T],
+    size: usize,
+}
+impl<'a, T> Iterator for RChunks<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let at = self.rest.len().saturating_sub(self.size);
+        let (rest, piece) = self.rest.split_at(at);
+        self.rest = rest;
+        Some(piece)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = (self.rest.len() + self.size - 1) / self.size;
+        (n, Some(n))
+    }
+}
+impl<T> ExactSizeIterator for RChunks<'_, T> {}
+
+pub struct RChunksExact<'a, T: 'a> {
+    rest: &'a [T],
+    remainder: &'a [T],
+    size: usize,
+}
+impl<'a, T> RChunksExact<'a, T> {
+    /// The leading elements that do not fill a piece.
+    pub fn remainder(&self) -> &'a [T] { self.remainder }
+}
+impl<'a, T> Iterator for RChunksExact<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.rest.is_empty() {
+            return None;
+        }
+        let at = self.rest.len() - self.size;
+        let (rest, piece) = self.rest.split_at(at);
+        self.rest = rest;
+        Some(piece)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = self.rest.len() / self.size;
+        (n, Some(n))
+    }
+}
+impl<T> ExactSizeIterator for RChunksExact<'_, T> {}
 
 impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for [T] {
     fn eq(&self, other: &[U; N]) -> bool {
