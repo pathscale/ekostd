@@ -1100,17 +1100,29 @@ use alloc::vec::Vec;
 /// produced, and a scoped borrow of data the parent owns.
 pub struct JoinHandle<T> {
     tid: libc::pthread_t,
-    // Where the closure leaves its result. The thread writes it before returning and `join`
-    // reads it after `pthread_join`, which is the ordering edge that makes the read safe.
-    slot: *mut Option<T>,
+    // Some until a successful join or detach. The worker owns a separate Arc.
+    slot: Option<alloc::sync::Arc<ThreadResult<T>>>,
 }
 
-// The handle is just an id and a pointer the joining thread owns exclusively after the join.
+struct ThreadResult<T> {
+    value: core::cell::UnsafeCell<Option<T>>,
+}
+
+// Only the worker writes; only a successful native join permits the handle to read.
+// Arc destruction cannot overlap either access because each accessor owns an Arc.
+unsafe impl<T: Send> Sync for ThreadResult<T> {}
+
+unsafe extern "C" {
+    fn pthread_detach(thread: libc::pthread_t) -> core::ffi::c_int;
+    fn pthread_equal(left: libc::pthread_t, right: libc::pthread_t) -> core::ffi::c_int;
+}
+
+// Native handle operations require exclusive access; the result is shared with the worker.
 unsafe impl<T: Send> Send for JoinHandle<T> {}
 
 struct SpawnPayload<F, T> {
     f: F,
-    slot: *mut Option<T>,
+    slot: alloc::sync::Arc<ThreadResult<T>>,
 }
 
 extern "C" fn spawn_trampoline<F: FnOnce() -> T + Send + 'static, T>(
@@ -1119,9 +1131,9 @@ extern "C" fn spawn_trampoline<F: FnOnce() -> T + Send + 'static, T>(
     let payload: Box<SpawnPayload<F, T>> = unsafe { Box::from_raw(arg.cast()) };
     let SpawnPayload { f, slot } = *payload;
     let value = f();
-    // Safe: the slot was leaked by `spawn` and is written by this thread alone, before the
-    // `pthread_join` that lets the parent read it.
-    unsafe { *slot = Some(value) };
+    // This worker is the sole writer. Join reads only after pthread_join succeeds.
+    // Detach drops only the handle's Arc; this Arc protects the write and result.
+    unsafe { *slot.value.get() = Some(value) };
     core::ptr::null_mut()
 }
 
@@ -1164,14 +1176,18 @@ impl Builder {
         self,
         f: F,
     ) -> Result<JoinHandle<T>, Errno> {
-        let slot: *mut Option<T> = Box::into_raw(Box::new(None));
-        let payload = Box::into_raw(Box::new(SpawnPayload { f, slot }));
+        let slot = alloc::sync::Arc::new(ThreadResult {
+            value: core::cell::UnsafeCell::new(None),
+        });
+        let payload = Box::into_raw(Box::new(SpawnPayload {
+            f,
+            slot: alloc::sync::Arc::clone(&slot),
+        }));
 
         let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
         let init_rc = unsafe { libc::pthread_attr_init(&mut attr) };
         if init_rc != 0 {
             drop(unsafe { Box::from_raw(payload) });
-            drop(unsafe { Box::from_raw(slot) });
             return Err(Errno(init_rc));
         }
         if self.stack_bytes != 0 {
@@ -1179,7 +1195,6 @@ impl Builder {
             if stack_rc != 0 {
                 unsafe { libc::pthread_attr_destroy(&mut attr) };
                 drop(unsafe { Box::from_raw(payload) });
-                drop(unsafe { Box::from_raw(slot) });
                 return Err(Errno(stack_rc));
             }
         }
@@ -1191,14 +1206,13 @@ impl Builder {
         if rc != 0 {
             // Nothing started, so both allocations are still ours to reclaim.
             drop(unsafe { Box::from_raw(payload) });
-            drop(unsafe { Box::from_raw(slot) });
             return Err(Errno(rc));
         }
         // The name is set from the parent because `pthread_setname_np` on macOS only names the
         // *calling* thread, so the child would have to do it itself; the name is a debugging
         // affordance and not worth another hop through the payload.
         let _ = self.name;
-        Ok(JoinHandle { tid, slot })
+        Ok(JoinHandle { tid, slot: Some(slot) })
     }
 }
 
@@ -1216,21 +1230,64 @@ pub fn spawn<T: Send + 'static>(
 }
 
 impl<T> JoinHandle<T> {
-    /// Wait for the thread and take its result.
-    ///
-    /// `Err` means the join itself failed - the thread was already detached or joined. A thread
-    /// that panicked does not arrive here at all: with `panic = "abort"` it took the process
-    /// down, which is why this returns `Result<T, Errno>` and not `std`'s
-    /// `Result<T, Box<dyn Any>>`.
-    pub fn join(self) -> Result<T, Errno> {
+    /// Whether this still-owned native thread is the caller.
+    /// Returns false after successful join or detach, without using a stale native ID.
+    pub fn is_current_thread(&self) -> bool {
+        self.slot.is_some()
+            && unsafe { pthread_equal(self.tid, libc::pthread_self()) != 0 }
+    }
+
+    /// Wait for completion and take the result, retaining ownership on native failure.
+    /// Despite its name this blocks, just like pthread_join. A successful call consumes
+    /// the native ownership; subsequent calls and self-join return EINVAL.
+    /// Panic aborts the process rather than producing a recoverable result.
+    pub fn try_join(&mut self) -> Result<T, Errno> {
+        if self.slot.is_none() {
+            return Err(Errno(libc::EINVAL));
+        }
+        if self.is_current_thread() {
+            return Err(Errno(libc::EINVAL));
+        }
         let rc = unsafe { libc::pthread_join(self.tid, core::ptr::null_mut()) };
         if rc != 0 {
             return Err(Errno(rc));
         }
-        // Safe: the join is the ordering edge - the thread's write to the slot happened-before
-        // this read, and it wrote exactly once.
-        let boxed = unsafe { Box::from_raw(self.slot) };
-        (*boxed).ok_or(Errno(libc::EINVAL))
+        // Native join orders the worker's sole write and all thread teardown before us.
+        let slot = self.slot.take().unwrap();
+        unsafe { (&mut *slot.value.get()).take() }.ok_or(Errno(libc::EINVAL))
+    }
+
+    /// Wait for the thread and take its result. On native failure, Drop detaches it.
+    /// Use try_join when the caller needs to retain ownership after an error.
+    pub fn join(mut self) -> Result<T, Errno> {
+        self.try_join()
+    }
+
+    /// Relinquish native ownership without waiting, including from this thread itself.
+    /// On failure this handle stays live and can be retried or joined. On success the
+    /// result is discarded when the last Arc goes away, on this caller if the worker
+    /// already finished, or on the worker otherwise. No completion guarantee is made.
+    /// Repeated calls after successful join/detach are harmless.
+    pub fn try_detach(&mut self) -> Result<(), Errno> {
+        if self.slot.is_none() {
+            return Ok(());
+        }
+        let rc = unsafe { pthread_detach(self.tid) };
+        if rc != 0 {
+            return Err(Errno(rc));
+        }
+        self.slot.take();
+        Ok(())
+    }
+}
+
+impl<T> Drop for JoinHandle<T> {
+    /// Never waits or starts a reaper. Failure to release native ownership is fatal;
+    /// use try_detach explicitly to handle a native error while retaining the handle.
+    fn drop(&mut self) {
+        if self.try_detach().is_err() {
+            unsafe { libc::abort() }
+        }
     }
 }
 
