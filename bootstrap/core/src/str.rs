@@ -361,34 +361,51 @@ impl str {
         self.trim_start().trim_end()
     }
 
+    /// Without the leading chars that are `char::is_whitespace` (Unicode White_Space).
     #[inline(always)]
     pub fn trim_start(&self) -> &str {
         let bytes = self.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            let b = bytes[i];
-            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                i += 1;
-            } else {
-                break;
+        let mut it = self.char_indices();
+        while let Some((at, c)) = crate::iter::Iterator::next(&mut it) {
+            if !c.is_whitespace() {
+                // SAFETY: `at` is the start of a char, so the tail is still UTF-8.
+                return unsafe { from_utf8_unchecked(&bytes[at..]) };
             }
         }
-        unsafe { from_utf8_unchecked(&bytes[i..]) }
+        unsafe { from_utf8_unchecked(&bytes[bytes.len()..]) }
     }
 
+    /// Without the trailing chars that are `char::is_whitespace` (Unicode White_Space).
     #[inline(always)]
     pub fn trim_end(&self) -> &str {
         let bytes = self.as_bytes();
-        let mut end = bytes.len();
-        while end > 0 {
-            let b = bytes[end - 1];
-            if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
-                end -= 1;
-            } else {
-                break;
+        let mut it = self.chars();
+        while let Some(c) = crate::iter::DoubleEndedIterator::next_back(&mut it) {
+            if !c.is_whitespace() {
+                let end = it.as_str().len() + c.len_utf8();
+                // SAFETY: `end` is the end of a char, so the head is still UTF-8.
+                return unsafe { from_utf8_unchecked(&bytes[..end]) };
             }
         }
-        unsafe { from_utf8_unchecked(&bytes[..end]) }
+        unsafe { from_utf8_unchecked(&bytes[..0]) }
+    }
+
+    /// Without the ASCII whitespace at the start.
+    pub const fn trim_ascii_start(&self) -> &str {
+        // SAFETY: the cut is next to an ASCII byte, so the rest is still UTF-8.
+        unsafe { from_utf8_unchecked(self.as_bytes().trim_ascii_start()) }
+    }
+
+    /// Without the ASCII whitespace at the end.
+    pub const fn trim_ascii_end(&self) -> &str {
+        // SAFETY: the cut is next to an ASCII byte, so the rest is still UTF-8.
+        unsafe { from_utf8_unchecked(self.as_bytes().trim_ascii_end()) }
+    }
+
+    /// Without the ASCII whitespace at both ends.
+    pub const fn trim_ascii(&self) -> &str {
+        // SAFETY: both cuts are next to ASCII bytes, so the rest is still UTF-8.
+        unsafe { from_utf8_unchecked(self.as_bytes().trim_ascii()) }
     }
 
     #[inline(always)]
