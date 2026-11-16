@@ -428,7 +428,24 @@ impl<I: Iterator> Iterator for Skip<I> {
     fn next(&mut self) -> Option<I::Item> {
         if self.n > 0 { let n = self.n; self.n = 0; self.iter.nth(n) } else { self.iter.next() }
     }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lo, hi) = self.iter.size_hint();
+        (lo.saturating_sub(self.n), hi.map(|h| h.saturating_sub(self.n)))
+    }
+    fn nth(&mut self, k: usize) -> Option<I::Item> {
+        // Drop the skipped prefix first, then seek `k` items further.
+        if self.n > 0 { let n = self.n; self.n = 0; self.iter.nth(n - 1)?; }
+        self.iter.nth(k)
+    }
 }
+impl<I: ExactSizeIterator> ExactSizeIterator for Skip<I> {}
+impl<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for Skip<I> {
+    fn next_back(&mut self) -> Option<I::Item> {
+        // Items in the skipped prefix are never yielded from the back.
+        if self.len() > 0 { self.iter.next_back() } else { None }
+    }
+}
+impl<I: FusedIterator> FusedIterator for Skip<I> {}
 
 pub struct Copied<I> { iter: I }
 impl<I: Clone> Clone for Copied<I> { fn clone(&self) -> Self { Self { iter: self.iter.clone() } } }
