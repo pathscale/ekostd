@@ -249,6 +249,8 @@ impl str {
         SplitTerminator { inner: self.split(pat) }
     }
 
+    pub fn get<I: SliceIndex<str>>(&self, i: I) -> Option<&I::Output> { i.get(self) }
+
     pub fn is_ascii(&self) -> bool { self.as_bytes().is_ascii() }
 
     /// The byte index of the last match.

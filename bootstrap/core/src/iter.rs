@@ -885,3 +885,9 @@ impl<I: Iterator, P: FnMut(&I::Item) -> bool> Iterator for SkipWhile<I, P> {
         (0, upper)
     }
 }
+
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Fuse<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Fuse").field("iter", &self.iter).finish()
+    }
+}

@@ -1161,3 +1161,52 @@ macro_rules! checked_add_signed {
     )*};
 }
 checked_add_signed!(u8, i8; u16, i16; u32, i32; u64, i64; u128, i128; usize, isize);
+
+/// Integer arithmetic that saturates at the bounds of the type.
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Saturating<T>(pub T);
+
+impl<T: crate::fmt::Debug> crate::fmt::Debug for Saturating<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { self.0.fmt(f) }
+}
+impl<T: crate::fmt::Display> crate::fmt::Display for Saturating<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { self.0.fmt(f) }
+}
+impl<T: crate::hash::Hash> crate::hash::Hash for Saturating<T> {
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) }
+}
+
+macro_rules! saturating_impl {
+    ($($t:ty)*) => {$(
+        impl crate::ops::Add for Saturating<$t> {
+            type Output = Self;
+            fn add(self, rhs: Self) -> Self { Saturating(self.0.saturating_add(rhs.0)) }
+        }
+        impl crate::ops::AddAssign for Saturating<$t> {
+            fn add_assign(&mut self, rhs: Self) { *self = *self + rhs; }
+        }
+        impl crate::ops::Sub for Saturating<$t> {
+            type Output = Self;
+            fn sub(self, rhs: Self) -> Self { Saturating(self.0.saturating_sub(rhs.0)) }
+        }
+        impl crate::ops::SubAssign for Saturating<$t> {
+            fn sub_assign(&mut self, rhs: Self) { *self = *self - rhs; }
+        }
+        impl crate::ops::Mul for Saturating<$t> {
+            type Output = Self;
+            fn mul(self, rhs: Self) -> Self { Saturating(self.0.saturating_mul(rhs.0)) }
+        }
+        impl crate::ops::MulAssign for Saturating<$t> {
+            fn mul_assign(&mut self, rhs: Self) { *self = *self * rhs; }
+        }
+        impl crate::ops::Div for Saturating<$t> {
+            type Output = Self;
+            fn div(self, rhs: Self) -> Self { Saturating(self.0.saturating_div(rhs.0)) }
+        }
+        impl crate::ops::DivAssign for Saturating<$t> {
+            fn div_assign(&mut self, rhs: Self) { *self = *self / rhs; }
+        }
+    )*};
+}
+saturating_impl!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);

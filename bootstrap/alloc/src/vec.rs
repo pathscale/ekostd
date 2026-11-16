@@ -106,6 +106,20 @@ impl<T> Vec<T> {
         self.length = write;
     }
 
+    pub fn retain_mut<F: FnMut(&mut T) -> bool>(&mut self, mut keep: F) {
+        let mut write = 0;
+        for read in 0..self.length {
+            unsafe {
+                let p = self.pointer.as_ptr();
+                if keep(&mut *p.add(read)) {
+                    if read != write { p.add(write).write(p.add(read).read()); }
+                    write += 1;
+                } else { ptr::drop_in_place(p.add(read)); }
+            }
+        }
+        self.length = write;
+    }
+
     pub fn dedup(&mut self) where T: PartialEq {
         if self.length < 2 { return; }
         let mut write = 1;
@@ -481,3 +495,10 @@ impl<T> Vec<T> {
     }
 }
 impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for &[T] { fn eq(&self, other: &Vec<U>) -> bool { **self == other[..] } }
+
+impl<T: PartialOrd> PartialOrd for Vec<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> { PartialOrd::partial_cmp(&**self, &**other) }
+}
+impl<T: Ord> Ord for Vec<T> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering { Ord::cmp(&**self, &**other) }
+}
