@@ -11,7 +11,7 @@ pub mod v1 {
     pub use crate::result::Result::{self, Err, Ok};
     pub use crate::{
         assert, assert_eq, assert_ne, cfg, column, compile_error, concat, debug_assert, debug_assert_eq,
-        debug_assert_ne, derive, env, global_allocator, file, format_args, include_bytes, include_str, line, matches,
+        debug_assert_ne, derive, env, global_allocator, file, format_args, include, include_bytes, include_str, line, matches,
         option_env, panic, stringify, test, todo, unimplemented, unreachable, write, writeln,
     };
     pub use crate::macros::builtin::{Debug, Hash};

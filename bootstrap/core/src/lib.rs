@@ -183,6 +183,7 @@ pub mod task {
         }
     }
 
+    #[lang = "Context"]
     pub struct Context<'a> {
         waker: &'a Waker,
         _marker: crate::marker::PhantomData<fn(&'a ()) -> &'a ()>,

@@ -361,3 +361,16 @@ impl From<String> for Arc<str> {
 impl<T> From<crate::boxed::Box<[T]>> for Arc<[T]> {
     fn from(boxed: crate::boxed::Box<[T]>) -> Arc<[T]> { Arc::from(crate::boxed::Box::into_vec(boxed)) }
 }
+
+impl<T: ?Sized + core::hash::Hash> core::hash::Hash for Arc<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) { (**self).hash(state) }
+}
+impl<T: ?Sized> core::borrow::Borrow<T> for Arc<T> {
+    fn borrow(&self) -> &T { self }
+}
+impl From<crate::boxed::Box<str>> for Arc<str> {
+    fn from(boxed: crate::boxed::Box<str>) -> Arc<str> { Arc::from(&*boxed) }
+}
+impl<T> Default for Arc<[T]> {
+    fn default() -> Arc<[T]> { Arc::from(Vec::new()) }
+}

@@ -263,7 +263,7 @@ impl str {
 
     /// The matches, left to right and not overlapping, with the byte index each starts at.
     pub fn match_indices<P: Pattern>(&self, pat: P) -> MatchIndices<'_, P> {
-        MatchIndices { haystack: self, pattern: pat, pos: 0, done: false }
+        MatchIndices { haystack: self, pattern: pat, pos: 0, back: self.len(), done: false }
     }
 
     /// The pieces between runs of whitespace, with no empty pieces.
@@ -938,24 +938,46 @@ pub struct MatchIndices<'a, P> {
     haystack: &'a str,
     pattern: P,
     pos: usize,
+    back: usize,
     done: bool,
 }
 impl<'a, P: Pattern> crate::iter::Iterator for MatchIndices<'a, P> {
     type Item = (usize, &'a str);
     fn next(&mut self) -> Option<(usize, &'a str)> {
         if self.done { return None; }
-        match self.pattern.find_in(self.haystack, self.pos) {
+        let haystack = &self.haystack[..self.back];
+        match self.pattern.find_in(haystack, self.pos) {
             None => { self.done = true; None }
             Some((start, end)) => {
                 if end > start {
                     self.pos = end;
-                } else if end >= self.haystack.len() {
+                } else if end >= haystack.len() {
                     self.done = true;
                 } else {
-                    self.pos = end + self.haystack[end..].chars().next().map_or(1, |c| c.len_utf8());
+                    self.pos = end + haystack[end..].chars().next().map_or(1, |c| c.len_utf8());
                 }
                 Some((start, &self.haystack[start..end]))
             }
         }
+    }
+}
+/// Matches taken from the back are the last non-empty matches, as in `rfind`.
+impl<'a, P: Pattern> crate::iter::DoubleEndedIterator for MatchIndices<'a, P> {
+    fn next_back(&mut self) -> Option<(usize, &'a str)> {
+        if self.done { return None; }
+        let mut i = self.back;
+        while i > self.pos {
+            i -= 1;
+            if !self.haystack.is_char_boundary(i) { continue; }
+            if let Some(len) = self.pattern.prefix_len(&self.haystack[i..self.back]) {
+                if len > 0 {
+                    let end = i + len;
+                    self.back = i;
+                    return Some((i, &self.haystack[i..end]));
+                }
+            }
+        }
+        self.done = true;
+        None
     }
 }
