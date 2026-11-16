@@ -35,6 +35,12 @@ macro_rules! cx { ($intr:ident,$p:expr,$old:expr,$new:expr,$t:ty,$s:expr,$f:expr
         (Ordering::SeqCst,Ordering::Relaxed)=>unsafe{intrinsics::$intr::<$t,{IOrd::SeqCst},{IOrd::Relaxed}>($p,$old,$new)},
         (Ordering::SeqCst,Ordering::Acquire)=>unsafe{intrinsics::$intr::<$t,{IOrd::SeqCst},{IOrd::Acquire}>($p,$old,$new)},
         (Ordering::SeqCst,Ordering::SeqCst)=>unsafe{intrinsics::$intr::<$t,{IOrd::SeqCst},{IOrd::SeqCst}>($p,$old,$new)},
+        (Ordering::Relaxed,Ordering::SeqCst)=>unsafe{intrinsics::$intr::<$t,{IOrd::Relaxed},{IOrd::SeqCst}>($p,$old,$new)},
+        (Ordering::Acquire,Ordering::SeqCst)=>unsafe{intrinsics::$intr::<$t,{IOrd::Acquire},{IOrd::SeqCst}>($p,$old,$new)},
+        (Ordering::Release,Ordering::Acquire)=>unsafe{intrinsics::$intr::<$t,{IOrd::Release},{IOrd::Acquire}>($p,$old,$new)},
+        (Ordering::Release,Ordering::SeqCst)=>unsafe{intrinsics::$intr::<$t,{IOrd::Release},{IOrd::SeqCst}>($p,$old,$new)},
+        (Ordering::AcqRel,Ordering::SeqCst)=>unsafe{intrinsics::$intr::<$t,{IOrd::AcqRel},{IOrd::SeqCst}>($p,$old,$new)},
+        // Remaining pairs have a failure ordering of Release or AcqRel, which Rust rejects.
         _=>panic!("invalid compare_exchange ordering")
     };
     if ok { Ok(v) } else { Err(v) }
