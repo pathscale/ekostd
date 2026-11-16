@@ -295,6 +295,235 @@ impl String {
         self.vec.splice(start..end, replace_with.bytes());
     }
 }
+impl core::ops::DerefMut for String {
+    fn deref_mut(&mut self) -> &mut str {
+        self.as_mut_str()
+    }
+}
+impl AsMut<str> for String { fn as_mut(&mut self) -> &mut str { self.as_mut_str() } }
+impl core::borrow::BorrowMut<str> for String { fn borrow_mut(&mut self) -> &mut str { self.as_mut_str() } }
+
+impl String {
+    /// The text as a mutable `str`.
+    pub fn as_mut_str(&mut self) -> &mut str {
+        let length = self.vec.len();
+        // SAFETY: the first `length` bytes of the buffer are the string, valid UTF-8 by String's invariant, and
+        // `&mut str` only allows changes that keep them valid UTF-8.
+        unsafe { str::from_utf8_unchecked_mut(core::slice::from_raw_parts_mut(self.vec.as_mut_ptr(), length)) }
+    }
+
+    /// Keeps only the characters for which `keep` returns true, in order. One pass moves the kept bytes forward
+    /// in place; nothing is allocated.
+    pub fn retain<F: FnMut(char) -> bool>(&mut self, mut keep: F) {
+        let length = self.vec.len();
+        let base = self.vec.as_mut_ptr();
+        // A panic in `keep` leaves the string empty instead of half moved.
+        // SAFETY: zero bytes are always valid UTF-8.
+        unsafe { self.vec.set_len(0); }
+        let mut read = 0;
+        let mut write = 0;
+        while read < length {
+            // SAFETY: bytes from `read` on have not been moved yet, so they are still whole UTF-8 characters.
+            let rest = unsafe { str::from_utf8_unchecked(core::slice::from_raw_parts(base.add(read), length - read)) };
+            let ch = match rest.chars().next() {
+                Some(ch) => ch,
+                None => break,
+            };
+            let width = ch.len_utf8();
+            if keep(ch) {
+                if write != read {
+                    // SAFETY: both ranges lie inside the buffer; `copy` allows them to overlap.
+                    unsafe { core::ptr::copy(base.add(read), base.add(write), width); }
+                }
+                write += width;
+            }
+            read += width;
+        }
+        // SAFETY: the first `write` bytes are the kept characters, whole and in their order.
+        unsafe { self.vec.set_len(write); }
+    }
+
+    /// Splits the string at byte `at`: `self` keeps `[0, at)` and the rest is returned. Panics if `at` is past the
+    /// end or not on a character boundary.
+    pub fn split_off(&mut self, at: usize) -> String {
+        if !self.as_str().is_char_boundary(at) {
+            panic!("String::split_off: at does not lie on a char boundary");
+        }
+        let other = String::from(&self.as_str()[at..]);
+        self.vec.truncate(at);
+        other
+    }
+
+    /// Shrinks the capacity to the length.
+    pub fn shrink_to_fit(&mut self) {
+        self.vec.shrink_to_fit();
+    }
+
+    /// Gives up ownership and returns the text, which stays allocated for the rest of the program.
+    pub fn leak<'a>(self) -> &'a mut str {
+        let bytes = self.vec.leak();
+        // SAFETY: the bytes are the string's, valid UTF-8 by String's invariant.
+        unsafe { str::from_utf8_unchecked_mut(bytes) }
+    }
+
+    /// Decodes UTF-16 `v`; a lone surrogate is an error.
+    pub fn from_utf16(v: &[u16]) -> Result<String, FromUtf16Error> {
+        let mut out = String::with_capacity(v.len());
+        let mut i = 0;
+        while i < v.len() {
+            let (ch, units) = decode_utf16_at(v, i);
+            match ch {
+                Some(ch) => out.push(ch),
+                None => return Err(FromUtf16Error(())),
+            }
+            i += units;
+        }
+        Ok(out)
+    }
+
+    /// Decodes UTF-16 `v`, with each lone surrogate replaced by U+FFFD.
+    pub fn from_utf16_lossy(v: &[u16]) -> String {
+        let mut out = String::with_capacity(v.len());
+        let mut i = 0;
+        while i < v.len() {
+            let (ch, units) = decode_utf16_at(v, i);
+            out.push(match ch {
+                Some(ch) => ch,
+                None => '\u{fffd}',
+            });
+            i += units;
+        }
+        out
+    }
+}
+
+/// The character that starts at `v[i]` and how many units it takes: two for a surrogate pair, else one. `None`
+/// for a lone surrogate.
+fn decode_utf16_at(v: &[u16], i: usize) -> (Option<char>, usize) {
+    let unit = v[i] as u32;
+    if unit < 0xD800 || unit >= 0xE000 {
+        return (core::char::from_u32(unit), 1);
+    }
+    if unit < 0xDC00 {
+        if let Some(&next) = v.get(i + 1) {
+            let low = next as u32;
+            if low >= 0xDC00 && low < 0xE000 {
+                return (core::char::from_u32(0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)), 2);
+            }
+        }
+    }
+    (None, 1)
+}
+
+/// The error `String::from_utf16` returns: the input held a lone surrogate.
+pub struct FromUtf16Error(());
+
+impl core::fmt::Debug for FromUtf16Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("FromUtf16Error(())")
+    }
+}
+impl core::fmt::Display for FromUtf16Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("invalid utf-16: lone surrogate found")
+    }
+}
+
+impl core::fmt::Debug for FromUtf8Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FromUtf8Error").field("bytes", &self.bytes).field("error", &self.error).finish()
+    }
+}
+impl core::fmt::Display for FromUtf8Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Display::fmt(&self.error, f)
+    }
+}
+impl Clone for FromUtf8Error {
+    fn clone(&self) -> Self {
+        FromUtf8Error { bytes: self.bytes.clone(), error: self.error }
+    }
+}
+impl PartialEq for FromUtf8Error {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes && self.error == other.error
+    }
+}
+impl Eq for FromUtf8Error {}
+
+impl core::str::FromStr for String {
+    type Err = core::convert::Infallible;
+    fn from_str(s: &str) -> Result<String, Self::Err> {
+        Ok(String::from(s))
+    }
+}
+
+impl From<char> for String {
+    fn from(c: char) -> String {
+        let mut s = String::new();
+        s.push(c);
+        s
+    }
+}
+impl From<crate::boxed::Box<str>> for String {
+    fn from(s: crate::boxed::Box<str>) -> String {
+        let raw = crate::boxed::Box::into_raw(s) as *mut [u8];
+        // SAFETY: `str` and `[u8]` have the same layout, so the allocation is handed over unchanged; its bytes are
+        // valid UTF-8 because they were a `str`.
+        let bytes = unsafe { crate::boxed::Box::from_raw(raw) };
+        String { vec: crate::boxed::Box::into_vec(bytes) }
+    }
+}
+impl<'a> From<crate::borrow::Cow<'a, str>> for String {
+    fn from(s: crate::borrow::Cow<'a, str>) -> String {
+        s.into_owned()
+    }
+}
+impl From<&mut str> for String {
+    fn from(s: &mut str) -> String {
+        String::from(&*s)
+    }
+}
+impl From<String> for crate::boxed::Box<str> {
+    fn from(s: String) -> crate::boxed::Box<str> {
+        s.into_boxed_str()
+    }
+}
+
+impl<'a> core::iter::Extend<&'a str> for String {
+    fn extend<I: IntoIterator<Item = &'a str>>(&mut self, iter: I) {
+        for s in iter { self.push_str(s) }
+    }
+}
+impl core::iter::Extend<String> for String {
+    fn extend<I: IntoIterator<Item = String>>(&mut self, iter: I) {
+        for s in iter { self.push_str(&s) }
+    }
+}
+impl<'a> core::iter::Extend<&'a char> for String {
+    fn extend<I: IntoIterator<Item = &'a char>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+        self.reserve(iter.size_hint().0);
+        for c in iter { self.push(*c) }
+    }
+}
+impl<'a> core::iter::Extend<crate::borrow::Cow<'a, str>> for String {
+    fn extend<I: IntoIterator<Item = crate::borrow::Cow<'a, str>>>(&mut self, iter: I) {
+        for s in iter { self.push_str(&s) }
+    }
+}
+impl core::iter::Extend<crate::boxed::Box<str>> for String {
+    fn extend<I: IntoIterator<Item = crate::boxed::Box<str>>>(&mut self, iter: I) {
+        for s in iter { self.push_str(&s) }
+    }
+}
+
+impl<'a> PartialEq<crate::borrow::Cow<'a, str>> for String {
+    fn eq(&self, other: &crate::borrow::Cow<'a, str>) -> bool { self.as_str() == &**other }
+}
+impl<'a> PartialEq<String> for crate::borrow::Cow<'a, str> {
+    fn eq(&self, other: &String) -> bool { &**self == other.as_str() }
+}
 impl From<String> for Vec<u8> { fn from(string: String) -> Vec<u8> { string.vec } }
 impl From<&str> for Vec<u8> { fn from(string: &str) -> Vec<u8> { Vec::from(string.as_bytes()) } }
 
