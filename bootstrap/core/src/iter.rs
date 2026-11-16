@@ -219,6 +219,87 @@ pub trait Iterator {
             }
         }
     }
+    /// True when this iterator sorts strictly before `other`, comparing item by item.
+    fn lt<I>(self, other: I) -> bool
+    where
+        I: IntoIterator,
+        Self::Item: crate::cmp::PartialOrd<I::Item>,
+        Self: Sized,
+    {
+        match Iterator::partial_cmp(self, other) {
+            Some(crate::cmp::Ordering::Less) => true,
+            _ => false,
+        }
+    }
+    /// True when this iterator sorts before `other` or equal to it, comparing item by item.
+    fn le<I>(self, other: I) -> bool
+    where
+        I: IntoIterator,
+        Self::Item: crate::cmp::PartialOrd<I::Item>,
+        Self: Sized,
+    {
+        match Iterator::partial_cmp(self, other) {
+            Some(crate::cmp::Ordering::Less) | Some(crate::cmp::Ordering::Equal) => true,
+            _ => false,
+        }
+    }
+    /// True when this iterator sorts strictly after `other`, comparing item by item.
+    fn gt<I>(self, other: I) -> bool
+    where
+        I: IntoIterator,
+        Self::Item: crate::cmp::PartialOrd<I::Item>,
+        Self: Sized,
+    {
+        match Iterator::partial_cmp(self, other) {
+            Some(crate::cmp::Ordering::Greater) => true,
+            _ => false,
+        }
+    }
+    /// True when this iterator sorts after `other` or equal to it, comparing item by item.
+    fn ge<I>(self, other: I) -> bool
+    where
+        I: IntoIterator,
+        Self::Item: crate::cmp::PartialOrd<I::Item>,
+        Self: Sized,
+    {
+        match Iterator::partial_cmp(self, other) {
+            Some(crate::cmp::Ordering::Greater) | Some(crate::cmp::Ordering::Equal) => true,
+            _ => false,
+        }
+    }
+    /// True when every item is less than or equal to the one after it.
+    fn is_sorted(self) -> bool
+    where
+        Self: Sized,
+        Self::Item: crate::cmp::PartialOrd,
+    {
+        self.is_sorted_by(|a, b| crate::cmp::PartialOrd::le(a, b))
+    }
+    /// True when `compare` accepts every pair of neighbouring items as being in order.
+    fn is_sorted_by<F>(mut self, mut compare: F) -> bool
+    where
+        Self: Sized,
+        F: FnMut(&Self::Item, &Self::Item) -> bool,
+    {
+        let mut last = match self.next() {
+            Some(x) => x,
+            None => return true,
+        };
+        while let Some(curr) = self.next() {
+            if !compare(&last, &curr) { return false; }
+            last = curr;
+        }
+        true
+    }
+    /// True when the keys `f` gives for the items are sorted.
+    fn is_sorted_by_key<F, K>(self, f: F) -> bool
+    where
+        Self: Sized,
+        F: FnMut(Self::Item) -> K,
+        K: crate::cmp::PartialOrd,
+    {
+        self.map(f).is_sorted()
+    }
     fn cmp<I>(mut self, other: I) -> crate::cmp::Ordering
     where
         I: IntoIterator<Item = Self::Item>,
@@ -274,6 +355,18 @@ pub trait DoubleEndedIterator: Iterator {
     }
     fn rfind<P: FnMut(&Self::Item) -> bool>(&mut self, mut predicate: P) -> Option<Self::Item> where Self: Sized {
         while let Some(x) = self.next_back() { if predicate(&x) { return Some(x); } } None
+    }
+    /// Folds from the back until `f` first reports failure, and returns that failure.
+    fn try_rfold<B, F, R>(&mut self, init: B, mut f: F) -> R
+    where Self: Sized, F: FnMut(B, Self::Item) -> R, R: Try<Output = B> {
+        let mut acc = init;
+        while let Some(x) = self.next_back() {
+            match f(acc, x).branch() {
+                ControlFlow::Continue(value) => acc = value,
+                ControlFlow::Break(residual) => return R::from_residual(residual),
+            }
+        }
+        R::from_output(acc)
     }
     fn rfold<B, F>(mut self, init: B, mut f: F) -> B
     where
@@ -1213,6 +1306,79 @@ impl<I: Iterator, R> Iterator for UntilFailure<'_, I, R> where I::Item: Try<Resi
         }
     }
 }
+
+/// Adds up the values, or gives `None` when any item is `None`.
+impl<T, U: Sum<T>> Sum<Option<T>> for Option<U> {
+    fn sum<I: Iterator<Item = Option<T>>>(iter: I) -> Self {
+        let mut failure = None;
+        let total = U::sum(UntilFailure { iter, failure: &mut failure });
+        match failure { Some(_) => None, None => Some(total) }
+    }
+}
+
+/// Multiplies the values, or gives `None` when any item is `None`.
+impl<T, U: Product<T>> Product<Option<T>> for Option<U> {
+    fn product<I: Iterator<Item = Option<T>>>(iter: I) -> Self {
+        let mut failure = None;
+        let total = U::product(UntilFailure { iter, failure: &mut failure });
+        match failure { Some(_) => None, None => Some(total) }
+    }
+}
+
+/// Adds up the successes, or gives back the first error.
+impl<T, U: Sum<T>, E> Sum<Result<T, E>> for Result<U, E> {
+    fn sum<I: Iterator<Item = Result<T, E>>>(iter: I) -> Self {
+        let mut failure = None;
+        let total = U::sum(UntilFailure { iter, failure: &mut failure });
+        match failure {
+            Some(Result::Err(error)) => Result::Err(error),
+            _ => Result::Ok(total),
+        }
+    }
+}
+
+/// Multiplies the successes, or gives back the first error.
+impl<T, U: Product<T>, E> Product<Result<T, E>> for Result<U, E> {
+    fn product<I: Iterator<Item = Result<T, E>>>(iter: I) -> Self {
+        let mut failure = None;
+        let total = U::product(UntilFailure { iter, failure: &mut failure });
+        match failure {
+            Some(Result::Err(error)) => Result::Err(error),
+            _ => Result::Ok(total),
+        }
+    }
+}
+
+/// Wrapping integers add up and multiply with wraparound on overflow.
+macro_rules! wrapping_sum_product {
+    ($($t:ty)*) => {$(
+        impl Sum for crate::num::Wrapping<$t> {
+            fn sum<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+                let mut total: $t = 0;
+                loop { match iter.next() { Some(item) => total = total.wrapping_add(item.0), None => return crate::num::Wrapping(total) } }
+            }
+        }
+        impl<'a> Sum<&'a crate::num::Wrapping<$t>> for crate::num::Wrapping<$t> {
+            fn sum<I: Iterator<Item = &'a crate::num::Wrapping<$t>>>(mut iter: I) -> Self {
+                let mut total: $t = 0;
+                loop { match iter.next() { Some(item) => total = total.wrapping_add(item.0), None => return crate::num::Wrapping(total) } }
+            }
+        }
+        impl Product for crate::num::Wrapping<$t> {
+            fn product<I: Iterator<Item = Self>>(mut iter: I) -> Self {
+                let mut total: $t = 1;
+                loop { match iter.next() { Some(item) => total = total.wrapping_mul(item.0), None => return crate::num::Wrapping(total) } }
+            }
+        }
+        impl<'a> Product<&'a crate::num::Wrapping<$t>> for crate::num::Wrapping<$t> {
+            fn product<I: Iterator<Item = &'a crate::num::Wrapping<$t>>>(mut iter: I) -> Self {
+                let mut total: $t = 1;
+                loop { match iter.next() { Some(item) => total = total.wrapping_mul(item.0), None => return crate::num::Wrapping(total) } }
+            }
+        }
+    )*};
+}
+wrapping_sum_product!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
 
 /// Collects the successes, or gives back the first error.
 impl<A, E, V: FromIterator<A>> FromIterator<Result<A, E>> for Result<V, E> {
