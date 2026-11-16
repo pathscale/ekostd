@@ -254,6 +254,78 @@ The only error is `serde_core` on `core::net` (E0432). `serde` is not in ekod's 
 ekostd's `serde` feature, and have `frontend-private` and `relax-facts` (feature `facts-json`) serialise a path
 through its string form. That is a caller change and was not made here.
 
+## Run 14, 2026-11-16: serde removed, relax-base, relax-front and relax-types
+
+Numbers are from `summary.txt` of the runs made in this round. Survey (A), `check --workspace --all-features` in ekostd:
+exit 0, 1 unit started, 0 failed, after the `serde` feature and dependency were removed.
+
+| round | units started | units failed | errors | what changed |
+|---|---|---|---|---|
+| S1 | 50 | 2 | 4 | start (relax-base 3, machine 1; escape_debug and envyrs fixed before) |
+| S2 | 50 | 1 | 36 | GlobalAlloc re-export, str::trim_start_matches: relax-base opens up |
+| S3 | 51 | 1 | 58 | relax-base items, escape_debug, NEON: relax-front opens up |
+| S4 | 45 | 2 | 24 | relax-front items: relax-types opens up |
+| S5 | 49 | 3 | 4 | relax-types items |
+| S6 | 51 | 2 | 2 | String::pop/as_bytes, RangeInclusive Hash |
+| S7 | 51 | 2 | 2 | no change: re-run, same two errors |
+
+Commits: ekostd 4160d58, 1e37bcd; envyrs 9ce4b0b.
+
+### Routes
+- **serde.** Removed ekostd's `serde` feature, the optional dependency and the three impls in `src/path.rs`. Nothing in
+  frontend-relax serialises a `Path` or `PathBuf` (every `Serialize` struct was checked for a path field: the path types
+  there are only `&Path` arguments), so no replacement serde code was written. The `features = ["serde"]` and
+  `ekostd/serde` entries in `frontend-private` and `relax-facts` were deleted; FRONT owns the rest of serde there.
+- **`char::escape_debug` (relax-lex `tokens.rs:806`).** The call renders a doc comment as the `#[doc = "..."]` literal
+  that a proc macro sees, so it is user-visible: route (a) would have changed token text for non-ASCII. The relax std
+  tables are not usable (they were generated for Unicode 18, and `GRAPHEME_EXTEND_PRINTABLE` is empty because the
+  extenders were subtracted from `PRINTABLE`, which is right for `char` but wrong for `str`). Taken: **rust**, the
+  stdlib's own algorithm (`escape_debug_ext`: control, private use, whitespace, `Grapheme_Extend`,
+  `Default_Ignorable`, `Cf`, unassigned) over the stdlib's own tables (Unicode 17), copied into
+  `bootstrap/core/src/unicode.rs` (`grapheme_extend`, `cf`, `cn_planes_0_3`, `default_ignorable_code_point`,
+  `skip_search`). The compile-time table checks and the `assume` hints were dropped; the data is untouched. Output is
+  identical to rustc's for every character. FRONT saw the error clear in S2 and later.
+- **envyrs.** `use super::libc;` (same `cfg`) in the five submodules of `src/os.rs`.
+
+### Items added (source: rust = copied from ps-rust-stdlib, written = written here)
+- **rust:** the `unicode.rs` tables and their search (`grapheme_extend`, `cf`, `cn_planes_0_3`,
+  `default_ignorable_code_point`, `alphabetic`, `n`, `uppercase` with `bitset_search`, `conversions::{to_upper, to_lower}`
+  with their L1 tables, as one module); `char::{escape_debug, to_uppercase, to_lowercase, is_alphabetic, is_alphanumeric,
+  is_uppercase}` and `str::to_uppercase` over them; `Duration::from_secs_f64` (the `try_from_secs!` algorithm for
+  `f64`, same rounding and panic messages).
+- **written:** `char::{is_digit, is_ascii_hexdigit, to_ascii_uppercase, to_ascii_lowercase}`; `Cell::as_ptr`,
+  `Atomic{U8,U16,U32,U64,Usize,Isize,I32,I64}::as_ptr`; `OnceCell` (`new`, `get`, `set`, `get_or_init` with the reentrancy
+  panic); `Clone for RefCell`; `mem::discriminant`/`Discriminant`; `Iterator for RangeFrom`; `Flatten` back iterator;
+  `Iterator::map_while`; `IntoIterator for Result` and for `&Box<[T]>`; `Iterator for Box<I>`; `Option::{insert,
+  get_or_insert_default}`; `Result::as_deref`; `ControlFlow::{is_break, is_continue}` and its `Try`/`FromResidual`;
+  `AtomicBool::get_mut`; `Formatter::debug_tuple_field{4,5}_finish`; `<[T]>::split`; `Concat` and `<[T]>::concat`;
+  `<[u8]>::trim_ascii{,_start,_end}`; `RangeInclusive: Hash`; the NEON `vsubq_u8`, `vcleq_u8`, `vbicq_u8`, `vmull_p64`
+  (bitwise carry-less multiply) and `p64`/`p128` aliases, and `vextq_u8` is now `vextq_u8::<N>(a, b)` as in
+  `core::arch` (its only user is ps-simd-scan); alloc: `GlobalAlloc` re-export in `alloc::alloc`,
+  `str::trim_start_matches` (core), `Arc::{increment_strong_count, unwrap_or_clone}`, `FromIterator<T> for Arc<[T]>`,
+  `FromIterator<Cow<str>> for String`, `Cow<str>: PartialEq<&str>` and `<str>`, `Vec::dedup_by_key`, `VecDeque::retain`,
+  `String::{pop, as_bytes}`.
+- Every one of these was called by a unit in the graph; the `rust` ones were also compared with the relax std, which
+  was rejected for the Unicode data above.
+
+### Debts, state after S7
+- `Vec::splice` and `BTreeSet::{difference, union, intersection}` are still eager. Not changed: no unit added this round
+  calls them, and the earlier rounds did not show a caller that can see the difference; a faithful version needs a
+  lazy iterator type per method and was not written.
+- `core::any::type_name` still returns `"<type>"`. A real one needs the compiler: an intrinsic
+  (`core::intrinsics::type_name::<T>()`, a `rustc_intrinsic` that rustc evaluates to the type's path string) wired
+  into `type_name`. It is not data we can write in the library.
+- `Result::into_iter` returns `iter::Once<T>` and `Option`'s the same, where Rust names `result::IntoIter`; the sequence
+  is the same.
+- The `escape_debug` for `str` (`str::escape_debug`, which does not escape grapheme extenders after the first character) is
+  not added: nothing in the graph calls it.
+- frontend-relax tracks `Cargo.lock` and `link-probe/Cargo.lock` in git; not touched, flagged.
+
+### First remaining blocker (S7)
+Two errors, both from in-flight unwinding removal by another agent, not library items:
+`ekopathrs/crates/door/src/server.rs:186` calls `contained(..)` which no longer exists (E0425), and
+`frontend-relax/src/lib.rs:36` imports `relax_eko_bridge::rustc_compat::unwind_janky`, which is not there (E0432).
+
 ## Open after run 2, largest first
 
 (Historical: everything in this list is closed as of run 7.)
