@@ -687,6 +687,107 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "Some(100) Some(57) Some(48)", "{:?} {:?} {:?}", back.next_back(), back.next_back(), back.next());
         check!(r, "EscapeAscii { .. }", "{:?}", raw.escape_ascii());
     }
+    { // lw4-f: cell API (Cell, RefCell, Ref, RefMut, OnceCell)
+        let a = core::cell::Cell::new(1);
+        let b = core::cell::Cell::new(2);
+        a.swap(&b);
+        check!(r, "(2, 1)", "{:?}", (a.get(), b.get()));
+        a.swap(&a);
+        check!(r, "2", "{}", a.get());
+        let c = core::cell::Cell::new(4);
+        c.update(|v| v * 10);
+        check!(r, "40", "{}", c.get());
+        check!(r, "7", "{}", core::cell::Cell::new(7).into_inner());
+        let mut x = 1;
+        core::cell::Cell::from_mut(&mut x).set(6);
+        check!(r, "6", "{}", x);
+        let mut arr = [1, 2];
+        core::cell::Cell::from_mut(&mut arr[..]).as_slice_of_cells()[1].set(9);
+        check!(r, "[1, 9]", "{:?}", arr);
+        let mut arr2 = [3, 4];
+        core::cell::Cell::from_mut(&mut arr2).as_array_of_cells()[0].set(5);
+        check!(r, "[5, 4]", "{:?}", arr2);
+        check!(r, "true", "{}", core::cell::Cell::new(1) < core::cell::Cell::new(2));
+        check!(r, "true", "{}", core::cell::Cell::new(3) == core::cell::Cell::new(3));
+        check!(r, "true", "{}", core::cell::Cell::new(5).cmp(&core::cell::Cell::new(2)) == core::cmp::Ordering::Greater);
+        check!(r, "Cell { value: 5 }", "{:?}", core::cell::Cell::new(5));
+        check!(r, "8", "{}", core::cell::Cell::new(8).clone().get());
+        check!(r, "3", "{}", core::cell::Cell::from(3).get());
+
+        let rc = core::cell::RefCell::new(1);
+        check!(r, "1", "{}", rc.replace_with(|v| *v + 1));
+        check!(r, "2", "{}", *rc.borrow());
+        let r1 = core::cell::RefCell::new(1);
+        let r2 = core::cell::RefCell::new(2);
+        r1.swap(&r2);
+        let swapped = (*r1.borrow(), *r2.borrow());
+        check!(r, "(2, 1)", "{:?}", swapped);
+        check!(r, "true", "{}", core::cell::RefCell::new(1) < core::cell::RefCell::new(2));
+        check!(r, "true", "{}", core::cell::RefCell::new(4) == core::cell::RefCell::from(4));
+
+        let p = core::cell::RefCell::new((3, 4));
+        {
+            let g = p.borrow();
+            match p.try_borrow_mut() {
+                Ok(_) => { check!(r, "already borrowed", "{}", "Ok"); }
+                Err(e) => { check!(r, "already borrowed", "{}", e); }
+            }
+            core::mem::drop(g);
+        }
+        {
+            let m = p.borrow_mut();
+            match p.try_borrow() {
+                Ok(_) => { check!(r, "already mutably borrowed", "{}", "Ok"); }
+                Err(e) => { check!(r, "already mutably borrowed", "{}", e); }
+            }
+            core::mem::drop(m);
+        }
+        check!(r, "3", "{}", *core::cell::Ref::map(p.borrow(), |q| &q.0));
+        {
+            let g1 = p.borrow();
+            let g2 = core::cell::Ref::clone(&g1);
+            core::mem::drop(g1);
+            check!(r, "true", "{}", p.try_borrow_mut().is_err());
+            check!(r, "(3, 4)", "{:?}", *g2);
+            core::mem::drop(g2);
+            check!(r, "true", "{}", p.try_borrow_mut().is_ok());
+        }
+        {
+            let (mut h0, mut h1) = core::cell::RefMut::map_split(p.borrow_mut(), |q| (&mut q.0, &mut q.1));
+            *h0 = 10;
+            *h1 = 20;
+            core::mem::drop(h0);
+            check!(r, "true", "{}", p.try_borrow().is_err());
+            check!(r, "true", "{}", p.try_borrow_mut().is_err());
+            core::mem::drop(h1);
+            check!(r, "true", "{}", p.try_borrow().is_ok());
+            check!(r, "true", "{}", p.try_borrow_mut().is_ok());
+        }
+        check!(r, "(10, 20)", "{:?}", *p.borrow());
+        check!(r, "true", "{}", core::cell::Ref::filter_map(p.borrow(), |q| if q.0 > 0 { Some(&q.0) } else { None }).is_ok());
+        check!(r, "true", "{}", core::cell::Ref::filter_map(p.borrow(), |q| if q.0 < 0 { Some(&q.0) } else { None }).is_err());
+        check!(r, "true", "{}", p.try_borrow_mut().is_ok());
+        {
+            let mut m = core::cell::RefMut::map(p.borrow_mut(), |q| &mut q.1);
+            *m += 1;
+            check!(r, "21", "{}", m);
+            check!(r, "21", "{:?}", m);
+        }
+        check!(r, "21", "{}", p.borrow().1);
+        let s = core::cell::RefCell::new(7);
+        check!(r, "7", "{}", s.borrow());
+
+        let mut o: core::cell::OnceCell<i32> = core::cell::OnceCell::new();
+        check!(r, "None", "{:?}", o.get_mut());
+        check!(r, "OnceCell(<uninit>)", "{:?}", o);
+        let _ = o.set(3);
+        check!(r, "Some(3)", "{:?}", o.get_mut());
+        check!(r, "OnceCell(3)", "{:?}", o);
+        check!(r, "true", "{}", o.clone() == o);
+        check!(r, "Some(3)", "{:?}", o.take());
+        check!(r, "None", "{:?}", o.get());
+        check!(r, "Some(4)", "{:?}", core::cell::OnceCell::from(4).into_inner());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
