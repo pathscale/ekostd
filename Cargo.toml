@@ -36,7 +36,3 @@ libc = { version = "^0.2.189", default-features = false }
 [features]
 # Off by default: a crate that has no serialiser should not gain serde through the wrapper.
 serde = ["dep:serde"]
-# The `dropck_eyepatch` on `thread::Mutex`'s destructor. Nightly-only, and needed by exactly one
-# consumer: rustc's `'tcx` origin-point pattern. Off by default so a stable consumer can use this
-# crate at all.
-nightly = []
