@@ -474,6 +474,24 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         fl.next();
         check!(r, "(2, Some(2))", "{:?}", fl.size_hint());
     }
+    { // lw2-h: StepBy and Chain size_hint, StepBy len
+        check!(r, "(4, Some(4))", "{:?}", (0..10).step_by(3).size_hint());
+        check!(r, "4", "{}", (0..10).step_by(3).len());
+        check!(r, "3", "{}", (0..9).step_by(3).len());
+        check!(r, "0", "{}", (0..0).step_by(2).len());
+        let mut s = (0..10).step_by(3);
+        s.next();
+        check!(r, "(3, Some(3))", "{:?}", s.size_hint());
+        check!(r, "1", "{}", (0..1).step_by(5).len());
+        check!(r, "(5, Some(5))", "{:?}", (0..3).chain(5..7).size_hint());
+        check!(r, "(18446744073709551615, None)", "{:?}", (0..3).chain(0u32..).size_hint());
+        let mut c = (0..3).chain(5..7);
+        c.next();
+        c.next();
+        c.next();
+        check!(r, "(2, Some(2))", "{:?}", c.size_hint());
+        check!(r, "(0, Some(0))", "{:?}", (0..0).chain(0..0).size_hint());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
