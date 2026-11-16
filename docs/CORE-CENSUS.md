@@ -360,3 +360,4 @@ All taken from the Rust standard library semantics; each is what a frontend unit
 - `Arc::make_mut` on `Arc<[T]>` as well as `Arc<T>`: bound is now the trait `CloneToArc` (Rust: `CloneToUninit`).
 - `sync::Weak::ptr_eq`, `VecDeque::remove`, `CStr::to_string_lossy` (needs `#[rustc_has_incoherent_inherent_impls]` on `CStr`), `str::rsplitn`.
 - `String::drain`: the removed characters are taken out when it is called and the iterator owns them (Rust removes on drop; differs only if the `Drain` is leaked).
+- `fmt::Display` for `PanicInfo` ("panicked at {location}:\n{message}"), for the `ekors` panic handler (ekors check exit 0 after it).

@@ -44,6 +44,14 @@ impl<'a> PanicInfo<'a> {
     pub const fn can_unwind(&self) -> bool { self.can_unwind }
     pub const fn force_no_backtrace(&self) -> bool { self.force_no_backtrace }
 }
+impl fmt::Display for PanicInfo<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match f.write_str("panicked at ") { Err(e) => return Err(e), Ok(()) => {} }
+        match fmt::Display::fmt(self.location, f) { Err(e) => return Err(e), Ok(()) => {} }
+        match f.write_str(":\n") { Err(e) => return Err(e), Ok(()) => {} }
+        f.write_fmt(*self.message)
+    }
+}
 pub struct PanicMessage<'a> { message: &'a fmt::Arguments<'a> }
 impl PanicMessage<'_> {
     pub const fn as_str(&self) -> Option<&str> { self.message.as_str() }
