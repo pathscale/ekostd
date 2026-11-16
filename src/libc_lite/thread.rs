@@ -184,6 +184,12 @@ pub struct Dl_info {
     pub dli_saddr: *mut c_void,
 }
 
+pub const RTLD_NOW: c_int = 0x2;
+#[cfg(target_os = "macos")]
+pub const RTLD_LOCAL: c_int = 0x4;
+#[cfg(target_os = "linux")]
+pub const RTLD_LOCAL: c_int = 0;
+
 unsafe extern "C" {
     pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int;
     pub fn sched_yield() -> c_int;
@@ -210,11 +216,16 @@ unsafe extern "C" {
     pub fn pthread_getspecific(key: pthread_key_t) -> *mut c_void;
     pub fn pthread_setspecific(key: pthread_key_t, value: *const c_void) -> c_int;
 
+    // The attribute argument is `*const pthread_mutexattr_t` / `*const pthread_condattr_t` in the
+    // `libc` crate. No caller here passes anything but null, so it is declared as the pointer it
+    // is at the ABI level rather than with a layout that nothing exercises.
+    pub fn pthread_mutex_init(lock: *mut pthread_mutex_t, attr: *const c_void) -> c_int;
     pub fn pthread_mutex_destroy(lock: *mut pthread_mutex_t) -> c_int;
     pub fn pthread_mutex_lock(lock: *mut pthread_mutex_t) -> c_int;
     pub fn pthread_mutex_trylock(lock: *mut pthread_mutex_t) -> c_int;
     pub fn pthread_mutex_unlock(lock: *mut pthread_mutex_t) -> c_int;
 
+    pub fn pthread_cond_init(cond: *mut pthread_cond_t, attr: *const c_void) -> c_int;
     pub fn pthread_cond_wait(cond: *mut pthread_cond_t, lock: *mut pthread_mutex_t) -> c_int;
     pub fn pthread_cond_signal(cond: *mut pthread_cond_t) -> c_int;
     pub fn pthread_cond_broadcast(cond: *mut pthread_cond_t) -> c_int;
@@ -225,6 +236,12 @@ unsafe extern "C" {
     pub fn pthread_rwlock_unlock(lock: *mut pthread_rwlock_t) -> c_int;
 
     pub fn dladdr(addr: *const c_void, info: *mut Dl_info) -> c_int;
+    pub fn dlopen(filename: *const core::ffi::c_char, flag: c_int) -> *mut c_void;
+    pub fn dlsym(handle: *mut c_void, symbol: *const core::ffi::c_char) -> *mut c_void;
+    pub fn dlclose(handle: *mut c_void) -> c_int;
+
+    /// Variadic, as in C; the request type is `c_ulong` on Apple and glibc.
+    pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
 }
 
 #[cfg(target_os = "macos")]

@@ -104,6 +104,8 @@ pub struct dirent {
 
 pub const EPERM: c_int = 1;
 pub const ENOENT: c_int = 2;
+pub const EBADF: c_int = 9;
+pub const ENOMEM: c_int = 12;
 pub const EINTR: c_int = 4;
 pub const EACCES: c_int = 13;
 pub const EEXIST: c_int = 17;

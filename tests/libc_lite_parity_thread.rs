@@ -16,7 +16,7 @@ macro_rules! same_consts {
     };
 }
 
-same_consts!(CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL, PTHREAD_CREATE_DETACHED);
+same_consts!(CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL, PTHREAD_CREATE_DETACHED, RTLD_NOW, RTLD_LOCAL);
 // `AT_SECURE` is read from the aux vector, so only the Linux targets have it.
 #[cfg(target_os = "linux")]
 same_consts!(AT_SECURE);
@@ -191,6 +191,12 @@ macro_rules! fn_signatures {
             $c::pthread_rwlock_wrlock;
         const _: unsafe extern "C" fn(*mut $c::pthread_rwlock_t) -> c_int =
             $c::pthread_rwlock_unlock;
+
+        const _: unsafe extern "C" fn(*const core::ffi::c_char, c_int) -> *mut $c::c_void = $c::dlopen;
+        const _: unsafe extern "C" fn(*mut $c::c_void, *const core::ffi::c_char) -> *mut $c::c_void =
+            $c::dlsym;
+        const _: unsafe extern "C" fn(*mut $c::c_void) -> c_int = $c::dlclose;
+        const _: unsafe extern "C" fn(c_int, core::ffi::c_ulong, ...) -> c_int = $c::ioctl;
 
         #[cfg(target_os = "macos")]
         const _: unsafe extern "C" fn(
