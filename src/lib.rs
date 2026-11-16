@@ -55,6 +55,7 @@ extern crate alloc;
 use crate::libc_lite as libc;
 
 pub mod channel;
+pub mod clock;
 pub mod command;
 pub mod compat;
 pub mod cpu;
