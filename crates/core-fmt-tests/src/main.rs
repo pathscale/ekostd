@@ -419,6 +419,40 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "None", "{:?}", s.next());
         check!(r, "(18446744073709551612, None)", "{:?}", (0..).skip(3).size_hint());
     }
+    { // lw2-f: Peekable size_hint, len, next_back, peek_mut, next_if_eq, count, last, nth
+        let mut p = [1, 2, 3].iter().peekable();
+        let _ = p.peek();
+        check!(r, "(3, Some(3))", "{:?}", p.size_hint());
+        check!(r, "3", "{}", p.len());
+        check!(r, "Some(3)", "{:?}", p.next_back());
+        check!(r, "Some(2)", "{:?}", p.next_back());
+        check!(r, "Some(1)", "{:?}", p.next_back());
+        check!(r, "None", "{:?}", p.next_back());
+
+        let mut q = [1, 2].into_iter().peekable();
+        if let Some(x) = q.peek_mut() { *x = 10; }
+        check!(r, "Some(10)", "{:?}", q.next());
+
+        let mut s = [1, 2, 3].into_iter().peekable();
+        check!(r, "Some(1)", "{:?}", s.next_if_eq(&1));
+        check!(r, "None", "{:?}", s.next_if_eq(&5));
+        check!(r, "Some(2)", "{:?}", s.next());
+
+        let mut c = [4, 5, 6].iter().peekable();
+        let _ = c.peek();
+        check!(r, "3", "{}", c.count());
+        let mut l = [4, 5, 6].iter().peekable();
+        let _ = l.peek();
+        check!(r, "Some(6)", "{:?}", l.last());
+        let mut n = [7].iter().peekable();
+        let _ = n.peek();
+        check!(r, "Some(7)", "{:?}", n.nth(0));
+
+        let mut e = [0u8; 0].iter().peekable();
+        check!(r, "None", "{:?}", e.peek());
+        check!(r, "(0, Some(0))", "{:?}", e.size_hint());
+    }
+
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
