@@ -42,7 +42,7 @@ impl<T: Ord> Ord for BTreeSet<T> { fn cmp(&self, o: &Self) -> Ordering { self.it
 impl<T: fmt::Debug> fmt::Debug for BTreeSet<T> { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_set().entries(self.iter()).finish() } }
 impl<T: Ord> FromIterator<T> for BTreeSet<T> { fn from_iter<I: IntoIterator<Item=T>>(it:I)->Self { let mut s=Self::new(); s.extend(it); s } }
 impl<T: Ord> Extend<T> for BTreeSet<T> { fn extend<I:IntoIterator<Item=T>>(&mut self,it:I) { for v in it { self.insert(v); } } }
-impl<'a, T: Ord> IntoIterator for &'a BTreeSet<T> { type Item=&'a T; type IntoIter=core::iter::Map<core::slice::Iter<'a,(T,())>,fn(&(T,()))->&T>; fn into_iter(self)->Self::IntoIter { fn key<T>((k,_):&(T,()))->&T {k} self.map.iter_raw().map(key::<T>) } }
+impl<'a, T: Ord> IntoIterator for &'a BTreeSet<T> { type Item=&'a T; type IntoIter=crate::collections::btree_map::Keys<'a, T, ()>; fn into_iter(self)->Self::IntoIter { self.map.keys() } }
 impl<T: Ord> IntoIterator for BTreeSet<T> { type Item=T; type IntoIter=core::iter::Map<<BTreeMap<T,()> as IntoIterator>::IntoIter, fn((T,()))->T>; fn into_iter(self)->Self::IntoIter { fn key<T>((k,_):(T,()))->T {k} self.map.into_iter().map(key::<T>) } }
 
 impl<T: Ord> BTreeSet<T> {
@@ -66,7 +66,7 @@ impl<T: core::hash::Hash> core::hash::Hash for BTreeSet<T> {
     }
 }
 
-pub type Range<'a, T> = core::iter::Map<crate::collections::btree_map::Iter<'a, T, ()>, fn((&'a T, &'a ())) -> &'a T>;
+pub type Range<'a, T> = core::iter::Map<crate::collections::btree_map::Range<'a, T, ()>, fn((&'a T, &'a ())) -> &'a T>;
 
 impl<T: Ord> BTreeSet<T> {
     pub fn range<K: ?Sized + Ord, R: core::ops::RangeBounds<K>>(&self, range: R) -> Range<'_, T> where T: core::borrow::Borrow<K> {

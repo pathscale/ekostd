@@ -1,0 +1,11 @@
+# Adds the stage0 link to ../../.cargo/config.toml (empty sysroot, panic=abort, RUSTC_BOOTSTRAP for the three
+# language crates only); cargo appends these rustflags to that file's. Linking is the toolchain's own rust-lld
+# (ld64 flavor) against the authored text stubs of ekopathrs/stage0-sdk: no cc, no Apple linker, no SDK.
+[build]
+rustflags = ["-Clinker-flavor=ld64.lld", "-Clink-arg=-lSystem", "-Clink-arg=-dead_strip_dylibs"]
+
+[target.aarch64-apple-darwin]
+linker = "rust-lld"
+
+[env]
+SDKROOT = { value = "../../../ekopathrs/stage0-sdk", relative = true }

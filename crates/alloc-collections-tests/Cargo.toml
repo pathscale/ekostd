@@ -1,0 +1,35 @@
+# Unit tests for the bootstrap alloc's collections (`bootstrap/alloc/src/collections`): the B-tree BTreeMap and the
+# BTreeSet over it, against a sorted-Vec model, through long pseudo-random operation sequences.
+#
+# A test harness links std, so this is a `no_main` program on the empty sysroot, built like every stage0 unit:
+# core, alloc and compiler_builtins are the ekostd bootstrap crates, panic=abort, linked by the toolchain's rust-lld
+# (`.cargo/config.toml` here). Run it from this directory:
+#
+#   cargo run --release > alloc-collections-tests.log 2>&1
+#
+# It prints one line per failed check and a count, and exits 0 only when every check passed.
+[workspace]
+
+[package]
+name = "alloc-collections-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "alloc-collections-tests"
+path = "src/main.rs"
+test = false
+doctest = false
+
+[dependencies]
+core = { package = "eko-core", path = "../../bootstrap/core" }
+alloc = { package = "eko-alloc", path = "../../bootstrap/alloc" }
+compiler_builtins = { package = "eko-compiler-builtins", path = "../../bootstrap/compiler_builtins" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
