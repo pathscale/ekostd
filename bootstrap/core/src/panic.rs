@@ -176,6 +176,22 @@ pub mod panic_const {
     #[lang = "panic_const_rem_overflow"]
     #[track_caller]
     pub const fn panic_const_rem_overflow() -> ! { panic_nounwind("attempt to calculate the remainder with overflow") }
+
+    #[lang = "panic_const_coroutine_resumed"]
+    #[track_caller]
+    pub const fn panic_const_coroutine_resumed() -> ! { panic_nounwind("coroutine resumed after completion") }
+
+    #[lang = "panic_const_async_fn_resumed"]
+    #[track_caller]
+    pub const fn panic_const_async_fn_resumed() -> ! { panic_nounwind("`async fn` resumed after completion") }
+
+    #[lang = "panic_const_async_gen_fn_resumed"]
+    #[track_caller]
+    pub const fn panic_const_async_gen_fn_resumed() -> ! { panic_nounwind("`async gen fn` resumed after completion") }
+
+    #[lang = "panic_const_gen_fn_none"]
+    #[track_caller]
+    pub const fn panic_const_gen_fn_none() -> ! { panic_nounwind("`gen fn` should just keep returning `None` after completion") }
 }
 
 pub mod panicking {

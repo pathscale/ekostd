@@ -131,7 +131,9 @@ pub const unsafe fn align_of_val_raw<T: ?Sized>(value: *const T) -> usize {
 }
 
 trait SizedTypeProperties: crate::marker::Sized {
+    #[lang = "mem_size_const"]
     const SIZE: usize = crate::intrinsics::size_of::<Self>();
+    #[lang = "mem_align_const"]
     const ALIGN: usize = crate::intrinsics::align_of::<Self>();
 }
 impl<T> SizedTypeProperties for T {}
