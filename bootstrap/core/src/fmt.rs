@@ -76,6 +76,12 @@ impl<'a> Formatter<'a> {
     pub fn debug_tuple_field3_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug, value3: &dyn Debug) -> Result {
         self.debug_tuple_fields_finish(name, &[value1, value2, value3])
     }
+    pub fn debug_tuple_field4_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug, value3: &dyn Debug, value4: &dyn Debug) -> Result {
+        self.debug_tuple_fields_finish(name, &[value1, value2, value3, value4])
+    }
+    pub fn debug_tuple_field5_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug, value3: &dyn Debug, value4: &dyn Debug, value5: &dyn Debug) -> Result {
+        self.debug_tuple_fields_finish(name, &[value1, value2, value3, value4, value5])
+    }
     pub fn debug_tuple_fields_finish<'b>(&'b mut self, name: &str, values: &[&dyn Debug]) -> Result {
         attempt!(self.write_str(name));
         attempt!(self.write_str("("));

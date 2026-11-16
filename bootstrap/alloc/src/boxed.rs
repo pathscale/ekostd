@@ -229,3 +229,9 @@ impl<Args: core::marker::Tuple, F: Fn<Args> + ?Sized> Fn<Args> for Box<F> {
         <F as Fn<Args>>::call(&**self, args)
     }
 }
+
+impl<I: core::iter::Iterator + ?Sized> core::iter::Iterator for Box<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> { (**self).next() }
+    fn size_hint(&self) -> (usize, Option<usize>) { (**self).size_hint() }
+}

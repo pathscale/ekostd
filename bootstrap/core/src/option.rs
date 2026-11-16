@@ -130,6 +130,17 @@ impl<T> Option<T> {
         match self { Some(x) => x, None => unsafe { crate::hint::unreachable_unchecked() } }
     }
 
+    /// Puts the default in when empty, and lends what is then inside.
+    pub fn get_or_insert_default(&mut self) -> &mut T where T: crate::default::Default {
+        self.get_or_insert_with(T::default)
+    }
+
+    /// Puts `value` in, dropping what was there, and lends it.
+    pub fn insert(&mut self, value: T) -> &mut T {
+        *self = Some(value);
+        match self { Some(x) => x, None => unsafe { crate::hint::unreachable_unchecked() } }
+    }
+
     /// Puts `value` in and returns what was there.
     pub fn replace(&mut self, value: T) -> Option<T> { crate::mem::replace(self, Some(value)) }
 

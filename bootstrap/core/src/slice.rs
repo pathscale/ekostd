@@ -810,6 +810,11 @@ impl<T> [T] {
         self.rotate_left(len - k);
     }
 
+    /// The pieces between the elements `pred` accepts, which are not in any piece. An empty slice gives one empty piece.
+    pub fn split<F: FnMut(&T) -> bool>(&self, pred: F) -> Split<'_, T, F> {
+        Split { v: self, pred, finished: false }
+    }
+
     /// Consecutive pieces of `size` elements; the last one holds what is left and may be shorter.
     pub fn chunks(&self, size: usize) -> Chunks<'_, T> {
         if size == 0 { crate::intrinsics::abort(); }
@@ -1236,6 +1241,25 @@ impl<T> [T] {
 }
 
 impl [u8] {
+    /// Without the ASCII whitespace at the start.
+    pub const fn trim_ascii_start(&self) -> &[u8] {
+        let mut bytes = self;
+        while let [first, rest @ ..] = bytes {
+            if first.is_ascii_whitespace() { bytes = rest; } else { break; }
+        }
+        bytes
+    }
+    /// Without the ASCII whitespace at the end.
+    pub const fn trim_ascii_end(&self) -> &[u8] {
+        let mut bytes = self;
+        while let [rest @ .., last] = bytes {
+            if last.is_ascii_whitespace() { bytes = rest; } else { break; }
+        }
+        bytes
+    }
+    /// Without the ASCII whitespace at both ends.
+    pub const fn trim_ascii(&self) -> &[u8] { self.trim_ascii_start().trim_ascii_end() }
+
     pub const fn is_ascii(&self) -> bool {
         let mut i = 0;
         while i < self.len() {
@@ -1267,5 +1291,25 @@ impl<'a, T, P: crate::ops::FnMut(&T, &T) -> bool> Iterator for ChunkBy<'a, T, P>
         let (head, tail) = self.slice.split_at(len);
         self.slice = tail;
         Some(head)
+    }
+}
+
+/// What `<[T]>::split` returns.
+pub struct Split<'a, T: 'a, P: FnMut(&T) -> bool> { v: &'a [T], pred: P, finished: bool }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for Split<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.finished { return None; }
+        let mut index = 0;
+        while index < self.v.len() {
+            if (self.pred)(&self.v[index]) {
+                let piece = &self.v[..index];
+                self.v = &self.v[index + 1..];
+                return Some(piece);
+            }
+            index += 1;
+        }
+        self.finished = true;
+        Some(self.v)
     }
 }

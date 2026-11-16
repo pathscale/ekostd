@@ -7,6 +7,8 @@ impl<T> VecDeque<T> {
     pub const fn new() -> Self { Self { items: Vec::new() } }
     pub fn with_capacity(capacity: usize) -> Self { Self { items: Vec::with_capacity(capacity) } }
     pub fn len(&self) -> usize { self.items.len() }
+    /// Keeps the elements `keep` accepts, in order.
+    pub fn retain<F: FnMut(&T) -> bool>(&mut self, keep: F) { self.items.retain(keep) }
     pub fn is_empty(&self) -> bool { self.items.is_empty() }
     pub fn clear(&mut self) { self.items.clear(); }
     pub fn push_back(&mut self, value: T) { self.items.push(value); }

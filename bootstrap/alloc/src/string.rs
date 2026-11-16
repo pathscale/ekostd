@@ -31,6 +31,17 @@ impl String {
         self.vec.capacity()
     }
 
+    pub fn as_bytes(&self) -> &[u8] { self.vec.as_slice() }
+
+    /// Removes the last character and returns it; `None` when empty.
+    pub fn pop(&mut self) -> Option<char> {
+        let ch = self.as_str().chars().next_back()?;
+        let length = self.vec.len() - ch.len_utf8();
+        // SAFETY: the characters before `ch` are whole, so the bytes stay valid UTF-8.
+        unsafe { self.vec.set_len(length); }
+        Some(ch)
+    }
+
     pub fn as_str(&self) -> &str {
         // String only admits bytes through validated &str inputs or checked UTF-8 conversion.
         unsafe { str::from_utf8_unchecked(&self.vec) }
@@ -234,3 +245,11 @@ impl String {
 }
 impl From<String> for Vec<u8> { fn from(string: String) -> Vec<u8> { string.vec } }
 impl From<&str> for Vec<u8> { fn from(string: &str) -> Vec<u8> { Vec::from(string.as_bytes()) } }
+
+impl<'a> core::iter::FromIterator<crate::borrow::Cow<'a, str>> for String {
+    fn from_iter<I: IntoIterator<Item = crate::borrow::Cow<'a, str>>>(iter: I) -> String {
+        let mut out = String::new();
+        for piece in iter { out.push_str(&piece); }
+        out
+    }
+}

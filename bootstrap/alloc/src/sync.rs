@@ -381,6 +381,13 @@ impl<T> Default for Arc<[T]> {
     fn default() -> Arc<[T]> { Arc::from(Vec::new()) }
 }
 
+impl<T: Clone> Arc<T> {
+    /// The value without a copy when this is the only strong reference, else a clone of it.
+    pub fn unwrap_or_clone(this: Self) -> T {
+        match Self::try_unwrap(this) { Ok(value) => value, Err(arc) => (*arc).clone() }
+    }
+}
+
 impl<T> Arc<T> {
     /// The value, when this is the only strong reference; otherwise the reference back.
     pub fn try_unwrap(this: Self) -> Result<T, Self> {
@@ -408,5 +415,12 @@ impl<T> Arc<T> {
         let value = unsafe { ptr::read(&(*this.ptr.as_ptr()).value) };
         let _weak = Weak { ptr: this.ptr };
         Some(value)
+    }
+}
+
+impl<T> core::iter::FromIterator<T> for Arc<[T]> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let items: Vec<T> = iter.into_iter().collect();
+        Arc::from(items)
     }
 }

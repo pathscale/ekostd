@@ -199,3 +199,15 @@ impl crate::clone::Clone for Alignment {
 impl Alignment {
     pub const fn as_usize(self) -> usize { self.0 }
 }
+
+/// What `discriminant` returns: comparable, hashable, copyable, and nothing else.
+pub struct Discriminant<T>(<T as crate::intrinsics::DiscriminantKind>::Discriminant);
+impl<T> crate::marker::Copy for Discriminant<T> {}
+impl<T> crate::clone::Clone for Discriminant<T> { fn clone(&self) -> Self { *self } }
+impl<T> crate::cmp::PartialEq for Discriminant<T> { fn eq(&self, rhs: &Self) -> bool { self.0 == rhs.0 } }
+impl<T> crate::cmp::Eq for Discriminant<T> {}
+impl<T> crate::hash::Hash for Discriminant<T> { fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { self.0.hash(state); } }
+impl<T> crate::fmt::Debug for Discriminant<T> {
+    fn fmt(&self, fmt: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { fmt.debug_tuple("Discriminant").field(&self.0).finish() }
+}
+pub const fn discriminant<T>(v: &T) -> Discriminant<T> { Discriminant(crate::intrinsics::discriminant_value(v)) }

@@ -531,6 +531,10 @@ impl<T> Vec<T> {
         removed.into_iter()
     }
 
+    pub fn dedup_by_key<K: PartialEq, F: FnMut(&mut T) -> K>(&mut self, mut key: F) {
+        self.dedup_by(|a, b| key(a) == key(b))
+    }
+
     pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, mut same: F) {
         if self.length < 2 { return; }
         let mut write = 1;

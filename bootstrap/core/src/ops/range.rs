@@ -215,3 +215,11 @@ impl<Idx: crate::cmp::PartialOrd> RangeInclusive<Idx> {
 impl<Idx: crate::default::Default> crate::default::Default for Range<Idx> {
     fn default() -> Self { Range { start: Idx::default(), end: Idx::default() } }
 }
+
+impl<Idx: crate::hash::Hash> crate::hash::Hash for RangeInclusive<Idx> {
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) {
+        self.start.hash(state);
+        self.end.hash(state);
+        self.exhausted.hash(state);
+    }
+}

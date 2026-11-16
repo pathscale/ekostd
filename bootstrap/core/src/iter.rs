@@ -164,12 +164,15 @@ pub trait Iterator {
         FlatMap { iter: self, f, front: None }
     }
     fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Item: IntoIterator {
-        Flatten { iter: self, front: None }
+        Flatten { iter: self, front: None, back: None }
     }
     fn fuse(self) -> Fuse<Self> where Self: Sized { Fuse { iter: Some(self) } }
     fn peekable(self) -> Peekable<Self> where Self: Sized { Peekable { iter: self, peeked: None } }
     fn skip_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> SkipWhile<Self, P> where Self: Sized {
         SkipWhile { iter: self, flag: false, predicate }
+    }
+    fn map_while<B, P: FnMut(Self::Item) -> Option<B>>(self, predicate: P) -> MapWhile<Self, P> where Self: Sized {
+        MapWhile { iter: self, predicate }
     }
     fn take_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> TakeWhile<Self, P> where Self: Sized {
         TakeWhile { iter: self, predicate, done: false }
@@ -607,6 +610,16 @@ macro_rules! impl_step {
 
 impl_step!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 
+impl<A: Step> Iterator for crate::ops::RangeFrom<A> {
+    type Item = A;
+    fn next(&mut self) -> Option<A> {
+        let v = self.start;
+        self.start = Step::forward_one(self.start);
+        Some(v)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { (usize::MAX, None) }
+}
+
 impl<A: Step> Iterator for Range<A> {
     type Item = A;
     #[inline]
@@ -791,6 +804,31 @@ impl<I: Iterator, U: IntoIterator, F: FnMut(I::Item) -> U> Iterator for FlatMap<
 pub struct Flatten<I: Iterator> where I::Item: IntoIterator {
     iter: I,
     front: Option<<I::Item as IntoIterator>::IntoIter>,
+    back: Option<<I::Item as IntoIterator>::IntoIter>,
+}
+impl<I: DoubleEndedIterator> DoubleEndedIterator for Flatten<I>
+where I::Item: IntoIterator, <I::Item as IntoIterator>::IntoIter: DoubleEndedIterator {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(inner) = &mut self.back {
+                if let Some(x) = inner.next_back() { return Some(x); }
+                self.back = None;
+            }
+            match self.iter.next_back() {
+                Some(outer) => self.back = Some(outer.into_iter()),
+                None => {
+                    return match &mut self.front {
+                        Some(inner) => {
+                            let x = inner.next_back();
+                            if x.is_none() { self.front = None; }
+                            x
+                        }
+                        None => None,
+                    };
+                }
+            }
+        }
+    }
 }
 impl<I: Iterator> Iterator for Flatten<I> where I::Item: IntoIterator {
     type Item = <I::Item as IntoIterator>::Item;
@@ -802,7 +840,16 @@ impl<I: Iterator> Iterator for Flatten<I> where I::Item: IntoIterator {
             }
             match self.iter.next() {
                 Some(outer) => self.front = Some(outer.into_iter()),
-                None => return None,
+                None => {
+                    return match &mut self.back {
+                        Some(inner) => {
+                            let x = inner.next();
+                            if x.is_none() { self.back = None; }
+                            x
+                        }
+                        None => None,
+                    };
+                }
             }
         }
     }
@@ -955,4 +1002,15 @@ impl<I: crate::fmt::Debug> crate::fmt::Debug for Fuse<I> {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
         f.debug_struct("Fuse").field("iter", &self.iter).finish()
     }
+}
+
+/// Yields what `predicate` maps to `Some`, and ends at the first `None`.
+pub struct MapWhile<I, P> { iter: I, predicate: P }
+impl<B, I: Iterator, P: FnMut(I::Item) -> Option<B>> Iterator for MapWhile<I, P> {
+    type Item = B;
+    fn next(&mut self) -> Option<B> {
+        let x = self.iter.next()?;
+        (self.predicate)(x)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let (_, upper) = self.iter.size_hint(); (0, upper) }
 }

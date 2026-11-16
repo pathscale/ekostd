@@ -96,3 +96,10 @@ impl<'a, T: Clone + PartialEq<U>, U> PartialEq<crate::vec::Vec<U>> for Cow<'a, [
 impl<'a, T: Clone + PartialEq<U>, U> PartialEq<&[U]> for Cow<'a, [T]> {
     fn eq(&self, other: &&[U]) -> bool { self.as_ref() == *other }
 }
+
+impl<'a, 'b> PartialEq<&'b str> for Cow<'a, str> {
+    fn eq(&self, other: &&'b str) -> bool { **self == **other }
+}
+impl<'a> PartialEq<str> for Cow<'a, str> {
+    fn eq(&self, other: &str) -> bool { **self == *other }
+}

@@ -172,6 +172,35 @@ impl<T: ?Sized> crate::ops::Drop for RefMut<'_, T> {
     fn drop(&mut self) { self.state.set(0); }
 }
 
+/// A cell written at most once.
+pub struct OnceCell<T> { inner: UnsafeCell<Option<T>> }
+impl<T> OnceCell<T> {
+    pub const fn new() -> OnceCell<T> { OnceCell { inner: UnsafeCell::new(None) } }
+    pub fn get(&self) -> Option<&T> {
+        // SAFETY: the value is only ever written while the cell is empty, and no reference to the empty cell is lent out.
+        unsafe { &*self.inner.get() }.as_ref()
+    }
+    pub fn set(&self, value: T) -> Result<(), T> {
+        if self.get().is_some() { return Err(value); }
+        unsafe { *self.inner.get() = Some(value); }
+        Ok(())
+    }
+    /// Initialises with `f` if empty. Panics when `f` itself initialised the cell.
+    pub fn get_or_init<F: FnOnce() -> T>(&self, f: F) -> &T {
+        if let Some(value) = self.get() { return value; }
+        let value = f();
+        if self.get().is_some() { panic!("reentrant init"); }
+        unsafe { *self.inner.get() = Some(value); }
+        match self.get() { Some(value) => value, None => unsafe { crate::hint::unreachable_unchecked() } }
+    }
+}
+impl<T> crate::default::Default for OnceCell<T> { fn default() -> OnceCell<T> { OnceCell::new() } }
+
+impl<T: Clone> Clone for RefCell<T> {
+    /// Panics when the value is mutably borrowed.
+    fn clone(&self) -> RefCell<T> { RefCell::new(self.borrow().clone()) }
+}
+
 impl<T: crate::default::Default> crate::default::Default for RefCell<T> {
     fn default() -> RefCell<T> { RefCell::new(T::default()) }
 }

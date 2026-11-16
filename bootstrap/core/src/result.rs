@@ -193,6 +193,12 @@ impl<T, E> Result<Result<T, E>, E> {
     }
 }
 
+impl<T: crate::ops::Deref, E> Result<T, E> {
+    pub fn as_deref(&self) -> Result<&T::Target, &E> {
+        match self { Ok(t) => Ok(t.deref()), Err(e) => Err(e) }
+    }
+}
+
 impl<T, E> Result<Option<T>, E> {
     /// `Ok(None)` becomes `None`; `Ok(Some(v))` and `Err(e)` become `Some`.
     pub fn transpose(self) -> Option<Result<T, E>> {

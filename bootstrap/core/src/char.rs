@@ -208,3 +208,65 @@ impl char {
         if *self >= 'a' && *self <= 'z' { ((*self as u8) - 32) as char } else { *self }
     }
 }
+
+impl char {
+    /// Rust's definition: ASCII letters, else the `Alphabetic` property.
+    pub fn is_alphabetic(self) -> bool {
+        match self {
+            'a'..='z' | 'A'..='Z' => true,
+            c => c > '\x7f' && crate::unicode::alphabetic::lookup(c),
+        }
+    }
+    fn is_numeric(self) -> bool {
+        match self {
+            '0'..='9' => true,
+            c => c > '\x7f' && crate::unicode::n::lookup(c),
+        }
+    }
+    pub fn is_alphanumeric(self) -> bool { self.is_alphabetic() || self.is_numeric() }
+}
+
+/// The lowercase mapping of one character: one, two or three characters.
+#[derive(Clone, Debug)]
+pub struct ToLowercase { chars: [char; 3], pos: usize, len: usize }
+impl crate::iter::Iterator for ToLowercase {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len { return None; }
+        let c = self.chars[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = self.len - self.pos; (n, Some(n)) }
+}
+impl crate::iter::ExactSizeIterator for ToLowercase {}
+impl crate::fmt::Display for ToLowercase {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut i = self.pos;
+        while i < self.len { f.write_char(self.chars[i])?; i += 1; }
+        Ok(())
+    }
+}
+impl char {
+    /// The Rust table (`unicode_data::conversions::to_lower`). The context-free mapping: no final sigma.
+    pub fn to_lowercase(self) -> ToLowercase {
+        let [a, b, c] = crate::unicode::conversions::to_lower(self);
+        let len = if b == '\0' { 1 } else if c == '\0' { 2 } else { 3 };
+        ToLowercase { chars: [a, b, c], pos: 0, len }
+    }
+    pub fn is_uppercase(self) -> bool {
+        match self {
+            'A'..='Z' => true,
+            c => c > '\x7f' && crate::unicode::uppercase::lookup(c),
+        }
+    }
+    pub const fn is_ascii_hexdigit(&self) -> bool {
+        matches!(*self, '0'..='9' | 'A'..='F' | 'a'..='f')
+    }
+}
+
+impl char {
+    pub const fn to_ascii_lowercase(&self) -> char {
+        if *self >= 'A' && *self <= 'Z' { ((*self as u8) + 32) as char } else { *self }
+    }
+}

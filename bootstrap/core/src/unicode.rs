@@ -2,6 +2,53 @@
 //! Unicode 17.0.0): `Grapheme_Extend`, `Cf`, `Cn` in planes 0 to 3 and `Default_Ignorable_Code_Point`, with the
 //! `skip_search` they share. The compile-time table checks and the `assume` hints are dropped; the tables are untouched.
 
+#[inline(always)]
+fn bitset_search<
+    const N: usize,
+    const CHUNK_SIZE: usize,
+    const N1: usize,
+    const CANONICAL: usize,
+    const CANONICALIZED: usize,
+>(
+    needle: u32,
+    chunk_idx_map: &[u8; N],
+    bitset_chunk_idx: &[[u8; CHUNK_SIZE]; N1],
+    bitset_canonical: &[u64; CANONICAL],
+    bitset_canonicalized: &[(u8, u8); CANONICALIZED],
+) -> bool {
+    let bucket_idx = (needle / 64) as usize;
+    let chunk_map_idx = bucket_idx / CHUNK_SIZE;
+    let chunk_piece = bucket_idx % CHUNK_SIZE;
+    // FIXME(const-hack): Revert to `slice::get` when slice indexing becomes possible in const.
+    let chunk_idx = if chunk_map_idx < chunk_idx_map.len() {
+        chunk_idx_map[chunk_map_idx]
+    } else {
+        return false;
+    };
+    let idx = bitset_chunk_idx[chunk_idx as usize][chunk_piece] as usize;
+    // FIXME(const-hack): Revert to `slice::get` when slice indexing becomes possible in const.
+    let word = if idx < bitset_canonical.len() {
+        bitset_canonical[idx]
+    } else {
+        let (real_idx, mapping) = bitset_canonicalized[idx - bitset_canonical.len()];
+        let mut word = bitset_canonical[real_idx as usize];
+        let should_invert = mapping & (1 << 6) != 0;
+        if should_invert {
+            word = !word;
+        }
+        // Lower 6 bits
+        let quantity = mapping & ((1 << 6) - 1);
+        if mapping & (1 << 7) != 0 {
+            // shift
+            word >>= quantity as u64;
+        } else {
+            word = word.rotate_left(quantity as u32);
+        }
+        word
+    };
+    (word & (1 << (needle % 64) as u64)) != 0
+}
+
 #[repr(transparent)]
 struct ShortOffsetRunHeader(u32);
 
@@ -395,6 +442,15 @@ pub mod conversions {
         None
     }
 
+    pub fn to_lower(c: char) -> [char; 3] {
+        // https://util.unicode.org/UnicodeJsps/list-unicodeset.jsp?a=[:Changes_When_Lowercased:]-[:ASCII:]&abb=on
+        if c < '\u{C0}' {
+            return [c.to_ascii_lowercase(), '\0', '\0'];
+        }
+
+        lookup(c, &LOWERCASE_LUT).unwrap_or([c, '\0', '\0'])
+    }
+
     pub fn to_upper(c: char) -> [char; 3] {
         // https://util.unicode.org/UnicodeJsps/list-unicodeset.jsp?a=[:Changes_When_Uppercased:]-[:ASCII:]&abb=on
         if c < '\u{B5}' {
@@ -571,4 +627,360 @@ pub mod conversions {
             },
         ],
     };
+
+    static LOWERCASE_LUT: L1Lut = L1Lut {
+        l2_luts: [
+            L2Lut {
+                singles: &[ // 172 entries, 1032 bytes
+                    (Range::step_by_1(0x00c0..=0x00d6), 32), (Range::step_by_1(0x00d8..=0x00de), 32),
+                    (Range::step_by_2(0x0100..=0x012e), 1), (Range::step_by_2(0x0132..=0x0136), 1),
+                    (Range::step_by_2(0x0139..=0x0147), 1), (Range::step_by_2(0x014a..=0x0176), 1),
+                    (Range::singleton(0x0178), -121), (Range::step_by_2(0x0179..=0x017d), 1),
+                    (Range::singleton(0x0181), 210), (Range::step_by_2(0x0182..=0x0184), 1),
+                    (Range::singleton(0x0186), 206), (Range::singleton(0x0187), 1),
+                    (Range::step_by_1(0x0189..=0x018a), 205), (Range::singleton(0x018b), 1),
+                    (Range::singleton(0x018e), 79), (Range::singleton(0x018f), 202),
+                    (Range::singleton(0x0190), 203), (Range::singleton(0x0191), 1),
+                    (Range::singleton(0x0193), 205), (Range::singleton(0x0194), 207),
+                    (Range::singleton(0x0196), 211), (Range::singleton(0x0197), 209),
+                    (Range::singleton(0x0198), 1), (Range::singleton(0x019c), 211),
+                    (Range::singleton(0x019d), 213), (Range::singleton(0x019f), 214),
+                    (Range::step_by_2(0x01a0..=0x01a4), 1), (Range::singleton(0x01a6), 218),
+                    (Range::singleton(0x01a7), 1), (Range::singleton(0x01a9), 218),
+                    (Range::singleton(0x01ac), 1), (Range::singleton(0x01ae), 218),
+                    (Range::singleton(0x01af), 1), (Range::step_by_1(0x01b1..=0x01b2), 217),
+                    (Range::step_by_2(0x01b3..=0x01b5), 1), (Range::singleton(0x01b7), 219),
+                    (Range::singleton(0x01b8), 1), (Range::singleton(0x01bc), 1), (Range::singleton(0x01c4), 2),
+                    (Range::singleton(0x01c5), 1), (Range::singleton(0x01c7), 2), (Range::singleton(0x01c8), 1),
+                    (Range::singleton(0x01ca), 2), (Range::step_by_2(0x01cb..=0x01db), 1),
+                    (Range::step_by_2(0x01de..=0x01ee), 1), (Range::singleton(0x01f1), 2),
+                    (Range::step_by_2(0x01f2..=0x01f4), 1), (Range::singleton(0x01f6), -97),
+                    (Range::singleton(0x01f7), -56), (Range::step_by_2(0x01f8..=0x021e), 1),
+                    (Range::singleton(0x0220), -130), (Range::step_by_2(0x0222..=0x0232), 1),
+                    (Range::singleton(0x023a), 10795), (Range::singleton(0x023b), 1),
+                    (Range::singleton(0x023d), -163), (Range::singleton(0x023e), 10792),
+                    (Range::singleton(0x0241), 1), (Range::singleton(0x0243), -195),
+                    (Range::singleton(0x0244), 69), (Range::singleton(0x0245), 71),
+                    (Range::step_by_2(0x0246..=0x024e), 1), (Range::step_by_2(0x0370..=0x0372), 1),
+                    (Range::singleton(0x0376), 1), (Range::singleton(0x037f), 116),
+                    (Range::singleton(0x0386), 38), (Range::step_by_1(0x0388..=0x038a), 37),
+                    (Range::singleton(0x038c), 64), (Range::step_by_1(0x038e..=0x038f), 63),
+                    (Range::step_by_1(0x0391..=0x03a1), 32), (Range::step_by_1(0x03a3..=0x03ab), 32),
+                    (Range::singleton(0x03cf), 8), (Range::step_by_2(0x03d8..=0x03ee), 1),
+                    (Range::singleton(0x03f4), -60), (Range::singleton(0x03f7), 1),
+                    (Range::singleton(0x03f9), -7), (Range::singleton(0x03fa), 1),
+                    (Range::step_by_1(0x03fd..=0x03ff), -130), (Range::step_by_1(0x0400..=0x040f), 80),
+                    (Range::step_by_1(0x0410..=0x042f), 32), (Range::step_by_2(0x0460..=0x0480), 1),
+                    (Range::step_by_2(0x048a..=0x04be), 1), (Range::singleton(0x04c0), 15),
+                    (Range::step_by_2(0x04c1..=0x04cd), 1), (Range::step_by_2(0x04d0..=0x052e), 1),
+                    (Range::step_by_1(0x0531..=0x0556), 48), (Range::step_by_1(0x10a0..=0x10c5), 7264),
+                    (Range::singleton(0x10c7), 7264), (Range::singleton(0x10cd), 7264),
+                    (Range::step_by_1(0x13a0..=0x13ef), -26672), (Range::step_by_1(0x13f0..=0x13f5), 8),
+                    (Range::singleton(0x1c89), 1), (Range::step_by_1(0x1c90..=0x1cba), -3008),
+                    (Range::step_by_1(0x1cbd..=0x1cbf), -3008), (Range::step_by_2(0x1e00..=0x1e94), 1),
+                    (Range::singleton(0x1e9e), -7615), (Range::step_by_2(0x1ea0..=0x1efe), 1),
+                    (Range::step_by_1(0x1f08..=0x1f0f), -8), (Range::step_by_1(0x1f18..=0x1f1d), -8),
+                    (Range::step_by_1(0x1f28..=0x1f2f), -8), (Range::step_by_1(0x1f38..=0x1f3f), -8),
+                    (Range::step_by_1(0x1f48..=0x1f4d), -8), (Range::step_by_2(0x1f59..=0x1f5f), -8),
+                    (Range::step_by_1(0x1f68..=0x1f6f), -8), (Range::step_by_1(0x1f88..=0x1f8f), -8),
+                    (Range::step_by_1(0x1f98..=0x1f9f), -8), (Range::step_by_1(0x1fa8..=0x1faf), -8),
+                    (Range::step_by_1(0x1fb8..=0x1fb9), -8), (Range::step_by_1(0x1fba..=0x1fbb), -74),
+                    (Range::singleton(0x1fbc), -9), (Range::step_by_1(0x1fc8..=0x1fcb), -86),
+                    (Range::singleton(0x1fcc), -9), (Range::step_by_1(0x1fd8..=0x1fd9), -8),
+                    (Range::step_by_1(0x1fda..=0x1fdb), -100), (Range::step_by_1(0x1fe8..=0x1fe9), -8),
+                    (Range::step_by_1(0x1fea..=0x1feb), -112), (Range::singleton(0x1fec), -7),
+                    (Range::step_by_1(0x1ff8..=0x1ff9), -128), (Range::step_by_1(0x1ffa..=0x1ffb), -126),
+                    (Range::singleton(0x1ffc), -9), (Range::singleton(0x2126), -7517),
+                    (Range::singleton(0x212a), -8383), (Range::singleton(0x212b), -8262),
+                    (Range::singleton(0x2132), 28), (Range::step_by_1(0x2160..=0x216f), 16),
+                    (Range::singleton(0x2183), 1), (Range::step_by_1(0x24b6..=0x24cf), 26),
+                    (Range::step_by_1(0x2c00..=0x2c2f), 48), (Range::singleton(0x2c60), 1),
+                    (Range::singleton(0x2c62), -10743), (Range::singleton(0x2c63), -3814),
+                    (Range::singleton(0x2c64), -10727), (Range::step_by_2(0x2c67..=0x2c6b), 1),
+                    (Range::singleton(0x2c6d), -10780), (Range::singleton(0x2c6e), -10749),
+                    (Range::singleton(0x2c6f), -10783), (Range::singleton(0x2c70), -10782),
+                    (Range::singleton(0x2c72), 1), (Range::singleton(0x2c75), 1),
+                    (Range::step_by_1(0x2c7e..=0x2c7f), -10815), (Range::step_by_2(0x2c80..=0x2ce2), 1),
+                    (Range::step_by_2(0x2ceb..=0x2ced), 1), (Range::singleton(0x2cf2), 1),
+                    (Range::step_by_2(0xa640..=0xa66c), 1), (Range::step_by_2(0xa680..=0xa69a), 1),
+                    (Range::step_by_2(0xa722..=0xa72e), 1), (Range::step_by_2(0xa732..=0xa76e), 1),
+                    (Range::step_by_2(0xa779..=0xa77b), 1), (Range::singleton(0xa77d), 30204),
+                    (Range::step_by_2(0xa77e..=0xa786), 1), (Range::singleton(0xa78b), 1),
+                    (Range::singleton(0xa78d), 23256), (Range::step_by_2(0xa790..=0xa792), 1),
+                    (Range::step_by_2(0xa796..=0xa7a8), 1), (Range::singleton(0xa7aa), 23228),
+                    (Range::singleton(0xa7ab), 23217), (Range::singleton(0xa7ac), 23221),
+                    (Range::singleton(0xa7ad), 23231), (Range::singleton(0xa7ae), 23228),
+                    (Range::singleton(0xa7b0), 23278), (Range::singleton(0xa7b1), 23254),
+                    (Range::singleton(0xa7b2), 23275), (Range::singleton(0xa7b3), 928),
+                    (Range::step_by_2(0xa7b4..=0xa7c2), 1), (Range::singleton(0xa7c4), -48),
+                    (Range::singleton(0xa7c5), 23229), (Range::singleton(0xa7c6), 30152),
+                    (Range::step_by_2(0xa7c7..=0xa7c9), 1), (Range::singleton(0xa7cb), 23193),
+                    (Range::step_by_2(0xa7cc..=0xa7da), 1), (Range::singleton(0xa7dc), 22975),
+                    (Range::singleton(0xa7f5), 1), (Range::step_by_1(0xff21..=0xff3a), 32),
+                ],
+                multis: &[ // 1 entries, 8 bytes
+                    (0x0130, [0x0069, 0x0307, 0x0000]),
+                ],
+            },
+            L2Lut {
+                singles: &[ // 12 entries, 72 bytes
+                    (Range::step_by_1(0x0400..=0x0427), 40), (Range::step_by_1(0x04b0..=0x04d3), 40),
+                    (Range::step_by_1(0x0570..=0x057a), 39), (Range::step_by_1(0x057c..=0x058a), 39),
+                    (Range::step_by_1(0x058c..=0x0592), 39), (Range::step_by_1(0x0594..=0x0595), 39),
+                    (Range::step_by_1(0x0c80..=0x0cb2), 64), (Range::step_by_1(0x0d50..=0x0d65), 32),
+                    (Range::step_by_1(0x18a0..=0x18bf), 32), (Range::step_by_1(0x6e40..=0x6e5f), 32),
+                    (Range::step_by_1(0x6ea0..=0x6eb8), 27), (Range::step_by_1(0xe900..=0xe921), 34),
+                ],
+                multis: &[ // 0 entries, 0 bytes
+                ],
+            },
+        ],
+    };
 }
+
+pub mod alphabetic {
+    use super::ShortOffsetRunHeader;
+
+    static SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; 51] = [
+        ShortOffsetRunHeader::new(0, 706), ShortOffsetRunHeader::new(12, 4681),
+        ShortOffsetRunHeader::new(414, 5741), ShortOffsetRunHeader::new(452, 7958),
+        ShortOffsetRunHeader::new(552, 9398), ShortOffsetRunHeader::new(623, 11264),
+        ShortOffsetRunHeader::new(625, 12293), ShortOffsetRunHeader::new(663, 13312),
+        ShortOffsetRunHeader::new(687, 19904), ShortOffsetRunHeader::new(688, 42125),
+        ShortOffsetRunHeader::new(690, 42509), ShortOffsetRunHeader::new(694, 55204),
+        ShortOffsetRunHeader::new(778, 63744), ShortOffsetRunHeader::new(783, 64110),
+        ShortOffsetRunHeader::new(784, 64830), ShortOffsetRunHeader::new(806, 66176),
+        ShortOffsetRunHeader::new(847, 67383), ShortOffsetRunHeader::new(894, 73440),
+        ShortOffsetRunHeader::new(1217, 74650), ShortOffsetRunHeader::new(1228, 77712),
+        ShortOffsetRunHeader::new(1233, 78896), ShortOffsetRunHeader::new(1236, 82939),
+        ShortOffsetRunHeader::new(1240, 83527), ShortOffsetRunHeader::new(1242, 90368),
+        ShortOffsetRunHeader::new(1243, 92160), ShortOffsetRunHeader::new(1245, 92729),
+        ShortOffsetRunHeader::new(1246, 93504), ShortOffsetRunHeader::new(1261, 101590),
+        ShortOffsetRunHeader::new(1282, 110576), ShortOffsetRunHeader::new(1287, 110883),
+        ShortOffsetRunHeader::new(1294, 111356), ShortOffsetRunHeader::new(1304, 113664),
+        ShortOffsetRunHeader::new(1305, 119808), ShortOffsetRunHeader::new(1315, 120486),
+        ShortOffsetRunHeader::new(1352, 122624), ShortOffsetRunHeader::new(1375, 123536),
+        ShortOffsetRunHeader::new(1399, 124112), ShortOffsetRunHeader::new(1403, 126464),
+        ShortOffsetRunHeader::new(1431, 127280), ShortOffsetRunHeader::new(1497, 131072),
+        ShortOffsetRunHeader::new(1503, 173792), ShortOffsetRunHeader::new(1504, 178206),
+        ShortOffsetRunHeader::new(1506, 183982), ShortOffsetRunHeader::new(1508, 191457),
+        ShortOffsetRunHeader::new(1510, 192094), ShortOffsetRunHeader::new(1512, 194560),
+        ShortOffsetRunHeader::new(1513, 195102), ShortOffsetRunHeader::new(1514, 196608),
+        ShortOffsetRunHeader::new(1515, 201547), ShortOffsetRunHeader::new(1516, 210042),
+        ShortOffsetRunHeader::new(1518, 1324154),
+    ];
+    static OFFSETS: [u8; 1519] = [
+        170, 1, 10, 1, 4, 1, 5, 23, 1, 31, 1, 0, 4, 12, 14, 5, 7, 1, 1, 1, 86, 1, 29, 18, 1, 2, 2,
+        4, 1, 1, 6, 1, 1, 3, 1, 1, 1, 20, 1, 83, 1, 139, 8, 166, 1, 38, 2, 1, 6, 41, 39, 14, 1, 1,
+        1, 2, 1, 2, 1, 1, 8, 27, 4, 4, 29, 11, 5, 56, 1, 7, 14, 102, 1, 8, 4, 8, 4, 3, 10, 3, 2, 1,
+        16, 48, 13, 101, 24, 33, 9, 2, 4, 1, 5, 24, 2, 19, 19, 25, 7, 11, 5, 24, 1, 7, 7, 1, 8, 42,
+        10, 12, 3, 7, 6, 76, 1, 16, 1, 3, 4, 15, 13, 19, 1, 8, 2, 2, 2, 22, 1, 7, 1, 1, 3, 4, 3, 8,
+        2, 2, 2, 2, 1, 1, 8, 1, 4, 2, 1, 5, 12, 2, 10, 1, 4, 3, 1, 6, 4, 2, 2, 22, 1, 7, 1, 2, 1, 2,
+        1, 2, 4, 5, 4, 2, 2, 2, 4, 1, 7, 4, 1, 1, 17, 6, 11, 3, 1, 9, 1, 3, 1, 22, 1, 7, 1, 2, 1, 5,
+        3, 9, 1, 3, 1, 2, 3, 1, 15, 4, 21, 4, 4, 3, 1, 8, 2, 2, 2, 22, 1, 7, 1, 2, 1, 5, 3, 8, 2, 2,
+        2, 2, 9, 2, 4, 2, 1, 5, 13, 1, 16, 2, 1, 6, 3, 3, 1, 4, 3, 2, 1, 1, 1, 2, 3, 2, 3, 3, 3, 12,
+        4, 5, 3, 3, 1, 3, 3, 1, 6, 1, 40, 13, 1, 3, 1, 23, 1, 16, 3, 8, 1, 3, 1, 3, 8, 2, 1, 3, 1,
+        2, 2, 4, 28, 4, 1, 8, 1, 3, 1, 23, 1, 10, 1, 5, 3, 8, 1, 3, 1, 3, 8, 2, 5, 3, 1, 4, 13, 3,
+        12, 13, 1, 3, 1, 41, 2, 8, 1, 3, 1, 3, 1, 1, 5, 4, 7, 5, 22, 6, 1, 3, 1, 18, 3, 24, 1, 9, 1,
+        1, 2, 7, 8, 6, 1, 1, 1, 8, 18, 2, 13, 58, 5, 7, 6, 1, 51, 2, 1, 1, 1, 5, 1, 24, 1, 1, 1, 19,
+        1, 3, 2, 5, 1, 1, 6, 1, 14, 4, 32, 1, 63, 8, 1, 36, 4, 19, 4, 16, 1, 36, 67, 55, 1, 1, 2, 5,
+        16, 64, 10, 4, 2, 38, 1, 1, 5, 1, 2, 43, 1, 0, 1, 4, 2, 7, 1, 1, 1, 4, 2, 41, 1, 4, 2, 33,
+        1, 4, 2, 7, 1, 1, 1, 4, 2, 15, 1, 57, 1, 4, 2, 67, 37, 16, 16, 86, 2, 6, 3, 0, 2, 17, 1, 26,
+        5, 75, 3, 11, 7, 20, 11, 21, 12, 20, 12, 13, 1, 3, 1, 2, 12, 52, 2, 19, 14, 1, 4, 1, 67, 89,
+        7, 43, 5, 70, 10, 31, 1, 12, 4, 9, 23, 30, 2, 5, 11, 44, 4, 26, 54, 28, 4, 63, 2, 20, 50, 1,
+        23, 2, 11, 3, 49, 52, 1, 15, 1, 8, 51, 42, 2, 4, 10, 44, 1, 11, 14, 55, 22, 3, 10, 36, 2,
+        11, 5, 43, 2, 3, 41, 4, 1, 6, 1, 2, 3, 1, 5, 192, 19, 34, 11, 0, 2, 6, 2, 38, 2, 6, 2, 8, 1,
+        1, 1, 1, 1, 1, 1, 31, 2, 53, 1, 7, 1, 1, 3, 3, 1, 7, 3, 4, 2, 6, 4, 13, 5, 3, 1, 7, 116, 1,
+        13, 1, 16, 13, 101, 1, 4, 1, 2, 10, 1, 1, 3, 5, 6, 1, 1, 1, 1, 1, 1, 4, 1, 11, 2, 4, 5, 5,
+        4, 1, 17, 41, 0, 52, 0, 229, 6, 4, 3, 2, 12, 38, 1, 1, 5, 1, 2, 56, 7, 1, 16, 23, 9, 7, 1,
+        7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 7, 1, 32, 47, 1, 0, 3, 25, 9, 7, 5, 2, 5, 4, 86, 6, 3,
+        1, 90, 1, 4, 5, 43, 1, 94, 17, 32, 48, 16, 0, 0, 64, 0, 67, 46, 2, 0, 3, 16, 10, 2, 20, 47,
+        5, 8, 3, 113, 39, 9, 2, 103, 2, 82, 20, 21, 1, 33, 24, 52, 12, 68, 1, 1, 44, 6, 3, 1, 1, 3,
+        10, 33, 5, 35, 13, 29, 3, 51, 1, 12, 15, 1, 16, 16, 10, 5, 1, 55, 9, 14, 18, 23, 3, 69, 1,
+        1, 1, 1, 24, 3, 2, 16, 2, 4, 11, 6, 2, 6, 2, 6, 9, 7, 1, 7, 1, 43, 1, 14, 6, 123, 21, 0, 12,
+        23, 4, 49, 0, 0, 2, 106, 38, 7, 12, 5, 5, 12, 1, 13, 1, 5, 1, 1, 1, 2, 1, 2, 1, 108, 33, 0,
+        18, 64, 2, 54, 40, 12, 116, 5, 1, 135, 36, 26, 6, 26, 11, 89, 3, 6, 2, 6, 2, 6, 2, 3, 35,
+        12, 1, 26, 1, 19, 1, 2, 1, 15, 2, 14, 34, 123, 69, 53, 0, 29, 3, 49, 47, 32, 13, 30, 5, 43,
+        5, 30, 2, 36, 4, 8, 1, 5, 42, 158, 18, 36, 4, 36, 4, 40, 8, 52, 12, 11, 1, 15, 1, 7, 1, 2,
+        1, 11, 1, 15, 1, 7, 1, 2, 3, 52, 12, 0, 9, 22, 10, 8, 24, 6, 1, 42, 1, 9, 69, 6, 2, 1, 1,
+        44, 1, 2, 3, 1, 2, 23, 10, 23, 9, 31, 65, 19, 1, 2, 10, 22, 10, 26, 6, 26, 38, 56, 6, 2, 64,
+        4, 1, 2, 5, 8, 1, 3, 1, 29, 42, 29, 3, 29, 35, 8, 1, 28, 27, 54, 10, 22, 10, 19, 13, 18,
+        110, 73, 55, 51, 13, 51, 13, 40, 34, 28, 3, 1, 5, 23, 250, 42, 1, 2, 3, 2, 16, 6, 50, 3, 3,
+        29, 10, 1, 8, 22, 42, 18, 46, 21, 27, 23, 9, 70, 43, 5, 10, 57, 9, 1, 13, 25, 23, 51, 17, 4,
+        8, 35, 3, 1, 9, 64, 1, 4, 9, 2, 10, 1, 1, 1, 35, 18, 1, 34, 2, 1, 6, 4, 62, 7, 1, 1, 1, 4,
+        1, 15, 1, 10, 7, 57, 23, 4, 1, 8, 2, 2, 2, 22, 1, 7, 1, 2, 1, 5, 3, 8, 2, 2, 2, 2, 3, 1, 6,
+        1, 5, 7, 28, 10, 1, 1, 2, 1, 1, 38, 1, 10, 1, 1, 2, 1, 1, 4, 1, 2, 3, 1, 1, 1, 44, 66, 1, 3,
+        1, 4, 20, 3, 30, 66, 2, 2, 1, 1, 184, 54, 2, 7, 25, 6, 34, 63, 1, 1, 3, 1, 59, 54, 2, 1, 71,
+        27, 2, 14, 21, 7, 185, 57, 103, 64, 31, 8, 2, 1, 2, 8, 1, 2, 1, 30, 1, 2, 2, 2, 2, 4, 93, 8,
+        2, 46, 2, 6, 1, 1, 1, 2, 27, 51, 2, 10, 17, 72, 5, 1, 18, 73, 103, 8, 88, 33, 31, 9, 1, 45,
+        1, 7, 1, 1, 49, 30, 2, 22, 1, 14, 73, 7, 1, 2, 1, 44, 3, 1, 1, 2, 1, 3, 1, 1, 2, 2, 24, 6,
+        1, 2, 1, 37, 1, 2, 1, 4, 1, 1, 23, 44, 0, 23, 9, 17, 1, 41, 3, 3, 111, 1, 79, 0, 102, 111,
+        17, 196, 0, 97, 15, 0, 17, 6, 25, 0, 5, 0, 0, 47, 0, 0, 7, 31, 17, 79, 17, 30, 18, 48, 16,
+        4, 31, 21, 5, 19, 0, 45, 211, 64, 32, 25, 2, 25, 44, 75, 4, 57, 7, 17, 64, 2, 1, 1, 12, 7,
+        9, 0, 41, 32, 97, 115, 0, 4, 1, 7, 1, 2, 1, 0, 15, 1, 29, 3, 2, 1, 14, 4, 8, 0, 0, 107, 5,
+        13, 3, 9, 7, 10, 4, 1, 0, 85, 1, 71, 1, 2, 2, 1, 2, 2, 2, 4, 1, 12, 1, 1, 1, 7, 1, 65, 1, 4,
+        2, 8, 1, 7, 1, 28, 1, 4, 1, 5, 1, 1, 3, 7, 1, 0, 2, 25, 1, 25, 1, 31, 1, 25, 1, 31, 1, 25,
+        1, 31, 1, 25, 1, 31, 1, 25, 1, 8, 0, 31, 6, 6, 213, 7, 1, 17, 2, 7, 1, 2, 1, 5, 5, 62, 33,
+        1, 112, 45, 10, 7, 16, 1, 0, 30, 18, 44, 0, 28, 228, 30, 2, 1, 207, 31, 1, 22, 8, 2, 224, 7,
+        1, 4, 1, 2, 1, 15, 1, 197, 59, 68, 3, 1, 3, 1, 0, 4, 1, 27, 1, 2, 1, 1, 2, 1, 1, 10, 1, 4,
+        1, 1, 1, 1, 6, 1, 4, 1, 1, 1, 1, 1, 1, 3, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1,
+        1, 2, 4, 1, 7, 1, 4, 1, 4, 1, 1, 1, 10, 1, 17, 5, 3, 1, 5, 1, 17, 0, 26, 6, 26, 6, 26, 0, 0,
+        32, 0, 2, 0, 2, 0, 15, 0, 0, 0, 0, 0, 5, 0, 0,
+    ];
+    #[inline]
+    pub fn lookup(c: char) -> bool {
+        debug_assert!(!c.is_ascii());
+        (c as u32) >= 0xaa && lookup_slow(c)
+    }
+
+    #[inline(never)]
+    fn lookup_slow(c: char) -> bool {
+        unsafe { super::skip_search(c, &SHORT_OFFSET_RUNS, &OFFSETS) }
+    }
+}
+
+pub mod n {
+    use super::ShortOffsetRunHeader;
+
+    static SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; 43] = [
+        ShortOffsetRunHeader::new(0, 1632), ShortOffsetRunHeader::new(7, 2406),
+        ShortOffsetRunHeader::new(13, 4160), ShortOffsetRunHeader::new(47, 4969),
+        ShortOffsetRunHeader::new(51, 5870), ShortOffsetRunHeader::new(53, 6470),
+        ShortOffsetRunHeader::new(61, 8304), ShortOffsetRunHeader::new(77, 9312),
+        ShortOffsetRunHeader::new(87, 10102), ShortOffsetRunHeader::new(91, 11517),
+        ShortOffsetRunHeader::new(93, 12295), ShortOffsetRunHeader::new(95, 12690),
+        ShortOffsetRunHeader::new(101, 42528), ShortOffsetRunHeader::new(113, 43056),
+        ShortOffsetRunHeader::new(117, 44016), ShortOffsetRunHeader::new(129, 65296),
+        ShortOffsetRunHeader::new(131, 65799), ShortOffsetRunHeader::new(133, 66273),
+        ShortOffsetRunHeader::new(139, 67672), ShortOffsetRunHeader::new(151, 68858),
+        ShortOffsetRunHeader::new(181, 69216), ShortOffsetRunHeader::new(187, 70736),
+        ShortOffsetRunHeader::new(207, 71248), ShortOffsetRunHeader::new(211, 71904),
+        ShortOffsetRunHeader::new(219, 72688), ShortOffsetRunHeader::new(223, 73552),
+        ShortOffsetRunHeader::new(233, 74752), ShortOffsetRunHeader::new(237, 90416),
+        ShortOffsetRunHeader::new(239, 92768), ShortOffsetRunHeader::new(241, 93552),
+        ShortOffsetRunHeader::new(249, 93824), ShortOffsetRunHeader::new(251, 94196),
+        ShortOffsetRunHeader::new(253, 118000), ShortOffsetRunHeader::new(255, 119488),
+        ShortOffsetRunHeader::new(257, 120782), ShortOffsetRunHeader::new(263, 123200),
+        ShortOffsetRunHeader::new(265, 123632), ShortOffsetRunHeader::new(267, 124144),
+        ShortOffsetRunHeader::new(269, 125127), ShortOffsetRunHeader::new(273, 126065),
+        ShortOffsetRunHeader::new(277, 127232), ShortOffsetRunHeader::new(287, 130032),
+        ShortOffsetRunHeader::new(289, 1244154),
+    ];
+    static OFFSETS: [u8; 291] = [
+        178, 2, 5, 1, 2, 3, 0, 10, 134, 10, 198, 10, 0, 10, 118, 10, 4, 6, 108, 10, 118, 10, 118,
+        10, 2, 6, 110, 13, 115, 10, 8, 7, 103, 10, 104, 7, 7, 19, 109, 10, 96, 10, 118, 10, 70, 20,
+        0, 10, 70, 10, 0, 20, 0, 3, 239, 10, 6, 10, 22, 10, 0, 10, 128, 11, 165, 10, 6, 10, 182, 10,
+        86, 10, 134, 10, 6, 10, 0, 1, 3, 6, 6, 10, 198, 51, 2, 5, 0, 60, 78, 22, 0, 30, 0, 1, 0, 1,
+        25, 9, 14, 3, 0, 4, 138, 10, 30, 8, 1, 15, 32, 10, 39, 15, 0, 10, 188, 10, 0, 6, 154, 10,
+        38, 10, 198, 10, 22, 10, 86, 10, 0, 10, 0, 10, 0, 45, 12, 57, 17, 2, 0, 27, 36, 4, 29, 1, 8,
+        1, 134, 5, 202, 10, 0, 8, 25, 7, 39, 9, 75, 5, 22, 6, 160, 2, 2, 16, 2, 46, 64, 9, 52, 2,
+        30, 3, 75, 5, 104, 8, 24, 8, 41, 7, 0, 6, 48, 10, 6, 10, 0, 31, 158, 10, 42, 4, 112, 7, 134,
+        30, 128, 10, 60, 10, 144, 10, 7, 20, 251, 10, 0, 10, 118, 10, 0, 10, 102, 10, 6, 20, 76, 12,
+        0, 19, 93, 10, 0, 10, 86, 29, 227, 10, 70, 10, 54, 10, 0, 10, 102, 21, 0, 111, 0, 10, 0, 10,
+        86, 10, 134, 10, 1, 7, 0, 10, 0, 23, 0, 3, 0, 10, 0, 20, 12, 20, 108, 25, 0, 50, 0, 10, 0,
+        10, 0, 10, 247, 10, 0, 9, 128, 10, 0, 59, 1, 3, 1, 4, 76, 45, 1, 15, 0, 13, 0, 10, 0,
+    ];
+    #[inline]
+    pub fn lookup(c: char) -> bool {
+        debug_assert!(!c.is_ascii());
+        (c as u32) >= 0xb2 && lookup_slow(c)
+    }
+
+    #[inline(never)]
+    fn lookup_slow(c: char) -> bool {
+        unsafe { super::skip_search(c, &SHORT_OFFSET_RUNS, &OFFSETS) }
+    }
+}
+
+pub mod uppercase {
+    static BITSET_CHUNKS_MAP: [u8; 125] = [
+        3, 14, 6, 6, 0, 6, 6, 2, 5, 12, 6, 15, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 9, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 6, 6, 7, 6, 13, 6, 11, 6, 6, 1, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
+        6, 8, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 16, 6, 6,
+        6, 6, 10, 6, 4,
+    ];
+    static BITSET_INDEX_CHUNKS: [[u8; 16]; 17] = [
+        [44, 44, 5, 35, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 5, 0],
+        [44, 44, 5, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 40, 44, 44, 44, 44, 44, 17, 17, 66, 17, 43, 29, 24, 23],
+        [44, 44, 44, 32, 36, 21, 22, 15, 13, 34, 44, 44, 44, 11, 30, 39],
+        [44, 44, 44, 44, 9, 8, 45, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 44, 44, 37, 28, 67, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 57, 44, 44, 44],
+        [44, 44, 44, 44, 44, 44, 44, 44, 44, 49, 63, 44, 44, 44, 44, 44],
+        [44, 44, 44, 44, 44, 44, 44, 44, 44, 65, 64, 44, 20, 14, 16, 4],
+        [44, 44, 44, 44, 50, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 53, 44, 44, 31, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [44, 44, 54, 46, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [51, 44, 9, 47, 44, 42, 33, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [52, 19, 3, 18, 10, 48, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [52, 38, 17, 27, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
+        [58, 1, 26, 55, 12, 7, 25, 56, 41, 59, 6, 2, 62, 61, 60, 68],
+    ];
+    static BITSET_CANONICAL: [u64; 44] = [
+        0b0000000000111111111111111111111111111111111111111111111111111111,
+        0b1111111111111111111111110000000000000000000000000011111111111111,
+        0b0000011111111111111111111111110000000000000000000000000000000001,
+        0b0101010101010101010101010101010101010101010101010101010000000001,
+        0b0000000000100000000000000000000000010101010101010101101011110101,
+        0b1111111111111111111111111111111100000000000000000000000000000000,
+        0b1111111111111111111111110000000000000000000000000000001111111111,
+        0b1111111111111111111100000000000000000000000000011111110001011111,
+        0b1111111111111111000000111111111111111111111111110000001111111111,
+        0b1111111111111111000000000000000000000000000000000000000000000000,
+        0b1111111111111110010101010101010101010101010101010101010101010101,
+        0b1000000001000101000000000000000000000000000000000000000000000000,
+        0b0111101100000000000000000000000000011111110111111110011110110000,
+        0b0110110000000101010101010101010101010101010101010101010101010101,
+        0b0110101000000000010101010101010101010101010101010101010101010101,
+        0b0101010111010010010101010101010101001010101010101010010010010000,
+        0b0101010101011111011111010101010101010101010001010010100001010101,
+        0b0101010101010101010101010101010101010101010101010101010101010101,
+        0b0101010101010101010101010101010101010101010101010010101010101011,
+        0b0101010101010101010101010101010100000000000000000000000000000000,
+        0b0101010101010100010101010101010000000000000000000000000000000000,
+        0b0010101101010101010101010101010101010101010101010101010010101010,
+        0b0001000110101110110100101101010110110001110110111100111011010110,
+        0b0000111100000000000111110000000000001111000000000000111100000000,
+        0b0000111100000000000000000000000000000000000000000000000000000000,
+        0b0000001111111111111111111111111100000000000000000000000000111111,
+        0b0000000000111111110111100110010011010000000000000000000000000011,
+        0b0000000000000100001010000000010101010101010101010101010101010101,
+        0b0000000000000000111111111111111100000000000000000000000000100000,
+        0b0000000000000000111111110000000010101010000000000011111100000000,
+        0b0000000000000000000011111111101111111111111111101101011101000000,
+        0b0000000000000000000000000011111111111111111111110000000000000000,
+        0b0000000000000000000000000000000001111111011111111111111111111111,
+        0b0000000000000000000000000000000000000000001101111111011111111111,
+        0b0000000000000000000000000000000000000000000000000101010101111010,
+        0b0000000000000000000000000000000000000000000000000010000010111111,
+        0b1010101001010101010101010101010101010101010101010101010101010101,
+        0b1100000000001111001111010101000000111110001001110011100010000100,
+        0b1100000000100101111010101001110100000000000000000000000000000000,
+        0b1110011010010000010101010101010101010101000111001000000000000000,
+        0b1110011111111111111111111111111111111111111111110000001000000000,
+        0b1111000000000000000000000000001111111111111111111111111100000000,
+        0b1111011111111111000000000000000000000000000000000000000000000000,
+        0b1111111100000000111111110000000000111111000000001111111100000000,
+    ];
+    static BITSET_MAPPING: [(u8, u8); 25] = [
+        (0, 182), (0, 74), (0, 166), (0, 162), (0, 159), (0, 150), (0, 148), (0, 142), (0, 134),
+        (0, 131), (0, 64), (1, 66), (1, 70), (1, 83), (1, 12), (1, 8), (2, 146), (2, 140), (2, 134),
+        (2, 130), (3, 164), (3, 146), (3, 20), (4, 178), (4, 171),
+    ];
+
+    pub fn lookup(c: char) -> bool {
+        debug_assert!(!c.is_ascii());
+        (c as u32) >= 0xc0 &&
+        super::bitset_search(
+            c as u32,
+            &BITSET_CHUNKS_MAP,
+            &BITSET_INDEX_CHUNKS,
+            &BITSET_CANONICAL,
+            &BITSET_MAPPING,
+        )
+    }
+}
+
