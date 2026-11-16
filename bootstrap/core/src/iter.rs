@@ -161,7 +161,7 @@ pub trait Iterator {
         R::from_output(())
     }
     fn flat_map<U: IntoIterator, F: FnMut(Self::Item) -> U>(self, f: F) -> FlatMap<Self, U, F> where Self: Sized {
-        FlatMap { iter: self, f, front: None }
+        FlatMap { iter: self, f, front: None, back: None }
     }
     fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Item: IntoIterator {
         Flatten { iter: self, front: None, back: None }
@@ -831,7 +831,8 @@ macro_rules! float_product {
 float_product!(f32 f64);
 
 /// The items of every iterable `f` produces, one iterable after the other.
-pub struct FlatMap<I, U: IntoIterator, F> { iter: I, f: F, front: Option<U::IntoIter> }
+/// `front` is the iterable being taken from the front, `back` the one being taken from the back.
+pub struct FlatMap<I, U: IntoIterator, F> { iter: I, f: F, front: Option<U::IntoIter>, back: Option<U::IntoIter> }
 impl<I: Iterator, U: IntoIterator, F: FnMut(I::Item) -> U> Iterator for FlatMap<I, U, F> {
     type Item = U::Item;
     fn next(&mut self) -> Option<U::Item> {
@@ -842,11 +843,55 @@ impl<I: Iterator, U: IntoIterator, F: FnMut(I::Item) -> U> Iterator for FlatMap<
             }
             match self.iter.next() {
                 Some(outer) => self.front = Some((self.f)(outer).into_iter()),
-                None => return None,
+                None => {
+                    return match &mut self.back {
+                        Some(inner) => {
+                            let x = inner.next();
+                            if x.is_none() { self.back = None; }
+                            x
+                        }
+                        None => None,
+                    };
+                }
+            }
+        }
+    }
+    /// At least what the front and back iterables still hold; exact once no iterable is left to produce.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (flo, fhi) = match &self.front { Some(inner) => inner.size_hint(), None => (0, Some(0)) };
+        let (blo, bhi) = match &self.back { Some(inner) => inner.size_hint(), None => (0, Some(0)) };
+        let lo = flo.saturating_add(blo);
+        match (self.iter.size_hint(), fhi, bhi) {
+            ((0, Some(0)), Some(a), Some(b)) => (lo, a.checked_add(b)),
+            _ => (lo, None),
+        }
+    }
+}
+impl<I: DoubleEndedIterator, U: IntoIterator, F: FnMut(I::Item) -> U> DoubleEndedIterator for FlatMap<I, U, F>
+where U::IntoIter: DoubleEndedIterator {
+    fn next_back(&mut self) -> Option<U::Item> {
+        loop {
+            if let Some(inner) = &mut self.back {
+                if let Some(x) = inner.next_back() { return Some(x); }
+                self.back = None;
+            }
+            match self.iter.next_back() {
+                Some(outer) => self.back = Some((self.f)(outer).into_iter()),
+                None => {
+                    return match &mut self.front {
+                        Some(inner) => {
+                            let x = inner.next_back();
+                            if x.is_none() { self.front = None; }
+                            x
+                        }
+                        None => None,
+                    };
+                }
             }
         }
     }
 }
+impl<I: FusedIterator, U: IntoIterator, F: FnMut(I::Item) -> U> FusedIterator for FlatMap<I, U, F> {}
 
 /// The items of every iterable an iterator yields, one iterable after the other.
 pub struct Flatten<I: Iterator> where I::Item: IntoIterator {
@@ -901,7 +946,18 @@ impl<I: Iterator> Iterator for Flatten<I> where I::Item: IntoIterator {
             }
         }
     }
+    /// At least what the front and back iterables still hold; exact once no iterable is left to yield.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (flo, fhi) = match &self.front { Some(inner) => inner.size_hint(), None => (0, Some(0)) };
+        let (blo, bhi) = match &self.back { Some(inner) => inner.size_hint(), None => (0, Some(0)) };
+        let lo = flo.saturating_add(blo);
+        match (self.iter.size_hint(), fhi, bhi) {
+            ((0, Some(0)), Some(a), Some(b)) => (lo, a.checked_add(b)),
+            _ => (lo, None),
+        }
+    }
 }
+impl<I: FusedIterator> FusedIterator for Flatten<I> where I::Item: IntoIterator {}
 
 /// An iterator whose next item can be looked at before it is taken.
 pub struct Peekable<I: Iterator> { iter: I, peeked: Option<Option<I::Item>> }
@@ -1033,7 +1089,9 @@ impl<A, V: FromIterator<A>> FromIterator<Option<A>> for Option<V> {
 }
 
 impl<I: Clone, U: IntoIterator, F: Clone> Clone for FlatMap<I, U, F> where U::IntoIter: Clone {
-    fn clone(&self) -> Self { Self { iter: self.iter.clone(), f: self.f.clone(), front: self.front.clone() } }
+    fn clone(&self) -> Self {
+        Self { iter: self.iter.clone(), f: self.f.clone(), front: self.front.clone(), back: self.back.clone() }
+    }
 }
 
 /// An iterator that yields `None` forever once the underlying one has yielded `None` once.
