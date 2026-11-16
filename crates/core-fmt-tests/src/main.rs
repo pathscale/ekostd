@@ -309,6 +309,16 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     check!(r, "b a b", "{1} {0} {1}", "a", "b");
     check!(r, "{x}", "{{x}}");
     check!(r, "v=3 v=3", "v={v} v={v}", v = 3);
+    // Float parsing: correctly rounded, f32 rounded once.
+    check!(r, "4340000000000001", "{:x}", "9007199254740993.0000000001".parse::<f64>().unwrap().to_bits());
+    check!(r, "3f800001", "{:x}", "1.00000005960464477550".parse::<f32>().unwrap().to_bits());
+    check!(r, "3fb999999999999a", "{:x}", "0.1".parse::<f64>().unwrap().to_bits());
+    check!(r, "44b52d02c7e14af6", "{:x}", "1e23".parse::<f64>().unwrap().to_bits());
+    check!(r, "1", "{:x}", "4.9e-324".parse::<f64>().unwrap().to_bits());
+    check!(r, "fffffffffffff", "{:x}", "2.2250738585072011e-308".parse::<f64>().unwrap().to_bits());
+    check!(r, "7ff0000000000000", "{:x}", "1e400".parse::<f64>().unwrap().to_bits());
+    check!(r, "0", "{:x}", "1e-400".parse::<f64>().unwrap().to_bits());
+    check!(r, "3dcccccd", "{:x}", "0.1".parse::<f32>().unwrap().to_bits());
     check!(r, "1.5s", "{:?}", Duration::from_millis(1500));
     check!(r, "1s", "{:?}", Duration::from_secs(1));
     check!(r, "1ms", "{:?}", Duration::from_millis(1));
