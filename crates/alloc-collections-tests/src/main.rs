@@ -881,6 +881,93 @@ fn strings_api(run: &mut Run) {
     run.check(s.capacity() == 2 && s == "ab", "string shrink_to_fit", 0);
 }
 
+fn btrees_api(run: &mut Run) {
+    // split_off of 0..100 (i -> i * 10) at 60, above every key and at the least key.
+    let mut left: BTreeMap<i32, i32> = (0..100).map(|i| (i, i * 10)).collect();
+    let right = left.split_off(&60);
+    run.check(left.len() == 60 && right.len() == 40, "split_off lengths", 0);
+    run.check(right.first_key_value() == Some((&60, &600)) && left.last_key_value() == Some((&59, &590)), "split_off ends", 0);
+    run.check(left.keys().copied().eq(0..60) && right.keys().copied().eq(60..100), "split_off keys", 0);
+    let mut whole = left.clone();
+    let none = whole.split_off(&1000);
+    run.check(none.is_empty() && whole.len() == 60 && whole.keys().copied().eq(0..60), "split_off above all", 0);
+    let mut all = right.clone();
+    let moved = all.split_off(&0);
+    run.check(all.is_empty() && moved.len() == 40 && moved.keys().copied().eq(60..100), "split_off everything", 0);
+
+    // Both halves of a split keep working as B-trees under random inserts and removals.
+    let mut low: BTreeMap<u32, u64> = (0u32..100).map(|i| (i, i as u64 * 10)).collect();
+    let mut high = low.split_off(&60);
+    let mut low_model = Model { pairs: (0u32..60).map(|i| (i, i as u64 * 10)).collect() };
+    let mut high_model = Model { pairs: (60u32..100).map(|i| (i, i as u64 * 10)).collect() };
+    same(run, &low, &low_model, 0);
+    same(run, &high, &high_model, 0);
+    let mut rng = Rng(0x5851_f42d_4c95_7f2d);
+    let mut step = 1u64;
+    while step <= 1000 {
+        let key = rng.below(200) as u32;
+        let value = rng.below(1 << 30);
+        let (map, model) = if rng.below(2) == 0 { (&mut low, &mut low_model) } else { (&mut high, &mut high_model) };
+        if rng.below(3) == 0 {
+            run.check(map.remove(&key) == model.remove(key), "split halves remove", step);
+        } else {
+            run.check(map.insert(key, value) == model.insert(key, value), "split halves insert", step);
+        }
+        if step % 100 == 0 {
+            same(run, &low, &low_model, step);
+            same(run, &high, &high_model, step);
+        }
+        step += 1;
+    }
+
+    // first_entry / last_entry.
+    let mut m: BTreeMap<i32, i32> = BTreeMap::new();
+    m.insert(1, 10);
+    m.insert(2, 20);
+    match m.first_entry() {
+        Some(e) => {
+            run.check(*e.key() == 1 && *e.get() == 10, "first_entry key", 0);
+            *e.into_mut() += 1;
+        }
+        None => run.check(false, "first_entry key", 1),
+    }
+    run.check(m[&1] == 11 && m[&2] == 20, "first_entry into_mut", 0);
+    let last = m.last_entry().map(|e| e.remove());
+    run.check(last == Some(20) && m.len() == 1 && !m.contains_key(&2), "last_entry remove", 0);
+    let mut empty: BTreeMap<i32, i32> = BTreeMap::new();
+    run.check(empty.first_entry().is_none() && empty.last_entry().is_none(), "first_entry empty", 0);
+
+    // Extend from references, or_insert_with_key, and OccupiedEntry::insert on the last entry.
+    m.extend([(&3, &4)]);
+    run.check(m[&3] == 4 && m.len() == 2, "extend refs", 0);
+    let got = *m.entry(5).or_insert_with_key(|k| k * 2);
+    run.check(got == 10 && m[&5] == 10, "or_insert_with_key", 0);
+    let kept = *m.entry(5).or_insert_with_key(|k| k * 3);
+    run.check(kept == 10, "or_insert_with_key occupied", 0);
+    let swapped = m.last_entry().map(|mut e| {
+        let old = e.insert(50);
+        (*e.key(), old, *e.get())
+    });
+    run.check(swapped == Some((5, 10, 50)) && m[&5] == 50, "last_entry insert", 0);
+
+    // BTreeSet additions.
+    let mut a: BTreeSet<i32> = BTreeSet::from([1, 2, 3]);
+    let b: BTreeSet<i32> = BTreeSet::from([3, 4]);
+    run.check(a.is_superset(&BTreeSet::from([1, 2])) && !b.is_superset(&a), "set is_superset", 0);
+    run.check(a.symmetric_difference(&b).copied().eq([1, 2, 4]), "set symmetric_difference", 0);
+    run.check((&a | &b).iter().copied().eq([1, 2, 3, 4]), "set bitor", 0);
+    run.check((&a & &b).iter().copied().eq([3]), "set bitand", 0);
+    run.check((&a - &b).iter().copied().eq([1, 2]), "set sub", 0);
+    run.check((&a ^ &b).iter().copied().eq([1, 2, 4]), "set bitxor", 0);
+    run.check(a.replace(2) == Some(2), "set replace", 0);
+    run.check(a.replace(9).is_none() && a.len() == 4, "set replace", 1);
+    let tail = a.split_off(&3);
+    run.check(a.iter().copied().eq([1, 2]) && tail.iter().copied().eq([3, 9]), "set split_off", 0);
+    let it: alloc::collections::btree_set::Iter<'_, i32> = a.iter();
+    run.check(it.len() == 2 && it.clone().count() == 2, "set Iter", 0);
+    run.check(a.iter().rev().copied().eq([2, 1]), "set Iter rev", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -890,6 +977,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    btrees_api(&mut run);
     strings_api(&mut run);
     vecdeques(&mut run);
     arc_layouts(&mut run);
