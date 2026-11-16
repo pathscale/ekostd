@@ -14,6 +14,7 @@ impl<P, T: Unpin> Pin<P> where P: Deref<Target = T> {
     pub fn get_mut(&mut self) -> &mut P::Target where P: DerefMut { self.pointer.deref_mut() }
 }
 impl<P> Pin<P> where P: Deref {
+    #[lang = "new_unchecked"]
     pub unsafe fn new_unchecked(pointer: P) -> Self { Self { pointer } }
     pub fn as_ref(&self) -> Pin<&P::Target> { Pin { pointer: self.pointer.deref() } }
     pub fn get_ref(&self) -> &P::Target { self.pointer.deref() }

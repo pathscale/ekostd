@@ -166,3 +166,7 @@ impl<T: ?Sized> crate::ops::DerefMut for RefMut<'_, T> {
 impl<T: ?Sized> crate::ops::Drop for RefMut<'_, T> {
     fn drop(&mut self) { self.state.set(0); }
 }
+
+impl<T: crate::default::Default> crate::default::Default for RefCell<T> {
+    fn default() -> RefCell<T> { RefCell::new(T::default()) }
+}

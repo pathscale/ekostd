@@ -316,3 +316,8 @@ impl<'a, T, const N: usize> TryFrom<&'a mut [T]> for &'a mut [T; N] {
         }
     }
 }
+
+const impl From<char> for u32 { fn from(c: char) -> u32 { c as u32 } }
+const impl From<char> for u64 { fn from(c: char) -> u64 { c as u64 } }
+const impl From<char> for u128 { fn from(c: char) -> u128 { c as u128 } }
+const impl From<u8> for char { fn from(i: u8) -> char { i as char } }

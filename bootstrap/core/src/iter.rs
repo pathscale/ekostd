@@ -40,6 +40,15 @@ pub trait Iterator {
     fn position<P: FnMut(Self::Item) -> bool>(&mut self, mut predicate: P) -> Option<usize> where Self: Sized {
         let mut i = 0; while let Some(x) = self.next() { if predicate(x) { return Some(i); } i += 1; } None
     }
+    fn rposition<P: FnMut(Self::Item) -> bool>(&mut self, mut predicate: P) -> Option<usize>
+    where Self: Sized + ExactSizeIterator + DoubleEndedIterator {
+        let mut i = self.len();
+        while let Some(x) = self.next_back() {
+            i -= 1;
+            if predicate(x) { return Some(i); }
+        }
+        None
+    }
     fn map<B, F: FnMut(Self::Item) -> B>(self, f: F) -> Map<Self, F> where Self: Sized { Map { iter: self, f } }
     fn filter<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> Filter<Self, P> where Self: Sized { Filter { iter: self, predicate } }
     fn filter_map<B, F: FnMut(Self::Item) -> Option<B>>(self, f: F) -> FilterMap<Self, F> where Self: Sized { FilterMap { iter: self, f } }

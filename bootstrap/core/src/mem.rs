@@ -37,6 +37,11 @@ impl<T: crate::marker::Sized> ManuallyDrop<T> {
     }
 
     pub const fn into_inner(self) -> T { self.value.0 }
+
+    /// Drops the value in place. The caller must not use the slot afterwards.
+    pub unsafe fn drop(slot: &mut Self) {
+        unsafe { crate::ptr::drop_in_place(&mut slot.value.0) }
+    }
 }
 
 impl<T: ?Sized> Deref for ManuallyDrop<T> {
@@ -85,6 +90,10 @@ impl<T> MaybeUninit<T> {
     }
 
     pub const fn as_ptr(&self) -> *const T { self as *const Self as *const T }
+
+    pub const unsafe fn assume_init_ref(&self) -> &T { unsafe { &*self.as_ptr() } }
+    pub const unsafe fn assume_init_mut(&mut self) -> &mut T { unsafe { &mut *self.as_mut_ptr() } }
+    pub unsafe fn assume_init_drop(&mut self) { unsafe { crate::ptr::drop_in_place(self.as_mut_ptr()) } }
 
     /// Reads the value out by copy. The caller must not let it be read or dropped twice.
     pub const unsafe fn assume_init_read(&self) -> T { unsafe { crate::ptr::read(self.as_ptr()) } }

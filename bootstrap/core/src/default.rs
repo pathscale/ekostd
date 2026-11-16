@@ -27,3 +27,17 @@ const impl<T: PointeeSized> Default for PhantomData<T> {
 impl<T: Default, const N: usize> Default for [T; N] {
     fn default() -> Self { crate::array::from_fn(|_| T::default()) }
 }
+
+impl Default for &str {
+    fn default() -> Self { "" }
+}
+macro_rules! tuple_default {
+    ($(($($t:ident),+))*) => {$(
+        impl<$($t: Default),+> Default for ($($t,)+) {
+            fn default() -> Self { ($($t::default(),)+) }
+        }
+    )*};
+}
+tuple_default!((A) (A, B) (A, B, C) (A, B, C, D) (A, B, C, D, E) (A, B, C, D, E, F) (A, B, C, D, E, F, G)
+    (A, B, C, D, E, F, G, H) (A, B, C, D, E, F, G, H, I) (A, B, C, D, E, F, G, H, I, J)
+    (A, B, C, D, E, F, G, H, I, J, K) (A, B, C, D, E, F, G, H, I, J, K, L));

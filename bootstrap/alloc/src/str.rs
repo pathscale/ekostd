@@ -16,3 +16,17 @@ impl str {
         unsafe { crate::string::String::from_utf8_unchecked(bytes) }
     }
 }
+
+impl str {
+    /// A new string of this one repeated `n` times.
+    #[rustc_allow_incoherent_impl]
+    pub fn repeat(&self, n: usize) -> crate::string::String {
+        let mut out = crate::string::String::with_capacity(self.len().checked_mul(n).expect("capacity overflow"));
+        let mut i = 0;
+        while i < n {
+            out.push_str(self);
+            i += 1;
+        }
+        out
+    }
+}

@@ -244,6 +244,25 @@ impl str {
         }
     }
 
+    /// As `split`, but a last piece that is empty is left out.
+    pub fn split_terminator<P: Pattern>(&self, pat: P) -> SplitTerminator<'_, P> {
+        SplitTerminator { inner: self.split(pat) }
+    }
+
+    /// What is left after removing every match from both ends.
+    pub fn trim_matches<P: Pattern>(&self, mut pat: P) -> &str {
+        let mut rest = self;
+        while let Some(len) = pat.prefix_len(rest) {
+            if len == 0 { break; }
+            rest = &rest[len..];
+        }
+        while let Some(len) = pat.suffix_len(rest) {
+            if len == 0 { break; }
+            rest = &rest[..rest.len() - len];
+        }
+        rest
+    }
+
     /// What is left after removing every match from the end.
     pub fn trim_end_matches<P: Pattern>(&self, mut pat: P) -> &str {
         let mut rest = self;
@@ -852,6 +871,19 @@ impl crate::iter::Iterator for CharIndices<'_> {
                 self.front_offset += before - self.iter.as_str().len();
                 Some((index, ch))
             }
+        }
+    }
+}
+
+pub struct SplitTerminator<'a, P> {
+    inner: Split<'a, P>,
+}
+impl<'a, P: Pattern> crate::iter::Iterator for SplitTerminator<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        match self.inner.next() {
+            Some(piece) if piece.is_empty() && self.inner.finished => None,
+            other => other,
         }
     }
 }

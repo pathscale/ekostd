@@ -49,6 +49,7 @@ impl Duration {
         Self { secs: nanos / 1_000_000_000, nanos: (nanos % 1_000_000_000) as u32 }
     }
     pub const fn as_secs(&self) -> u64 { self.secs }
+    pub const fn as_secs_f64(&self) -> f64 { (self.secs as f64) + (self.nanos as f64) / 1_000_000_000.0 }
     pub const fn subsec_nanos(&self) -> u32 { self.nanos }
     pub const fn subsec_millis(&self) -> u32 { self.nanos / 1_000_000 }
     pub const fn subsec_micros(&self) -> u32 { self.nanos / 1_000 }

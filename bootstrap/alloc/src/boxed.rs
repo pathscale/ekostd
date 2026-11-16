@@ -173,3 +173,13 @@ impl<Args: core::marker::Tuple, F: FnOnce<Args> + ?Sized> FnOnce<Args> for Box<F
         <F as FnOnce<Args>>::call_once(*self, args)
     }
 }
+
+impl<T> Box<[T]> {
+    /// A boxed slice of `len` uninitialized elements.
+    pub fn new_uninit_slice(len: usize) -> Box<[core::mem::MaybeUninit<T>]> {
+        let mut vec = crate::vec::Vec::<core::mem::MaybeUninit<T>>::with_capacity(len);
+        // SAFETY: `MaybeUninit` needs no initialization.
+        unsafe { vec.set_len(len) };
+        vec.into_boxed_slice()
+    }
+}

@@ -1234,3 +1234,14 @@ impl<T> [T] {
         Some((unsafe { &*(first.as_ptr() as *const [T; N]) }, tail))
     }
 }
+
+impl [u8] {
+    pub const fn is_ascii(&self) -> bool {
+        let mut i = 0;
+        while i < self.len() {
+            if self[i] > 0x7f { return false; }
+            i += 1;
+        }
+        true
+    }
+}

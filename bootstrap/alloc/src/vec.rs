@@ -188,6 +188,18 @@ impl<T> Vec<T> {
         self.reserve_inner(additional, false);
     }
 
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), crate::collections::TryReserveError> {
+        let required = match self.length.checked_add(additional) {
+            Some(required) => required,
+            None => return Err(crate::collections::TryReserveError::capacity_overflow()),
+        };
+        if mem::size_of::<T>() != 0 && Layout::array::<T>(required).is_err() {
+            return Err(crate::collections::TryReserveError::capacity_overflow());
+        }
+        self.reserve_exact(additional);
+        Ok(())
+    }
+
     pub fn reserve_exact(&mut self, additional: usize) {
         self.reserve_inner(additional, true);
     }

@@ -231,3 +231,6 @@ impl<T, E> Option<Result<T, E>> {
         match self { Some(Ok(x)) => Ok(Some(x)), Some(Err(e)) => Err(e), None => Ok(None) }
     }
 }
+
+/// The iterator `Option::into_iter` returns.
+pub type IntoIter<A> = crate::iter::Once<A>;

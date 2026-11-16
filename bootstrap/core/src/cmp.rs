@@ -317,3 +317,25 @@ macro_rules! fnptr_cmp_impls {
     };
 }
 fnptr_cmp_impls!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+/// Reverses the ordering of the wrapped value.
+pub struct Reverse<T>(pub T);
+impl<T: Copy> Copy for Reverse<T> {}
+impl<T: Clone> Clone for Reverse<T> { fn clone(&self) -> Self { Reverse(self.0.clone()) } }
+impl<T: PartialEq> PartialEq for Reverse<T> { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+impl<T: Eq> Eq for Reverse<T> {}
+impl<T: crate::fmt::Debug> crate::fmt::Debug for Reverse<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.debug_tuple("Reverse").field(&self.0).finish() }
+}
+impl<T: crate::default::Default> crate::default::Default for Reverse<T> {
+    fn default() -> Self { Reverse(T::default()) }
+}
+impl<T: crate::hash::Hash> crate::hash::Hash for Reverse<T> {
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) }
+}
+impl<T: PartialOrd> PartialOrd for Reverse<T> {
+    fn partial_cmp(&self, other: &Reverse<T>) -> Option<Ordering> { other.0.partial_cmp(&self.0) }
+}
+impl<T: Ord> Ord for Reverse<T> {
+    fn cmp(&self, other: &Reverse<T>) -> Ordering { other.0.cmp(&self.0) }
+}

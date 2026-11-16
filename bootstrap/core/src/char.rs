@@ -31,6 +31,11 @@ impl char {
         if digit < radix { Some(digit) } else { None }
     }
 
+    pub const fn is_control(self) -> bool {
+        let n = self as u32;
+        n < 0x20 || (n >= 0x7f && n < 0xa0)
+    }
+
     pub const fn len_utf8(self) -> usize {
         let n = self as u32;
         if n <= 0x7f { 1 } else if n <= 0x7ff { 2 } else if n <= 0xffff { 3 } else { 4 }
