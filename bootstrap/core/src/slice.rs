@@ -1426,6 +1426,393 @@ impl<'a, T, P: crate::ops::FnMut(&T, &T) -> bool> Iterator for ChunkBy<'a, T, P>
 }
 
 /// What `<[T]>::split` returns.
+impl<T> [T] {
+    /// True when every element is less than or equal to the next one.
+    pub fn is_sorted(&self) -> bool
+    where
+        T: PartialOrd,
+    {
+        self.is_sorted_by(|a, b| a.le(b))
+    }
+
+    /// True when `compare` holds for every pair of adjacent elements; slices of fewer than two elements are sorted.
+    pub fn is_sorted_by<'a, F: FnMut(&'a T, &'a T) -> bool>(&'a self, mut compare: F) -> bool {
+        let mut i = 1;
+        while i < self.len() {
+            if !compare(&self[i - 1], &self[i]) { return false; }
+            i += 1;
+        }
+        true
+    }
+
+    /// True when the keys `f` gives for the elements are each less than or equal to the next one.
+    pub fn is_sorted_by_key<'a, K: PartialOrd, F: FnMut(&'a T) -> K>(&'a self, mut f: F) -> bool {
+        if self.len() < 2 { return true; }
+        let mut prev = f(&self[0]);
+        let mut i = 1;
+        while i < self.len() {
+            let key = f(&self[i]);
+            if !prev.le(&key) { return false; }
+            prev = key;
+            i += 1;
+        }
+        true
+    }
+
+    /// As `split`, lending each piece mutably.
+    pub fn split_mut<F: FnMut(&T) -> bool>(&mut self, pred: F) -> SplitMut<'_, T, F> {
+        SplitMut { v: self, pred, finished: false }
+    }
+
+    /// The pieces of `split`, starting from the end of the slice.
+    pub fn rsplit<F: FnMut(&T) -> bool>(&self, pred: F) -> RSplit<'_, T, F> {
+        RSplit { inner: self.split(pred) }
+    }
+
+    /// The pieces of `split_mut`, starting from the end of the slice.
+    pub fn rsplit_mut<F: FnMut(&T) -> bool>(&mut self, pred: F) -> RSplitMut<'_, T, F> {
+        RSplitMut { inner: self.split_mut(pred) }
+    }
+
+    /// At most `n` pieces of `split`; the last one holds the rest of the slice. `n == 0` gives no piece.
+    pub fn splitn<F: FnMut(&T) -> bool>(&self, n: usize, pred: F) -> SplitN<'_, T, F> {
+        SplitN { inner: self.split(pred), count: n }
+    }
+
+    /// As `splitn`, lending each piece mutably.
+    pub fn splitn_mut<F: FnMut(&T) -> bool>(&mut self, n: usize, pred: F) -> SplitNMut<'_, T, F> {
+        SplitNMut { inner: self.split_mut(pred), count: n }
+    }
+
+    /// At most `n` pieces of `split` from the end; the last one holds the start of the slice. `n == 0` gives no piece.
+    pub fn rsplitn<F: FnMut(&T) -> bool>(&self, n: usize, pred: F) -> RSplitN<'_, T, F> {
+        RSplitN { inner: self.split(pred), count: n }
+    }
+
+    /// As `rsplitn`, lending each piece mutably.
+    pub fn rsplitn_mut<F: FnMut(&T) -> bool>(&mut self, n: usize, pred: F) -> RSplitNMut<'_, T, F> {
+        RSplitNMut { inner: self.split_mut(pred), count: n }
+    }
+
+    /// The pieces ending with each element `pred` accepts, which stays in its piece; no empty piece at the end, and an
+    /// empty slice gives no piece.
+    pub fn split_inclusive<F: FnMut(&T) -> bool>(&self, pred: F) -> SplitInclusive<'_, T, F> {
+        let finished = self.is_empty();
+        SplitInclusive { v: self, pred, finished }
+    }
+
+    /// As `split_inclusive`, lending each piece mutably.
+    pub fn split_inclusive_mut<F: FnMut(&T) -> bool>(&mut self, pred: F) -> SplitInclusiveMut<'_, T, F> {
+        let finished = self.is_empty();
+        SplitInclusiveMut { v: self, pred, finished }
+    }
+
+    /// Fills the slice with the values `f` returns, called once per element from the front.
+    pub fn fill_with<F: FnMut() -> T>(&mut self, mut f: F) {
+        let mut i = 0;
+        while i < self.len() {
+            self[i] = f();
+            i += 1;
+        }
+    }
+
+    /// The first `N` elements as an array, or `None` when the slice is shorter than `N`.
+    pub const fn first_chunk<const N: usize>(&self) -> Option<&[T; N]> {
+        if self.len() < N { return None; }
+        // SAFETY: the slice has at least `N` elements starting at its pointer.
+        Some(unsafe { &*(self.as_ptr() as *const [T; N]) })
+    }
+
+    /// As `first_chunk`, lending the array mutably.
+    pub fn first_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
+        if self.len() < N { return None; }
+        // SAFETY: the slice has at least `N` elements starting at its pointer.
+        Some(unsafe { &mut *(self.as_mut_ptr() as *mut [T; N]) })
+    }
+
+    /// The last `N` elements as an array, or `None` when the slice is shorter than `N`.
+    pub const fn last_chunk<const N: usize>(&self) -> Option<&[T; N]> {
+        if self.len() < N { return None; }
+        let (_, last) = self.split_at(self.len() - N);
+        // SAFETY: `last` has exactly `N` elements.
+        Some(unsafe { &*(last.as_ptr() as *const [T; N]) })
+    }
+
+    /// As `last_chunk`, lending the array mutably.
+    pub fn last_chunk_mut<const N: usize>(&mut self) -> Option<&mut [T; N]> {
+        if self.len() < N { return None; }
+        let mid = self.len() - N;
+        let (_, last) = self.split_at_mut(mid);
+        // SAFETY: `last` has exactly `N` elements.
+        Some(unsafe { &mut *(last.as_mut_ptr() as *mut [T; N]) })
+    }
+
+    /// The slice without its last `N` elements, and those elements as an array; `None` when the slice is shorter than `N`.
+    pub const fn split_last_chunk<const N: usize>(&self) -> Option<(&[T], &[T; N])> {
+        if self.len() < N { return None; }
+        let (init, last) = self.split_at(self.len() - N);
+        // SAFETY: `last` has exactly `N` elements.
+        Some((init, unsafe { &*(last.as_ptr() as *const [T; N]) }))
+    }
+
+    /// As `split_last_chunk`, lending both parts mutably.
+    pub fn split_last_chunk_mut<const N: usize>(&mut self) -> Option<(&mut [T], &mut [T; N])> {
+        if self.len() < N { return None; }
+        let mid = self.len() - N;
+        let (init, last) = self.split_at_mut(mid);
+        // SAFETY: `last` has exactly `N` elements.
+        Some((init, unsafe { &mut *(last.as_mut_ptr() as *mut [T; N]) }))
+    }
+}
+
+/// Index of the first element `pred` accepts.
+fn split_find_first<T, P: FnMut(&T) -> bool>(v: &[T], pred: &mut P) -> Option<usize> {
+    let mut i = 0;
+    while i < v.len() {
+        if (*pred)(&v[i]) { return Some(i); }
+        i += 1;
+    }
+    None
+}
+
+/// Index of the last element `pred` accepts.
+fn split_find_last<T, P: FnMut(&T) -> bool>(v: &[T], pred: &mut P) -> Option<usize> {
+    let mut i = v.len();
+    while i > 0 {
+        i -= 1;
+        if (*pred)(&v[i]) { return Some(i); }
+    }
+    None
+}
+
+/// A splitting iterator that can hand out everything it has not yielded yet as one last piece.
+trait SplitFinish: DoubleEndedIterator {
+    fn finish(&mut self) -> Option<Self::Item>;
+}
+
+/// One step of the `n` splitters: nothing once `count` is spent, the rest of the slice on the last step.
+fn split_n_step<I: SplitFinish>(inner: &mut I, count: &mut usize, back: bool) -> Option<I::Item> {
+    match *count {
+        0 => None,
+        1 => {
+            *count = 0;
+            inner.finish()
+        }
+        _ => {
+            *count -= 1;
+            if back { inner.next_back() } else { inner.next() }
+        }
+    }
+}
+
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for Split<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a [T]> {
+        if self.finished { return None; }
+        match split_find_last(self.v, &mut self.pred) {
+            Some(index) => {
+                let piece = &self.v[index + 1..];
+                self.v = &self.v[..index];
+                Some(piece)
+            }
+            None => {
+                self.finished = true;
+                Some(self.v)
+            }
+        }
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> SplitFinish for Split<'a, T, P> {
+    fn finish(&mut self) -> Option<&'a [T]> {
+        if self.finished { return None; }
+        self.finished = true;
+        Some(self.v)
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for Split<'a, T, P> {}
+impl<'a, T, P: FnMut(&T) -> bool + crate::clone::Clone> crate::clone::Clone for Split<'a, T, P> {
+    fn clone(&self) -> Self {
+        Split { v: self.v, pred: crate::clone::Clone::clone(&self.pred), finished: self.finished }
+    }
+}
+
+/// What `<[T]>::rsplit` returns.
+pub struct RSplit<'a, T: 'a, P: FnMut(&T) -> bool> { inner: Split<'a, T, P> }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for RSplit<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> { self.inner.next_back() }
+}
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for RSplit<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a [T]> { self.inner.next() }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for RSplit<'a, T, P> {}
+impl<'a, T, P: FnMut(&T) -> bool + crate::clone::Clone> crate::clone::Clone for RSplit<'a, T, P> {
+    fn clone(&self) -> Self { RSplit { inner: crate::clone::Clone::clone(&self.inner) } }
+}
+
+/// What `<[T]>::splitn` returns.
+pub struct SplitN<'a, T: 'a, P: FnMut(&T) -> bool> { inner: Split<'a, T, P>, count: usize }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for SplitN<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> { split_n_step(&mut self.inner, &mut self.count, false) }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for SplitN<'a, T, P> {}
+impl<'a, T, P: FnMut(&T) -> bool + crate::clone::Clone> crate::clone::Clone for SplitN<'a, T, P> {
+    fn clone(&self) -> Self { SplitN { inner: crate::clone::Clone::clone(&self.inner), count: self.count } }
+}
+
+/// What `<[T]>::rsplitn` returns.
+pub struct RSplitN<'a, T: 'a, P: FnMut(&T) -> bool> { inner: Split<'a, T, P>, count: usize }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for RSplitN<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> { split_n_step(&mut self.inner, &mut self.count, true) }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for RSplitN<'a, T, P> {}
+impl<'a, T, P: FnMut(&T) -> bool + crate::clone::Clone> crate::clone::Clone for RSplitN<'a, T, P> {
+    fn clone(&self) -> Self { RSplitN { inner: crate::clone::Clone::clone(&self.inner), count: self.count } }
+}
+
+/// What `<[T]>::split_mut` returns.
+pub struct SplitMut<'a, T: 'a, P: FnMut(&T) -> bool> { v: &'a mut [T], pred: P, finished: bool }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for SplitMut<'a, T, P> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> {
+        if self.finished { return None; }
+        match split_find_first(&*self.v, &mut self.pred) {
+            Some(index) => {
+                let rest = crate::mem::take(&mut self.v);
+                let (head, tail) = rest.split_at_mut(index);
+                let (_, after) = tail.split_at_mut(1);
+                self.v = after;
+                Some(head)
+            }
+            None => self.finish(),
+        }
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for SplitMut<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a mut [T]> {
+        if self.finished { return None; }
+        match split_find_last(&*self.v, &mut self.pred) {
+            Some(index) => {
+                let rest = crate::mem::take(&mut self.v);
+                let (head, tail) = rest.split_at_mut(index);
+                let (_, after) = tail.split_at_mut(1);
+                self.v = head;
+                Some(after)
+            }
+            None => self.finish(),
+        }
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> SplitFinish for SplitMut<'a, T, P> {
+    fn finish(&mut self) -> Option<&'a mut [T]> {
+        if self.finished { return None; }
+        self.finished = true;
+        Some(crate::mem::take(&mut self.v))
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for SplitMut<'a, T, P> {}
+
+/// What `<[T]>::rsplit_mut` returns.
+pub struct RSplitMut<'a, T: 'a, P: FnMut(&T) -> bool> { inner: SplitMut<'a, T, P> }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for RSplitMut<'a, T, P> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> { self.inner.next_back() }
+}
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for RSplitMut<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a mut [T]> { self.inner.next() }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for RSplitMut<'a, T, P> {}
+
+/// What `<[T]>::splitn_mut` returns.
+pub struct SplitNMut<'a, T: 'a, P: FnMut(&T) -> bool> { inner: SplitMut<'a, T, P>, count: usize }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for SplitNMut<'a, T, P> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> { split_n_step(&mut self.inner, &mut self.count, false) }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for SplitNMut<'a, T, P> {}
+
+/// What `<[T]>::rsplitn_mut` returns.
+pub struct RSplitNMut<'a, T: 'a, P: FnMut(&T) -> bool> { inner: SplitMut<'a, T, P>, count: usize }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for RSplitNMut<'a, T, P> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> { split_n_step(&mut self.inner, &mut self.count, true) }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for RSplitNMut<'a, T, P> {}
+
+/// What `<[T]>::split_inclusive` returns.
+pub struct SplitInclusive<'a, T: 'a, P: FnMut(&T) -> bool> { v: &'a [T], pred: P, finished: bool }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for SplitInclusive<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.finished { return None; }
+        let end = match split_find_first(self.v, &mut self.pred) {
+            Some(index) => index + 1,
+            None => self.v.len(),
+        };
+        if end == self.v.len() { self.finished = true; }
+        let (head, tail) = self.v.split_at(end);
+        self.v = tail;
+        Some(head)
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for SplitInclusive<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a [T]> {
+        if self.finished { return None; }
+        // The last element ends the last piece whether or not `pred` accepts it, so it is not searched.
+        let searched = if self.v.is_empty() { 0 } else { self.v.len() - 1 };
+        let start = match split_find_last(&self.v[..searched], &mut self.pred) {
+            Some(index) => index + 1,
+            None => 0,
+        };
+        if start == 0 { self.finished = true; }
+        let (head, tail) = self.v.split_at(start);
+        self.v = head;
+        Some(tail)
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for SplitInclusive<'a, T, P> {}
+impl<'a, T, P: FnMut(&T) -> bool + crate::clone::Clone> crate::clone::Clone for SplitInclusive<'a, T, P> {
+    fn clone(&self) -> Self {
+        SplitInclusive { v: self.v, pred: crate::clone::Clone::clone(&self.pred), finished: self.finished }
+    }
+}
+
+/// What `<[T]>::split_inclusive_mut` returns.
+pub struct SplitInclusiveMut<'a, T: 'a, P: FnMut(&T) -> bool> { v: &'a mut [T], pred: P, finished: bool }
+impl<'a, T, P: FnMut(&T) -> bool> Iterator for SplitInclusiveMut<'a, T, P> {
+    type Item = &'a mut [T];
+    fn next(&mut self) -> Option<&'a mut [T]> {
+        if self.finished { return None; }
+        let end = match split_find_first(&*self.v, &mut self.pred) {
+            Some(index) => index + 1,
+            None => self.v.len(),
+        };
+        if end == self.v.len() { self.finished = true; }
+        let rest = crate::mem::take(&mut self.v);
+        let (head, tail) = rest.split_at_mut(end);
+        self.v = tail;
+        Some(head)
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> DoubleEndedIterator for SplitInclusiveMut<'a, T, P> {
+    fn next_back(&mut self) -> Option<&'a mut [T]> {
+        if self.finished { return None; }
+        // The last element ends the last piece whether or not `pred` accepts it, so it is not searched.
+        let searched = if self.v.is_empty() { 0 } else { self.v.len() - 1 };
+        let start = match split_find_last(&self.v[..searched], &mut self.pred) {
+            Some(index) => index + 1,
+            None => 0,
+        };
+        if start == 0 { self.finished = true; }
+        let rest = crate::mem::take(&mut self.v);
+        let (head, tail) = rest.split_at_mut(start);
+        self.v = head;
+        Some(tail)
+    }
+}
+impl<'a, T, P: FnMut(&T) -> bool> crate::iter::FusedIterator for SplitInclusiveMut<'a, T, P> {}
+
 pub struct Split<'a, T: 'a, P: FnMut(&T) -> bool> { v: &'a [T], pred: P, finished: bool }
 impl<'a, T, P: FnMut(&T) -> bool> Iterator for Split<'a, T, P> {
     type Item = &'a [T];
