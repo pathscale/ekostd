@@ -22,8 +22,7 @@ struct FatPtr<T> {
 
 #[inline(always)]
 pub const fn metadata<T: PointeeSized>(ptr: *const T) -> <T as Pointee>::Metadata {
-    let _ = ptr;
-    loop {}
+    intrinsics::ptr_metadata(ptr)
 }
 
 #[inline(always)]
@@ -31,8 +30,7 @@ pub const fn from_raw_parts<T: PointeeSized>(
     data_pointer: *const impl Thin,
     metadata: <T as Pointee>::Metadata,
 ) -> *const T {
-    let _ = (data_pointer, metadata);
-    loop {}
+    intrinsics::aggregate_raw_ptr(data_pointer, metadata)
 }
 
 #[inline(always)]
@@ -40,8 +38,7 @@ pub const fn from_raw_parts_mut<T: PointeeSized>(
     data_pointer: *mut impl Thin,
     metadata: <T as Pointee>::Metadata,
 ) -> *mut T {
-    let _ = (data_pointer, metadata);
-    loop {}
+    intrinsics::aggregate_raw_ptr(data_pointer, metadata)
 }
 
 #[rustc_diagnostic_item = "ptr_null"]

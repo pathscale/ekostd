@@ -83,6 +83,29 @@ pub const fn forget<T: ?Sized>(_: T);
 #[rustc_nounwind]
 pub const unsafe fn transmute<Src, Dst>(src: Src) -> Dst;
 
+/// Types with a built-in dereference operator in runtime MIR: references and raw pointers.
+/// Restricts `aggregate_raw_ptr` to pointer types, as rustc's own core does.
+pub unsafe trait BuiltinDeref: Sized {
+    type Pointee: crate::marker::PointeeSized;
+}
+unsafe impl<T: crate::marker::PointeeSized> BuiltinDeref for &mut T { type Pointee = T; }
+unsafe impl<T: crate::marker::PointeeSized> BuiltinDeref for &T { type Pointee = T; }
+unsafe impl<T: crate::marker::PointeeSized> BuiltinDeref for *mut T { type Pointee = T; }
+unsafe impl<T: crate::marker::PointeeSized> BuiltinDeref for *const T { type Pointee = T; }
+
+/// Builds a (possibly wide) pointer from a data pointer and its metadata. Lowers in MIR to
+/// `Rvalue::Aggregate(AggregateKind::RawPtr)`.
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const fn aggregate_raw_ptr<P: BuiltinDeref, D, M>(data: D, meta: M) -> P
+where
+    <P as BuiltinDeref>::Pointee: crate::ptr::Pointee<Metadata = M>;
+
+/// The metadata of a (possibly wide) pointer. Lowers in MIR to `UnOp::PtrMetadata`.
+#[rustc_intrinsic]
+#[rustc_nounwind]
+pub const fn ptr_metadata<P: crate::ptr::Pointee<Metadata = M> + crate::marker::PointeeSized, M>(ptr: *const P) -> M;
+
 #[rustc_intrinsic]
 #[rustc_nounwind]
 pub const unsafe fn read_via_copy<T>(ptr: *const T) -> T;
