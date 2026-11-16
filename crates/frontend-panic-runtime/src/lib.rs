@@ -98,24 +98,92 @@ mod diagnostics {
             write_str("\n");
             let mut frame: *const usize;
             core::arch::asm!("mov {}, x29", out(reg) frame, options(nomem, nostack, preserves_flags));
-            let mut index = 0u32;
-            while !frame.is_null() && (frame as usize) % 8 == 0 && index < 96 {
-                let next = *frame as *const usize;
-                let ret = *frame.add(1);
-                if ret == 0 {
-                    break;
-                }
-                write_str("frame ");
-                write_u32(index);
-                write_str(" ");
-                write_hex(ret);
+            walk(frame);
+        }
+    }
+
+    /// Prints the return addresses up a frame-pointer chain, one `frame N 0x...` line each.
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    unsafe fn walk(mut frame: *const usize) {
+        let mut index = 0u32;
+        while !frame.is_null() && (frame as usize) % 8 == 0 && index < 96 {
+            let next = unsafe { *frame } as *const usize;
+            let ret = unsafe { *frame.add(1) };
+            if ret == 0 {
+                break;
+            }
+            write_str("frame ");
+            write_u32(index);
+            write_str(" ");
+            write_hex(ret);
+            write_str("\n");
+            if next <= frame {
+                break;
+            }
+            frame = next;
+            index += 1;
+        }
+    }
+
+    // SIGQUIT frame dump. A daemon that stops making progress has no debugger attached, and the
+    // only thing it can say about itself is where it is. `kill -QUIT <pid>` makes the thread that
+    // receives the signal print its program counter, link register and the frame-pointer chain
+    // from the interrupted context (not the handler's own frames), then abort. The addresses are
+    // raw; with the `image slide` line they symbolize against `nm -n` of the same binary (or
+    // `atos -o <binary> -s <slide>`). The handler uses only `write`, which is async-signal-safe,
+    // and no allocation. It is installed before `main` runs, from a Mach-O initializer, so no
+    // caller has to remember to ask for it.
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    mod quit {
+        use super::{_dyld_get_image_vmaddr_slide, walk, write_hex, write_str};
+
+        const SIGQUIT: i32 = 3;
+        const SA_SIGINFO: i32 = 0x40;
+
+        /// Darwin `struct sigaction`: handler, mask, flags.
+        #[repr(C)]
+        struct SigAction {
+            handler: extern "C" fn(i32, *const u8, *const u8),
+            mask: u32,
+            flags: i32,
+        }
+
+        unsafe extern "C" {
+            fn sigaction(sig: i32, act: *const SigAction, old: *mut SigAction) -> i32;
+            fn abort() -> !;
+        }
+
+        extern "C" fn on_quit(_sig: i32, _info: *const u8, ucontext: *const u8) {
+            unsafe {
+                // ucontext_t: onstack u32, sigmask u32, stack_t (24 bytes), link ptr, mcsize u64,
+                // then the mcontext pointer at offset 48. mcontext64: exception state (16 bytes),
+                // then thread state: x0..x28 (232 bytes), fp, lr, sp, pc.
+                let mctx = *(ucontext.add(48) as *const *const u8);
+                let state = mctx.add(16) as *const usize;
+                let (fp, lr, sp, pc) = (*state.add(29), *state.add(30), *state.add(31), *state.add(32));
+                write_str("SIGQUIT: frames of the interrupted thread\nimage slide ");
+                write_hex(_dyld_get_image_vmaddr_slide(0) as usize);
+                write_str("\npc ");
+                write_hex(pc);
+                write_str("\nlr ");
+                write_hex(lr);
+                write_str("\nsp ");
+                write_hex(sp);
                 write_str("\n");
-                if next <= frame {
-                    break;
-                }
-                frame = next;
-                index += 1;
+                walk(fp as *const usize);
+                abort()
             }
         }
+
+        extern "C" fn install() {
+            let act = SigAction { handler: on_quit, mask: 0, flags: SA_SIGINFO };
+            unsafe {
+                sigaction(SIGQUIT, &act, core::ptr::null_mut());
+            }
+        }
+
+        #[used]
+        #[unsafe(link_section = "__DATA,__mod_init_func")]
+        static INSTALL: extern "C" fn() = install;
     }
 }
