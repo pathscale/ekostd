@@ -659,6 +659,150 @@ fn arc_layouts(run: &mut Run) {
     run.check(held && weak_back, "arc weak dealloc layout", 0);
 }
 
+fn vecdeques(run: &mut Run) {
+    // push_front 0..N leaves N-1, ..., 0 front to back, so pop_back yields 0, 1, 2, ...
+    const N: u32 = 1_000_000;
+    let mut dq = alloc::collections::VecDeque::new();
+    let mut i = 0u32;
+    while i < N {
+        dq.push_front(i);
+        i += 1;
+    }
+    let mut ok = dq.len() == N as usize && dq.front() == Some(&(N - 1)) && dq.back() == Some(&0);
+    let mut want = 0u32;
+    while let Some(v) = dq.pop_back() {
+        ok &= v == want;
+        want += 1;
+    }
+    run.check(ok && want == N && dq.is_empty(), "vecdeque front-to-back queue", 0);
+
+    let mut dq = alloc::collections::VecDeque::new();
+    let mut i = 0u32;
+    while i < N {
+        dq.push_back(i);
+        i += 1;
+    }
+    let mut ok = dq.len() == N as usize;
+    let mut want = 0u32;
+    while let Some(v) = dq.pop_front() {
+        ok &= v == want;
+        want += 1;
+    }
+    run.check(ok && want == N && dq.is_empty(), "vecdeque fifo", 0);
+
+    // Random operations against a Vec model, pushes outnumbering pops so the deque grows, wraps and shrinks.
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let mut dq: alloc::collections::VecDeque<u64> = alloc::collections::VecDeque::new();
+    let mut model: alloc::vec::Vec<u64> = alloc::vec::Vec::new();
+    let mut step = 0u64;
+    while step < 20_000 {
+        let value = step;
+        match rng.below(10) {
+            0 | 1 => {
+                dq.push_front(value);
+                model.insert(0, value);
+            }
+            2 | 3 => {
+                dq.push_back(value);
+                model.push(value);
+            }
+            4 => {
+                let want = if model.is_empty() { None } else { Some(model.remove(0)) };
+                run.check(dq.pop_front() == want, "vecdeque model pop_front", step);
+            }
+            5 => run.check(dq.pop_back() == model.pop(), "vecdeque model pop_back", step),
+            6 => {
+                let at = rng.below(model.len() as u64 + 1) as usize;
+                dq.insert(at, value);
+                model.insert(at, value);
+            }
+            7 => {
+                if model.is_empty() {
+                    run.check(dq.remove(0).is_none(), "vecdeque model remove empty", step);
+                } else {
+                    let at = rng.below(model.len() as u64) as usize;
+                    run.check(dq.remove(at) == Some(model.remove(at)), "vecdeque model remove", step);
+                }
+            }
+            8 => {
+                if !model.is_empty() {
+                    let at = rng.below(model.len() as u64) as usize;
+                    run.check(dq[at] == model[at], "vecdeque model index", step);
+                }
+            }
+            _ => {
+                let at = rng.below(model.len() as u64 + 2) as usize;
+                run.check(dq.get(at) == model.get(at), "vecdeque model get", step);
+            }
+        }
+        step += 1;
+        if step % 1000 == 0 {
+            let (a, b) = dq.as_slices();
+            let slices = a.len() + b.len() == model.len() && a == &model[..a.len()] && b == &model[a.len()..];
+            let same = dq.len() == model.len()
+                && dq.iter().eq(model.iter())
+                && dq.iter().rev().eq(model.iter().rev())
+                && slices;
+            run.check(same, "vecdeque model", step);
+        }
+    }
+
+    // Capacity 4: 1 2 3, pop two, then 4 5 6 run past the end of the buffer.
+    let mut dq = alloc::collections::VecDeque::with_capacity(4);
+    dq.push_back(1u32);
+    dq.push_back(2);
+    dq.push_back(3);
+    dq.pop_front();
+    dq.pop_front();
+    dq.push_back(4);
+    dq.push_back(5);
+    dq.push_back(6);
+    let order = dq.len() == 4 && dq.iter().eq([3u32, 4, 5, 6].iter()) && dq[0] == 3 && dq[3] == 6;
+    let contiguous = &*dq.make_contiguous() == &[3u32, 4, 5, 6][..];
+    let one_slice = dq.as_slices().1.is_empty() && dq.as_slices().0 == &[3u32, 4, 5, 6][..];
+    let as_vec = alloc::vec::Vec::from(dq) == [3u32, 4, 5, 6];
+    run.check(order && contiguous && one_slice && as_vec, "vecdeque wrap", 0);
+
+    let mut dq: alloc::collections::VecDeque<u32> = (0..10).collect();
+    dq.retain(|x| *x % 3 != 0);
+    let retained = dq.iter().eq([1u32, 2, 4, 5, 7, 8].iter());
+    dq.swap(0, 5);
+    dq.truncate(4);
+    let rest = dq.iter().eq([8u32, 2, 4, 5].iter()) && dq.contains(&4) && !dq.contains(&7);
+    run.check(retained && rest, "vecdeque retain swap truncate contains", 0);
+
+    struct Counted<'a>(&'a core::cell::Cell<u32>);
+    impl Drop for Counted<'_> {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+    let drops = core::cell::Cell::new(0u32);
+    {
+        let mut dq = alloc::collections::VecDeque::new();
+        let mut i = 0;
+        while i < 100 {
+            if i % 2 == 0 {
+                dq.push_back(Counted(&drops));
+            } else {
+                dq.push_front(Counted(&drops));
+            }
+            i += 1;
+        }
+        let mut j = 0;
+        while j < 30 {
+            if j % 2 == 0 {
+                drop(dq.pop_front());
+            } else {
+                drop(dq.pop_back());
+            }
+            j += 1;
+        }
+        run.check(drops.get() == 30 && dq.len() == 70, "vecdeque drops popped", 0);
+    }
+    run.check(drops.get() == 100, "vecdeque drops", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -668,6 +812,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    vecdeques(&mut run);
     arc_layouts(&mut run);
     heaps(&mut run);
     rcs(&mut run);
