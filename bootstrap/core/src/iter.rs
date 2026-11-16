@@ -128,6 +128,9 @@ pub trait Iterator {
     }
     fn fuse(self) -> Fuse<Self> where Self: Sized { Fuse { iter: Some(self) } }
     fn peekable(self) -> Peekable<Self> where Self: Sized { Peekable { iter: self, peeked: None } }
+    fn skip_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> SkipWhile<Self, P> where Self: Sized {
+        SkipWhile { iter: self, flag: false, predicate }
+    }
     fn take_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> TakeWhile<Self, P> where Self: Sized {
         TakeWhile { iter: self, predicate, done: false }
     }
@@ -284,7 +287,7 @@ impl<B, I: DoubleEndedIterator, F: FnMut(I::Item) -> Option<B>> DoubleEndedItera
     }
 }
 
-pub struct Enumerate<I> { iter: I, count: usize }
+pub struct Enumerate<I> { pub(crate) iter: I, pub(crate) count: usize }
 impl<I: Clone> Clone for Enumerate<I> { fn clone(&self) -> Self { Self { iter: self.iter.clone(), count: self.count } } }
 impl<I: Iterator> Iterator for Enumerate<I> {
     type Item = (usize, I::Item);
@@ -844,3 +847,24 @@ impl<A: Clone> DoubleEndedIterator for Repeat<A> {
     fn next_back(&mut self) -> Option<A> { Some(self.element.clone()) }
 }
 pub fn repeat<T: Clone>(elt: T) -> Repeat<T> { Repeat { element: elt } }
+
+pub struct SkipWhile<I, P> { iter: I, flag: bool, predicate: P }
+impl<I: Clone, P: Clone> Clone for SkipWhile<I, P> {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), flag: self.flag, predicate: self.predicate.clone() } }
+}
+impl<I: Iterator, P: FnMut(&I::Item) -> bool> Iterator for SkipWhile<I, P> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        loop {
+            let item = self.iter.next()?;
+            if self.flag || !(self.predicate)(&item) {
+                self.flag = true;
+                return Some(item);
+            }
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.iter.size_hint();
+        (0, upper)
+    }
+}

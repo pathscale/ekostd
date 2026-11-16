@@ -211,6 +211,12 @@ pub mod future {
         unsafe { &mut *cx.0.as_ptr().cast() }
     }
 
+    #[lang = "async_drop"]
+    #[allow(async_fn_in_trait)]
+    pub trait AsyncDrop {
+        async fn drop(self: crate::pin::Pin<&mut Self>);
+    }
+
     pub trait IntoFuture {
         type Output;
         type IntoFuture: Future<Output = Self::Output>;
@@ -442,7 +448,7 @@ pub mod f64 {
 }
 
 pub use crate::panic::panicking;
-pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, module_path, stringify, concat, include_str, include_bytes, derive, compile_error, global_allocator, test};
+pub use crate::macros::{format_args, const_format_args, cfg, env, option_env, line, column, file, module_path, stringify, concat, include, include_str, include_bytes, derive, compile_error, global_allocator, test};
 
 #[prelude_import]
 #[allow(unused_imports)]

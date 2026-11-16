@@ -932,3 +932,24 @@ impl<T: ?Sized> Debug for crate::cell::UnsafeCell<T> {
 impl<T> Debug for crate::mem::MaybeUninit<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(crate::any::type_name::<Self>()) }
 }
+
+impl<T: Debug> Debug for crate::slice::Iter<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.debug_tuple("Iter").field(&self.as_slice()).finish() }
+}
+impl<I: Debug> Debug for crate::iter::Enumerate<I> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.debug_struct("Enumerate").field("iter", &self.iter).field("count", &self.count).finish() }
+}
+impl<T: ?Sized + Debug> Debug for crate::cell::RefCell<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let mut d = f.debug_struct("RefCell");
+        match self.try_borrow() {
+            Ok(borrow) => { d.field("value", &borrow); }
+            Err(_) => { d.field("value", &format_args!("<borrowed>")); }
+        }
+        d.finish()
+    }
+}
+
+impl<T: ?Sized + Debug> Debug for crate::cell::Ref<'_, T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { Debug::fmt(&**self, f) }
+}

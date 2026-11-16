@@ -437,3 +437,34 @@ impl<T> Drop for Drain<'_, T> {
         }
     }
 }
+
+impl<T> Vec<T> {
+    /// The vector's elements as a slice that lives for `'a`; the allocation is never freed.
+    pub fn leak<'a>(self) -> &'a mut [T] where T: 'a {
+        let mut this = mem::ManuallyDrop::new(self);
+        unsafe { slice::from_raw_parts_mut(this.as_mut_ptr(), this.length) }
+    }
+}
+impl<'a, T: Clone> From<crate::borrow::Cow<'a, [T]>> for Vec<T> {
+    fn from(cow: crate::borrow::Cow<'a, [T]>) -> Vec<T> { cow.into_owned() }
+}
+impl<T, const N: usize> From<[T; N]> for Vec<T> {
+    fn from(array: [T; N]) -> Vec<T> {
+        let mut vec = Vec::with_capacity(N);
+        let array = mem::ManuallyDrop::new(array);
+        unsafe {
+            ptr::copy_nonoverlapping(&*array as *const [T; N] as *const T, vec.as_mut_ptr(), N);
+            vec.set_len(N);
+        }
+        vec
+    }
+}
+impl<T, const N: usize> TryFrom<Vec<T>> for [T; N] {
+    type Error = Vec<T>;
+    fn try_from(mut vec: Vec<T>) -> Result<[T; N], Vec<T>> {
+        if vec.length != N { return Err(vec); }
+        // SAFETY: the vector holds exactly `N` initialized elements, whose ownership moves to the array.
+        unsafe { vec.set_len(0) };
+        Ok(unsafe { ptr::read(vec.as_ptr() as *const [T; N]) })
+    }
+}

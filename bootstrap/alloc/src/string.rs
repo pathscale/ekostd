@@ -197,3 +197,9 @@ impl String {
 impl<'a> core::iter::FromIterator<&'a char> for String { fn from_iter<I: IntoIterator<Item = &'a char>>(iter: I) -> Self { let mut s = Self::new(); for c in iter { s.push(*c) } s } }
 impl core::iter::Extend<char> for String { fn extend<I: IntoIterator<Item = char>>(&mut self, iter: I) { for c in iter { self.push(c) } } }
 impl From<&String> for String { fn from(s: &String) -> String { s.clone() } }
+
+impl core::str::pattern::Pattern for &String {
+    fn find_in(&mut self, haystack: &str, from: usize) -> Option<(usize, usize)> { self.as_str().find_in(haystack, from) }
+    fn prefix_len(&mut self, haystack: &str) -> Option<usize> { self.as_str().prefix_len(haystack) }
+    fn suffix_len(&mut self, haystack: &str) -> Option<usize> { self.as_str().suffix_len(haystack) }
+}

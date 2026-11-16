@@ -339,3 +339,36 @@ impl<T: PartialOrd> PartialOrd for Reverse<T> {
 impl<T: Ord> Ord for Reverse<T> {
     fn cmp(&self, other: &Reverse<T>) -> Ordering { other.0.cmp(&self.0) }
 }
+
+impl<T: PointeeSized> PartialOrd for crate::marker::PhantomData<T> {
+    fn partial_cmp(&self, _other: &crate::marker::PhantomData<T>) -> Option<Ordering> { Some(Equal) }
+}
+impl<T: PointeeSized> Ord for crate::marker::PhantomData<T> {
+    fn cmp(&self, _other: &crate::marker::PhantomData<T>) -> Ordering { Equal }
+}
+macro_rules! tuple_cmp {
+    (eq $(($($T:ident $i:tt),+))*) => {$(
+        impl<$($T: PartialEq),+> PartialEq for ($($T,)+) {
+            fn eq(&self, other: &($($T,)+)) -> bool { true $(&& self.$i == other.$i)+ }
+        }
+        impl<$($T: Eq),+> Eq for ($($T,)+) {}
+    )*};
+    (ord $(($($T:ident $i:tt),+))*) => {$(
+        impl<$($T: PartialOrd),+> PartialOrd for ($($T,)+) {
+            fn partial_cmp(&self, other: &($($T,)+)) -> Option<Ordering> {
+                $(match self.$i.partial_cmp(&other.$i) { Some(Equal) => {}, non_eq => return non_eq })+
+                Some(Equal)
+            }
+        }
+        impl<$($T: Ord),+> Ord for ($($T,)+) {
+            fn cmp(&self, other: &($($T,)+)) -> Ordering {
+                $(match self.$i.cmp(&other.$i) { Equal => {}, non_eq => return non_eq })+
+                Equal
+            }
+        }
+    )*};
+}
+tuple_cmp!(eq (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
+tuple_cmp!(ord (A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));

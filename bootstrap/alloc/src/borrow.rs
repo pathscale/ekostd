@@ -33,6 +33,15 @@ impl<'a, B: ?Sized + ToOwned> Cow<'a, B> {
     pub fn into_owned(self) -> B::Owned {
         match self { Self::Borrowed(value) => value.to_owned(), Self::Owned(value) => value }
     }
+    pub fn to_mut(&mut self) -> &mut <B as ToOwned>::Owned {
+        if let Cow::Borrowed(borrowed) = *self {
+            *self = Cow::Owned(borrowed.to_owned());
+        }
+        match self {
+            Cow::Owned(owned) => owned,
+            Cow::Borrowed(_) => unreachable!(),
+        }
+    }
     pub fn as_ref(&self) -> &B {
         match self { Self::Borrowed(value) => value, Self::Owned(value) => value.borrow() }
     }

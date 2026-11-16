@@ -75,9 +75,9 @@ unsafe impl<#[may_dangle] T: ?Sized> Drop for Box<T> {
 }
 
 impl<T: ?Sized> Box<T> {
-    pub fn leak(value: Self) -> &'static mut T
+    pub fn leak<'a>(value: Self) -> &'a mut T
     where
-        T: 'static,
+        T: 'a,
     {
         let raw = Self::into_raw(value);
         unsafe { &mut *raw }
@@ -181,5 +181,23 @@ impl<T> Box<[T]> {
         // SAFETY: `MaybeUninit` needs no initialization.
         unsafe { vec.set_len(len) };
         vec.into_boxed_slice()
+    }
+}
+
+impl<T> Box<[T]> {
+    /// A boxed slice of `len` elements whose bytes are all zero, not yet claimed to be initialized.
+    pub fn new_zeroed_slice(len: usize) -> Box<[core::mem::MaybeUninit<T>]> {
+        let layout = Layout::array::<T>(len).expect("capacity overflow");
+        let raw = unsafe { alloc::alloc_zeroed(layout).cast::<core::mem::MaybeUninit<T>>() };
+        // SAFETY: the allocation holds `len` elements of `MaybeUninit<T>`, which have the layout of `T`.
+        unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(raw, len)) }
+    }
+}
+impl<T> Box<[core::mem::MaybeUninit<T>]> {
+    /// # Safety
+    /// Every element must be initialized.
+    pub unsafe fn assume_init(self) -> Box<[T]> {
+        let raw = Box::into_raw(self);
+        unsafe { Box::from_raw(raw as *mut [T]) }
     }
 }

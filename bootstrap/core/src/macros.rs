@@ -97,6 +97,8 @@ pub macro stringify($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro concat($($tokens:tt)*) {}
 #[rustc_builtin_macro]
+pub macro include($($tokens:tt)*) {}
+#[rustc_builtin_macro]
 pub macro include_str($($tokens:tt)*) {}
 #[rustc_builtin_macro]
 pub macro include_bytes($($tokens:tt)*) {}

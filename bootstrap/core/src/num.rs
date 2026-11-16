@@ -1126,3 +1126,27 @@ impl crate::fmt::Debug for NonZero<char> {
 impl crate::fmt::Display for NonZero<char> {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Display::fmt(&self.0, f) }
 }
+
+macro_rules! wrapping_div_rem {
+    ($($t:ty)*) => {$(
+        impl crate::ops::Div for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn div(self, rhs: Self) -> Self { Wrapping(self.0.wrapping_div(rhs.0)) }
+        }
+        impl crate::ops::DivAssign for Wrapping<$t> {
+            #[inline]
+            fn div_assign(&mut self, rhs: Self) { *self = *self / rhs; }
+        }
+        impl crate::ops::Rem for Wrapping<$t> {
+            type Output = Self;
+            #[inline]
+            fn rem(self, rhs: Self) -> Self { Wrapping(self.0.wrapping_rem(rhs.0)) }
+        }
+        impl crate::ops::RemAssign for Wrapping<$t> {
+            #[inline]
+            fn rem_assign(&mut self, rhs: Self) { *self = *self % rhs; }
+        }
+    )*};
+}
+wrapping_div_rem!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);

@@ -11,6 +11,9 @@ pub const unsafe fn from_u32_unchecked(i: u32) -> char {
 impl char {
     pub const MAX: char = '\u{10ffff}';
 
+    /// The most bytes a character takes in UTF-8.
+    pub const MAX_LEN_UTF8: usize = 4;
+
     pub const fn from_u32(i: u32) -> Option<char> {
         if i <= 0x10ffff && !(i >= 0xd800 && i <= 0xdfff) {
             Some(unsafe { Self::from_u32_unchecked(i) })

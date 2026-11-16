@@ -249,6 +249,11 @@ impl str {
         SplitTerminator { inner: self.split(pat) }
     }
 
+    /// The pieces between runs of whitespace, with no empty pieces.
+    pub fn split_whitespace(&self) -> SplitWhitespace<'_> {
+        SplitWhitespace { rest: self }
+    }
+
     /// What is left after removing every match from both ends.
     pub fn trim_matches<P: Pattern>(&self, mut pat: P) -> &str {
         let mut rest = self;
@@ -885,5 +890,29 @@ impl<'a, P: Pattern> crate::iter::Iterator for SplitTerminator<'a, P> {
             Some(piece) if piece.is_empty() && self.inner.finished => None,
             other => other,
         }
+    }
+}
+
+pub struct SplitWhitespace<'a> {
+    rest: &'a str,
+}
+impl<'a> Clone for SplitWhitespace<'a> {
+    fn clone(&self) -> Self { SplitWhitespace { rest: self.rest } }
+}
+impl<'a> crate::iter::Iterator for SplitWhitespace<'a> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        let rest = self.rest;
+        let start = match rest.char_indices().find(|&(_, c)| !c.is_whitespace()) {
+            Some((start, _)) => start,
+            None => { self.rest = ""; return None; }
+        };
+        let rest = &rest[start..];
+        let end = match rest.char_indices().find(|&(_, c)| c.is_whitespace()) {
+            Some((end, _)) => end,
+            None => rest.len(),
+        };
+        self.rest = &rest[end..];
+        Some(&rest[..end])
     }
 }

@@ -136,3 +136,19 @@ macro_rules! fnptr_hash_impls {
     };
 }
 fnptr_hash_impls!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+impl<T: ?Sized> Hash for PhantomData<T> {
+    fn hash<H: Hasher>(&self, _: &mut H) {}
+}
+impl<H> Default for BuildHasherDefault<H> {
+    fn default() -> Self { Self(PhantomData) }
+}
+macro_rules! tuple_hash {
+    ($(($($T:ident $i:tt),+))*) => {$(
+        impl<$($T: Hash),+> Hash for ($($T,)+) {
+            fn hash<HS: Hasher>(&self, state: &mut HS) { $(self.$i.hash(state);)+ }
+        }
+    )*};
+}
+tuple_hash!((A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
