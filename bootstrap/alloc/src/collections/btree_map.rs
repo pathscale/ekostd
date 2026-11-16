@@ -613,7 +613,7 @@ impl<K: Ord, V> BTreeMap<K, V> {
         self.remove_by(&|entries: &[(K, V)], _leaf: bool| search(entries, key))
     }
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
-        if self.contains_key(&key) { Entry::Occupied(OccupiedEntry { map: self, key }) } else { Entry::Vacant(VacantEntry { map: self, key }) }
+        if self.contains_key(&key) { Entry::Occupied(OccupiedEntry { map: self, probe: Probe::Key(key) }) } else { Entry::Vacant(VacantEntry { map: self, key }) }
     }
     pub fn range<T: ?Sized + Ord, R: RangeBounds<T>>(&self, range: R) -> Range<'_, K, V> where K: Borrow<T> {
         check_range(&range);
@@ -676,8 +676,12 @@ impl<K, V> IntoIterator for BTreeMap<K, V> {
 }
 
 pub enum Entry<'a, K: 'a, V: 'a> { Occupied(OccupiedEntry<'a, K, V>), Vacant(VacantEntry<'a, K, V>) }
-/// A present key: the map and the probe key, which finds the pair again on each access.
-pub struct OccupiedEntry<'a, K: 'a, V: 'a> { map: &'a mut BTreeMap<K, V>, key: K }
+/// Where an occupied entry's pair is: under a probe key, or at either end of the map. The ends need
+/// no key, so `first_entry` and `last_entry` neither clone nor take one; while the entry lives it
+/// holds the map's only borrow, so the pair at that end stays the same pair.
+enum Probe<K> { Key(K), First, Last }
+/// A present key: the map and where its pair is, which finds the pair again on each access.
+pub struct OccupiedEntry<'a, K: 'a, V: 'a> { map: &'a mut BTreeMap<K, V>, probe: Probe<K> }
 pub struct VacantEntry<'a, K: 'a, V: 'a> { map: &'a mut BTreeMap<K, V>, key: K }
 impl<'a, K: Ord, V> Entry<'a, K, V> {
     pub fn key(&self) -> &K { match self { Self::Occupied(e) => e.key(), Self::Vacant(e) => e.key() } }
@@ -687,15 +691,41 @@ impl<'a, K: Ord, V> Entry<'a, K, V> {
     pub fn and_modify<F: FnOnce(&mut V)>(self, f: F) -> Self { match self { Self::Occupied(mut e) => { f(e.get_mut()); Self::Occupied(e) }, vacant => vacant } }
 }
 impl<'a, K: Ord, V> OccupiedEntry<'a, K, V> {
-    fn pair(&self) -> &(K, V) { self.map.find(&self.key).expect("an occupied entry's key is in the map") }
-    fn pair_mut(&mut self) -> &mut (K, V) { self.map.find_mut(&self.key).expect("an occupied entry's key is in the map") }
+    fn locate<'m>(map: &'m BTreeMap<K, V>, probe: &Probe<K>) -> &'m (K, V) {
+        match probe {
+            Probe::Key(key) => map.find(key),
+            Probe::First => map.first_pair(),
+            Probe::Last => map.last_pair(),
+        }
+        .expect("an occupied entry's pair is in the map")
+    }
+    fn locate_mut<'m>(map: &'m mut BTreeMap<K, V>, probe: &Probe<K>) -> &'m mut (K, V) {
+        match probe {
+            Probe::Key(key) => map.find_mut(key),
+            Probe::First => map.first_pair_mut(),
+            Probe::Last => map.last_pair_mut(),
+        }
+        .expect("an occupied entry's pair is in the map")
+    }
+    fn pair(&self) -> &(K, V) { Self::locate(&*self.map, &self.probe) }
+    fn pair_mut(&mut self) -> &mut (K, V) { Self::locate_mut(&mut *self.map, &self.probe) }
     pub fn key(&self) -> &K { &self.pair().0 }
     pub fn get(&self) -> &V { &self.pair().1 }
     pub fn get_mut(&mut self) -> &mut V { &mut self.pair_mut().1 }
-    pub fn into_mut(self) -> &'a mut V { &mut self.map.find_mut(&self.key).expect("an occupied entry's key is in the map").1 }
+    pub fn into_mut(self) -> &'a mut V {
+        let OccupiedEntry { map, probe } = self;
+        &mut Self::locate_mut(map, &probe).1
+    }
     pub fn insert(&mut self, value: V) -> V { core::mem::replace(self.get_mut(), value) }
     pub fn remove(self) -> V { self.remove_entry().1 }
-    pub fn remove_entry(self) -> (K, V) { self.map.remove_entry(&self.key).expect("an occupied entry's key is in the map") }
+    pub fn remove_entry(self) -> (K, V) {
+        match self.probe {
+            Probe::Key(key) => self.map.remove_entry(&key),
+            Probe::First => self.map.pop_first(),
+            Probe::Last => self.map.pop_last(),
+        }
+        .expect("an occupied entry's pair is in the map")
+    }
 }
 impl<'a, K: Ord, V> VacantEntry<'a, K, V> {
     pub fn key(&self) -> &K { &self.key }
@@ -711,4 +741,98 @@ impl<K: core::hash::Hash, V: core::hash::Hash> core::hash::Hash for BTreeMap<K, 
 }
 impl<K: Ord, V, const N: usize> From<[(K, V); N]> for BTreeMap<K, V> {
     fn from(entries: [(K, V); N]) -> Self { let mut map = BTreeMap::new(); for (k, v) in entries { map.insert(k, v); } map }
+}
+
+impl<K, V> BTreeMap<K, V> {
+    /// The pair with the least key: the first pair of the leftmost leaf.
+    fn first_pair(&self) -> Option<&(K, V)> {
+        let mut node = &self.root;
+        while let Some(child) = node.children.first() {
+            node = child;
+        }
+        node.entries.first()
+    }
+    /// The pair with the greatest key: the last pair of the rightmost leaf.
+    fn last_pair(&self) -> Option<&(K, V)> {
+        let mut node = &self.root;
+        while let Some(child) = node.children.last() {
+            node = child;
+        }
+        node.entries.last()
+    }
+    fn first_pair_mut(&mut self) -> Option<&mut (K, V)> {
+        let mut node = &mut self.root;
+        while !node.children.is_empty() {
+            node = &mut node.children[0];
+        }
+        node.entries.first_mut()
+    }
+    fn last_pair_mut(&mut self) -> Option<&mut (K, V)> {
+        let mut node = &mut self.root;
+        while !node.children.is_empty() {
+            let last = node.children.len() - 1;
+            node = &mut node.children[last];
+        }
+        node.entries.last_mut()
+    }
+    /// A map of `pairs`, which are already in strictly ascending key order, built along the right
+    /// edge without comparing keys.
+    pub(crate) fn from_sorted(pairs: Vec<(K, V)>) -> Self {
+        let mut map = Self::new();
+        map.extend_sorted(pairs);
+        map
+    }
+}
+
+impl<K: Ord, V> BTreeMap<K, V> {
+    /// The entry of the pair with the least key, or `None` for an empty map.
+    pub fn first_entry(&mut self) -> Option<OccupiedEntry<'_, K, V>> {
+        if self.is_empty() { None } else { Some(OccupiedEntry { map: self, probe: Probe::First }) }
+    }
+    /// The entry of the pair with the greatest key, or `None` for an empty map.
+    pub fn last_entry(&mut self) -> Option<OccupiedEntry<'_, K, V>> {
+        if self.is_empty() { None } else { Some(OccupiedEntry { map: self, probe: Probe::Last }) }
+    }
+    /// Moves every pair whose key is at or above `key` into a new map and returns it; the rest
+    /// stay. The pairs are taken out in order, split in one pass and rebuilt along the right edge
+    /// on both sides, so this is linear in the length of the map and never rebalances.
+    pub fn split_off<Q: ?Sized + Ord>(&mut self, key: &Q) -> Self where K: Borrow<Q> {
+        let pairs = self.take_pairs();
+        let mut below = Vec::with_capacity(pairs.len());
+        let mut above = Vec::new();
+        for pair in pairs {
+            if Ord::cmp(Borrow::<Q>::borrow(&pair.0), key) == Ordering::Less {
+                below.push(pair);
+            } else {
+                above.push(pair);
+            }
+        }
+        self.extend_sorted(below);
+        Self::from_sorted(above)
+    }
+    /// Puts `key` in place of the equal key stored in the map and returns the stored one, or gives
+    /// `key` back when no equal key is stored. The value and the shape of the tree stay as they are.
+    pub(crate) fn replace_key(&mut self, key: K) -> Result<K, K> {
+        match self.find_mut(&key) {
+            Some(pair) => Ok(core::mem::replace(&mut pair.0, key)),
+            None => Err(key),
+        }
+    }
+}
+
+impl<'a, K: Ord + Copy, V: Copy> Extend<(&'a K, &'a V)> for BTreeMap<K, V> {
+    fn extend<I: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, it: I) { for (&k, &v) in it { self.insert(k, v); } }
+}
+
+impl<'a, K: Ord, V> Entry<'a, K, V> {
+    /// Like `or_insert_with`, but the function that makes the value is given the key.
+    pub fn or_insert_with_key<F: FnOnce(&K) -> V>(self, f: F) -> &'a mut V {
+        match self {
+            Self::Occupied(e) => e.into_mut(),
+            Self::Vacant(e) => {
+                let value = f(&e.key);
+                e.insert(value)
+            }
+        }
+    }
 }
