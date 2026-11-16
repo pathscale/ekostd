@@ -205,11 +205,70 @@ impl<T: ?Sized> RangeBounds<T> for RangeToInclusive<&T> {
     fn start_bound(&self) -> Bound<&T> { Bound::Unbounded }
     fn end_bound(&self) -> Bound<&T> { Bound::Included(self.end) }
 }
-impl<Idx: crate::cmp::PartialOrd> Range<Idx> {
-    pub fn contains(&self, item: &Idx) -> bool { *item >= self.start && *item < self.end }
+impl<Idx: crate::cmp::PartialOrd<Idx>> Range<Idx> {
+    /// True when `item` lies in `start..end`, through `RangeBounds::contains`.
+    pub fn contains<U>(&self, item: &U) -> bool
+    where
+        Idx: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<Idx>,
+    {
+        <Self as RangeBounds<Idx>>::contains(self, item)
+    }
+
+    /// True when the range holds no value: `start` is not below `end`.
+    pub fn is_empty(&self) -> bool {
+        !(self.start < self.end)
+    }
 }
-impl<Idx: crate::cmp::PartialOrd> RangeInclusive<Idx> {
-    pub fn contains(&self, item: &Idx) -> bool { *item >= self.start && *item <= self.end }
+
+impl<Idx: crate::cmp::PartialOrd<Idx>> RangeInclusive<Idx> {
+    /// True when `item` lies in the range, through `RangeBounds::contains`;
+    /// an exhausted range contains nothing.
+    pub fn contains<U>(&self, item: &U) -> bool
+    where
+        Idx: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<Idx>,
+    {
+        <Self as RangeBounds<Idx>>::contains(self, item)
+    }
+
+    /// True when the range holds no value: it was iterated to the end, or `start` is not at or below `end`.
+    pub fn is_empty(&self) -> bool {
+        self.exhausted || !(self.start <= self.end)
+    }
+}
+
+impl<Idx: crate::cmp::PartialOrd<Idx>> RangeFrom<Idx> {
+    /// True when `item` is at or above `start`, through `RangeBounds::contains`.
+    pub fn contains<U>(&self, item: &U) -> bool
+    where
+        Idx: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<Idx>,
+    {
+        <Self as RangeBounds<Idx>>::contains(self, item)
+    }
+}
+
+impl<Idx: crate::cmp::PartialOrd<Idx>> RangeTo<Idx> {
+    /// True when `item` is below `end`, through `RangeBounds::contains`.
+    pub fn contains<U>(&self, item: &U) -> bool
+    where
+        Idx: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<Idx>,
+    {
+        <Self as RangeBounds<Idx>>::contains(self, item)
+    }
+}
+
+impl<Idx: crate::cmp::PartialOrd<Idx>> RangeToInclusive<Idx> {
+    /// True when `item` is at or below `end`, through `RangeBounds::contains`.
+    pub fn contains<U>(&self, item: &U) -> bool
+    where
+        Idx: crate::cmp::PartialOrd<U>,
+        U: ?Sized + crate::cmp::PartialOrd<Idx>,
+    {
+        <Self as RangeBounds<Idx>>::contains(self, item)
+    }
 }
 
 impl<Idx: crate::default::Default> crate::default::Default for Range<Idx> {
