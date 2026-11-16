@@ -322,6 +322,85 @@ fn sets(run: &mut Run) {
     run.check(set.first() == Some(&0) && set.last() == Some(&5000), "set first last", 0);
 }
 
+fn sorts(run: &mut Run) {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let mut pairs: Vec<(u32, u32)> = Vec::with_capacity(200_000);
+    let mut i = 0u32;
+    while i < 200_000 {
+        pairs.push((rng.below(1000) as u32, i));
+        i += 1;
+    }
+    pairs.sort_by_key(|p| p.0);
+    run.check(
+        pairs.len() == 200_000 && pairs.iter().zip(pairs.iter().skip(1)).all(|(a, b)| a.0 < b.0 || (a.0 == b.0 && a.1 < b.1)),
+        "sort_by_key stable",
+        0,
+    );
+
+    let mut values: Vec<u64> = Vec::with_capacity(200_000);
+    let mut sum = 0u64;
+    let mut xor = 0u64;
+    let mut n = 0u32;
+    while n < 200_000 {
+        let v = rng.below(1 << 40);
+        sum = sum.wrapping_add(v);
+        xor ^= v;
+        values.push(v);
+        n += 1;
+    }
+    values.sort_unstable();
+    let mut sum_after = 0u64;
+    let mut xor_after = 0u64;
+    for v in values.iter() {
+        sum_after = sum_after.wrapping_add(*v);
+        xor_after ^= *v;
+    }
+    run.check(
+        values.len() == 200_000
+            && values.iter().zip(values.iter().skip(1)).all(|(a, b)| a <= b)
+            && sum == sum_after
+            && xor == xor_after,
+        "sort_unstable",
+        0,
+    );
+
+    let mut reversed: Vec<u32> = Vec::with_capacity(100_000);
+    let mut k = 100_000u32;
+    while k > 0 {
+        k -= 1;
+        reversed.push(k);
+    }
+    reversed.sort();
+    run.check(reversed.iter().copied().eq(0..100_000), "sort reversed", 0);
+
+    let mut sorted: Vec<u32> = Vec::with_capacity(100_000);
+    let mut k = 0u32;
+    while k < 100_000 {
+        sorted.push(k);
+        k += 1;
+    }
+    sorted.sort();
+    run.check(sorted.iter().copied().eq(0..100_000), "sort sorted", 0);
+
+    let mut equal: Vec<(u32, u32)> = Vec::with_capacity(50_000);
+    let mut k = 0u32;
+    while k < 50_000 {
+        equal.push((7, k));
+        k += 1;
+    }
+    equal.sort_by_key(|p| p.0);
+    run.check(equal.iter().all(|p| p.0 == 7) && equal.iter().map(|p| p.1).eq(0..50_000), "sort all equal", 0);
+
+    let mut empty: Vec<u32> = Vec::new();
+    empty.sort();
+    empty.sort_unstable();
+    let mut one: Vec<u32> = Vec::new();
+    one.push(5);
+    one.sort();
+    one.sort_unstable();
+    run.check(empty.is_empty() && one.len() == 1 && one[0] == 5, "sort tiny", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -331,6 +410,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    sorts(&mut run);
     // Descending inserts: every one lands at the front, which the sorted Vec paid for with a full move.
     let mut map = BTreeMap::new();
     let mut k = 200_000u32;
