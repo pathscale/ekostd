@@ -535,6 +535,90 @@ fn rcs(run: &mut Run) {
     run.check(alloc::rc::Rc::strong_count(&r) == 1 && alloc::rc::Rc::weak_count(&r) == 0, "rc clone drop pairs", 0);
 }
 
+fn heaps(run: &mut Run) {
+    let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+    let mut values: Vec<u64> = Vec::with_capacity(100_000);
+    let mut sum = 0u64;
+    let mut xor = 0u64;
+    let mut n = 0u32;
+    while n < 100_000 {
+        let v = rng.below(1 << 20);
+        sum = sum.wrapping_add(v);
+        xor ^= v;
+        values.push(v);
+        n += 1;
+    }
+    let mut heap = alloc::collections::BinaryHeap::from(values.clone());
+    run.check(heap.len() == 100_000, "heap from vec len", 0);
+    let mut prev = u64::MAX;
+    let mut ordered = true;
+    let mut count = 0u32;
+    let mut sum_after = 0u64;
+    let mut xor_after = 0u64;
+    while let Some(v) = heap.pop() {
+        if v > prev {
+            ordered = false;
+        }
+        prev = v;
+        count += 1;
+        sum_after = sum_after.wrapping_add(v);
+        xor_after ^= v;
+    }
+    run.check(
+        ordered && count == 100_000 && sum_after == sum && xor_after == xor && heap.is_empty(),
+        "heap from vec pops sorted",
+        0,
+    );
+
+    let collected: alloc::collections::BinaryHeap<u64> = values.iter().copied().collect();
+    let sorted = collected.into_sorted_vec();
+    values.sort_unstable();
+    run.check(
+        sorted.len() == 100_000 && sorted.iter().zip(sorted.iter().skip(1)).all(|(a, b)| a <= b) && sorted.iter().eq(values.iter()),
+        "heap into_sorted_vec",
+        0,
+    );
+
+    let mut small = alloc::collections::BinaryHeap::from([5u32, 9, 3]);
+    {
+        let mut top = small.peek_mut().unwrap();
+        run.check(*top == 9, "heap peek_mut top", 0);
+        *top = 1;
+    }
+    let p1 = small.pop();
+    let p2 = small.pop();
+    let p3 = small.pop();
+    let p4 = small.pop();
+    run.check(p1 == Some(5) && p2 == Some(3) && p3 == Some(1) && p4.is_none(), "heap peek_mut", 0);
+    let mut other = alloc::collections::BinaryHeap::from([4u32, 8, 6, 2]);
+    let top = other.peek_mut().map(alloc::collections::binary_heap::PeekMut::pop);
+    run.check(top == Some(8) && other.len() == 3 && other.peek() == Some(&6), "heap PeekMut::pop", 0);
+    let mut none: alloc::collections::BinaryHeap<u32> = alloc::collections::BinaryHeap::new();
+    run.check(none.peek_mut().is_none(), "heap peek_mut empty", 0);
+
+    let mut a: alloc::collections::BinaryHeap<u32> = alloc::collections::BinaryHeap::new();
+    a.extend([7u32, 1, 12, 4]);
+    a.extend(&[3u32, 10]);
+    let mut b: alloc::collections::BinaryHeap<u32> = (20u32..30).collect();
+    a.append(&mut b);
+    run.check(a.len() == 16 && b.is_empty() && a.peek() == Some(&29), "heap misc extend append", 0);
+    run.check(a.iter().copied().sum::<u32>() == 282 && (&a).into_iter().count() == 16, "heap misc iter", 0);
+    let mut evens = a.clone();
+    evens.retain(|x| x % 2 == 0);
+    let mut kept: Vec<u32> = Vec::new();
+    while let Some(v) = evens.pop() {
+        kept.push(v);
+    }
+    run.check(kept.iter().eq([28u32, 26, 24, 22, 20, 12, 10, 4].iter()), "heap misc retain", 0);
+    let mut d = a.clone();
+    let drained = d.drain().count();
+    run.check(drained == 16 && d.is_empty() && a.len() == 16, "heap misc drain", 0);
+    a.clear();
+    run.check(a.is_empty() && a.len() == 0 && a.peek().is_none(), "heap misc clear", 0);
+    let roomy: alloc::collections::BinaryHeap<u32> = alloc::collections::BinaryHeap::with_capacity(10);
+    run.check(roomy.capacity() >= 10 && roomy.is_empty(), "heap misc with_capacity", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -544,6 +628,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    heaps(&mut run);
     rcs(&mut run);
     sorts(&mut run);
     // Descending inserts: every one lands at the front, which the sorted Vec paid for with a full move.
