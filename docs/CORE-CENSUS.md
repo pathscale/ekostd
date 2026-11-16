@@ -186,6 +186,74 @@ are compiler work and are listed in `ekopathrs/docs/TODO.md`. Two things left `e
 them and nothing in the graph uses them: `Rem` and `RemAssign` for `f32` and `f64`, and shifts by a 128-bit
 amount. The census still exits 0 without them. `Default` for the atomics takes its zero as a macro argument.
 
+## Run 13, 2026-11-16: ekod on an empty sysroot, `eko-core` and `eko-alloc` only
+
+The survey builds `eko-core`, `eko-alloc` and `eko-compiler-builtins` with `--sysroot <empty> -Cpanic=abort`, then
+`cargo check --keep-going --bin ekod` with the three as the only `core`, `alloc` and `compiler_builtins`.
+Every item below was added on its own and only as far as a user needed it. Nothing is a stub: no dummy bodies, no
+`unimplemented!`. Rounds are taken from `summary.txt` of each run.
+
+| round | units started | units failed | errors | commit |
+|---|---|---|---|---|
+| R10 | 40 | 4 | 178 | 4ddd770 |
+| R11 (Pin, Zip, BTreeSet, str, Vec::splice, Option/Result/Cell/Ordering) | 40 | 3 | 25 | |
+| R12 (Unpin, array Clone, Vec/Cow equality, `ascii`, Pattern for `&&str`) | 45 | 6 | 88 | |
+| R13 (CString, Box Fn/FnMut, String replace_range, NonZero const, floats, Step) | 48 | 4 | 68 | |
+| R14 (BTreeSet range/union, Extend<&T>, From<T> for Option) | 48 | 2 | 56 | f3f79b9 |
+
+Source per item. **written** means written here against the existing eko-core primitives; **copied** means taken
+from `ps-rust-stdlib`; **relax** means taken from `relax/libs/relax/compiler/std/core` (Rust syntax). Where the
+Rust version sits on a chain, the item was rewritten smaller and is marked *chain-forced*. Everything below is
+written; nothing was copied or taken from relax in these rounds, because each item stands on existing primitives
+and is shorter written than imported.
+
+- `Pin<&mut T>::get_mut/get_unchecked_mut/into_ref` by value (the old ones took `&mut self`); `Unpin` for raw
+  pointers, `PhantomData`, `Box`, `Rc`, `Arc`, `Weak`; `Clone for [T; N]` for `T: Clone` (it was `Copy` only).
+- `Zip` `size_hint`, `ExactSizeIterator`, `DoubleEndedIterator`; `Take` `DoubleEndedIterator`;
+  `Iterator::{ne, reduce, partition, max_by}`; `Step` for `u128`/`i128`; `Range: Default`.
+- `Option::{as_slice, inspect}`, `From<T> for Option<T>`, `Result::{inspect, inspect_err, expect_err}`,
+  `Cell: Default`, `Ordering::{reverse, is_eq, is_ne, is_lt, is_gt, is_le, is_ge}`, `f32/f64::total_cmp` (the Rust
+  algorithm), `From<bool>` for `f32`/`f64`.
+- *chain-forced*: `NonZero::new` is a plain `const fn` that reads the bytes. Rust relies on a niche attribute, and a
+  `[const]` trait bound would force every caller to enable `const_trait_impl`.
+- `str::{matches, rsplit_once, rsplit, splitn, escape_default}`, `Pattern for &&str`, `core::ascii::escape_default`.
+- *eager*: `Vec::splice` and `BTreeSet::{difference, union, intersection}` build their result at once and return a
+  `vec::IntoIter`. Rust defers the splice to the drop of the iterator; the difference shows only in when the vector
+  changes.
+- `Vec::dedup_by`; `Vec` equality with `Vec<U>`, `[U]`, `&[U]`, `&mut [U]`, `[U; N]`, `&[U; N]`; `Cow<[T]>` equality
+  with `Vec<U>` and `&[U]`; `[T]: PartialEq<Vec<U>>`; `Rc::try_unwrap`; `Arc::into_inner` (the Rust algorithm,
+  `fetch_sub` first); `String::{try_reserve, insert_str, replace_range}`; `From<String>` and `From<&str>` for
+  `Vec<u8>`; `alloc::str::replace`; `VecDeque::try_reserve`.
+- `BTreeSet` without the `T: Ord` struct bound (non-ordering methods now in `impl<T>`), `is_subset`, `range`,
+  `From<[T; N]>`, `Hash`, `Extend<&T>`; `BTreeMap` `Hash` and `From<[(K, V); N]>`.
+- `Box<F>: Fn/FnMut` (it had `FnOnce` only).
+- *chain-forced*: `alloc::ffi::{CString, NulError}` hold a `Box<[u8]>` with the NUL, over the existing
+  `core::ffi::CStr`: `new`, `from_vec_unchecked`, `as_bytes`, `as_bytes_with_nul`, `as_c_str`, `into_bytes`, `Deref`,
+  `Debug`.
+- Rounds R1 to R9: `fmt::Options` and template options; `Debug` for `UnsafeCell`, `MaybeUninit`, `slice::Iter`,
+  `Enumerate`, `RefCell`, `Ref`, `Fuse`, tuples 4 to 8; generic `NonZero<T>`; `Saturating`; `Wrapping` `/` and `%`; the
+  lang items for async lowering (`ResumeTy`, `get_context`, `IntoFuture`, `AsyncDrop`, `Poll`, `Context`);
+  `task::Wake`; the `Vec`, `Box`, `Arc`, `String`, `str`, `slice`, `BinaryHeap`, `BTreeMap::range` groups; the NEON
+  intrinsics `memchr` uses; `include!`.
+
+### Not added
+
+- `char::escape_debug` (relax-lex `tokens.rs:806`). It needs the Unicode grapheme-extend and printable tables, which is
+  a chain, so it stays open. The caller can use `escape_default` (different for non-ASCII), or the tables can be
+  generated into eko-core as a separate decision.
+- `core::net`. `serde_core` is its only user, and only ekostd's optional `serde` feature pulls serde in.
+- Dropped by the owner: `sort_by_cached_key`, `is_sorted_by`, bounds-pair `SliceIndex`, `shrink_to`, `align_to`,
+  `Formatter::precision`, `IntoIter` Clone/Debug, `Drain::as_slice`, the crc32 intrinsics.
+- Deferred, dependency may be removed: indexmap, crc32fast, generic-array, hybrid-array, typenum, tinyvec.
+- Caller-side, not library: `envyrs/src/os.rs` submodules use `libc::` while only the parent has
+  `use eko::libc_lite as libc` (55 errors on macOS and Linux aarch64, where the `libc` crate is not a dependency).
+
+### ekostd with `--workspace --all-features`
+
+The only error is `serde_core` on `core::net` (E0432). `serde` is not in ekod's `Cargo.lock`. Recommended: drop
+ekostd's `serde` feature, and have `frontend-private` and `relax-facts` (feature `facts-json`) serialise a path
+through its string form. That is a caller change and was not made here.
+
 ## Open after run 2, largest first
 
 (Historical: everything in this list is closed as of run 7.)
