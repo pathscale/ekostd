@@ -1371,6 +1371,291 @@ impl<T> [T] {
     }
 }
 
+impl<T> [T] {
+    /// Reorders the slice so `self[index]` is the element a full sort would put there, everything before it is
+    /// less than or equal to it and everything after it is greater than or equal to it.
+    pub fn select_nth_unstable(&mut self, index: usize) -> (&mut [T], &mut T, &mut [T])
+    where
+        T: Ord,
+    {
+        self.select_nth_unstable_by(index, |a, b| a.cmp(b))
+    }
+
+    /// `select_nth_unstable` with the order given by `compare`.
+    pub fn select_nth_unstable_by<F>(&mut self, index: usize, mut compare: F) -> (&mut [T], &mut T, &mut [T])
+    where
+        F: crate::ops::FnMut(&T, &T) -> Ordering,
+    {
+        let len = self.len();
+        if index >= len {
+            panic!("partition_at_index index {} greater than length of slice {}", index, len);
+        }
+        self.select_nth_in_place(index, &mut compare);
+        let (left, rest) = self.split_at_mut(index);
+        let (nth, right) = rest.split_at_mut(1);
+        (left, &mut nth[0], right)
+    }
+
+    /// `select_nth_unstable` with the order of the keys `f` gives.
+    pub fn select_nth_unstable_by_key<K, F>(&mut self, index: usize, mut f: F) -> (&mut [T], &mut T, &mut [T])
+    where
+        F: crate::ops::FnMut(&T) -> K,
+        K: Ord,
+    {
+        self.select_nth_unstable_by(index, |a, b| f(a).cmp(&f(b)))
+    }
+
+    /// Quickselect: partitions around a median-of-three pivot and keeps only the side holding `index`. After about
+    /// 2*log2(len) rounds the remaining range is heapsorted, so the worst case stays O(n log n).
+    fn select_nth_in_place<F>(&mut self, index: usize, compare: &mut F)
+    where
+        F: crate::ops::FnMut(&T, &T) -> Ordering,
+    {
+        let mut lo = 0;
+        let mut hi = self.len();
+        let mut budget = 0usize;
+        let mut n = hi;
+        while n > 1 {
+            budget += 2;
+            n >>= 1;
+        }
+        while hi - lo > 1 {
+            if budget == 0 {
+                self[lo..hi].sort_unstable_by(|a, b| compare(a, b));
+                return;
+            }
+            budget -= 1;
+            let mid = lo + (hi - lo) / 2;
+            let last = hi - 1;
+            if compare(&self[mid], &self[lo]) == Ordering::Less {
+                self.swap(mid, lo);
+            }
+            if compare(&self[last], &self[mid]) == Ordering::Less {
+                self.swap(last, mid);
+                if compare(&self[mid], &self[lo]) == Ordering::Less {
+                    self.swap(mid, lo);
+                }
+            }
+            // The median of the three is the pivot; it waits at `last` while the range is partitioned.
+            self.swap(mid, last);
+            let mut store = lo;
+            let mut i = lo;
+            while i < last {
+                if compare(&self[i], &self[last]) == Ordering::Less {
+                    self.swap(i, store);
+                    store += 1;
+                }
+                i += 1;
+            }
+            self.swap(store, last);
+            // Now `self[lo..store]` is below the pivot, `self[store]` is the pivot and the rest is not below it.
+            if index == store {
+                return;
+            }
+            if index < store {
+                hi = store;
+            } else {
+                lo = store + 1;
+            }
+        }
+    }
+
+    /// Mutable references to the elements at every index of `indices`, or an error when an index is out of
+    /// bounds or two indices are equal.
+    pub fn get_disjoint_mut<const N: usize>(&mut self, indices: [usize; N]) -> Result<[&mut T; N], GetDisjointMutError> {
+        let len = self.len();
+        let mut i = 0;
+        while i < N {
+            if indices[i] >= len {
+                return Err(GetDisjointMutError::IndexOutOfBounds);
+            }
+            i += 1;
+        }
+        let mut i = 0;
+        while i < N {
+            let mut j = 0;
+            while j < i {
+                if indices[i] == indices[j] {
+                    return Err(GetDisjointMutError::OverlappingIndices);
+                }
+                j += 1;
+            }
+            i += 1;
+        }
+        // SAFETY: every index is in bounds and no two are equal.
+        Ok(unsafe { self.get_disjoint_unchecked_mut(indices) })
+    }
+
+    /// Mutable references to the elements at every index of `indices`, without checking them.
+    ///
+    /// # Safety
+    /// Every index must be in bounds and no two may be equal.
+    pub unsafe fn get_disjoint_unchecked_mut<const N: usize>(&mut self, indices: [usize; N]) -> [&mut T; N] {
+        let base = self.as_mut_ptr();
+        // SAFETY: the caller guarantees each index is in bounds and distinct, so the references never alias.
+        crate::array::from_fn(|k| unsafe { &mut *base.add(indices[k]) })
+    }
+}
+
+/// Why `get_disjoint_mut` refused its indices.
+#[derive(crate::clone::Clone, crate::marker::Copy, crate::cmp::PartialEq, crate::cmp::Eq, crate::fmt::Debug)]
+pub enum GetDisjointMutError {
+    /// An index is not below the length of the slice.
+    IndexOutOfBounds,
+    /// Two indices are equal.
+    OverlappingIndices,
+}
+
+impl crate::fmt::Display for GetDisjointMutError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        match self {
+            GetDisjointMutError::IndexOutOfBounds => f.write_str("an index is out of bounds"),
+            GetDisjointMutError::OverlappingIndices => f.write_str("there were overlapping indices"),
+        }
+    }
+}
+
+impl [u8] {
+    /// Turns every ASCII lowercase letter into its uppercase form, in place.
+    pub fn make_ascii_uppercase(&mut self) {
+        let mut i = 0;
+        while i < self.len() {
+            self[i] = self[i].to_ascii_uppercase();
+            i += 1;
+        }
+    }
+
+    /// Turns every ASCII uppercase letter into its lowercase form, in place.
+    pub fn make_ascii_lowercase(&mut self) {
+        let mut i = 0;
+        while i < self.len() {
+            self[i] = self[i].to_ascii_lowercase();
+            i += 1;
+        }
+    }
+
+    /// Whether both slices have the same length and the same bytes once ASCII letters are lowercased.
+    pub fn eq_ignore_ascii_case(&self, other: &[u8]) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        let mut i = 0;
+        while i < self.len() {
+            if !self[i].eq_ignore_ascii_case(&other[i]) {
+                return false;
+            }
+            i += 1;
+        }
+        true
+    }
+
+    /// The bytes with each one written as in a byte string literal (`core::ascii::escape_default`).
+    pub fn escape_ascii(&self) -> EscapeAscii<'_> {
+        EscapeAscii { bytes: self.iter(), front: EscapedByte::EMPTY, back: EscapedByte::EMPTY }
+    }
+}
+
+/// The escaped form of a byte slice, as an iterator over its bytes; the result of `[u8]::escape_ascii`.
+#[derive(crate::clone::Clone)]
+pub struct EscapeAscii<'a> {
+    bytes: Iter<'a, u8>,
+    front: EscapedByte,
+    back: EscapedByte,
+}
+
+/// The escape of one byte, consumable from both ends.
+#[derive(crate::clone::Clone)]
+struct EscapedByte {
+    data: [u8; 4],
+    start: u8,
+    end: u8,
+}
+
+impl EscapedByte {
+    const EMPTY: EscapedByte = EscapedByte { data: [0; 4], start: 0, end: 0 };
+
+    fn of(byte: u8) -> EscapedByte {
+        let mut escape = crate::ascii::escape_default(byte);
+        let mut data = [0u8; 4];
+        let mut end = 0u8;
+        while let Some(b) = escape.next() {
+            data[end as usize] = b;
+            end += 1;
+        }
+        EscapedByte { data, start: 0, end }
+    }
+
+    fn next(&mut self) -> Option<u8> {
+        if self.start == self.end { return None; }
+        let b = self.data[self.start as usize];
+        self.start += 1;
+        Some(b)
+    }
+
+    fn next_back(&mut self) -> Option<u8> {
+        if self.start == self.end { return None; }
+        self.end -= 1;
+        Some(self.data[self.end as usize])
+    }
+
+    fn len(&self) -> usize { (self.end - self.start) as usize }
+}
+
+impl<'a> Iterator for EscapeAscii<'a> {
+    type Item = u8;
+    fn next(&mut self) -> Option<u8> {
+        loop {
+            if let Some(b) = self.front.next() { return Some(b); }
+            match self.bytes.next() {
+                Some(&byte) => self.front = EscapedByte::of(byte),
+                None => return self.back.next(),
+            }
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let known = self.front.len() + self.back.len();
+        let (rest_lo, rest_hi) = self.bytes.size_hint();
+        let hi = match rest_hi {
+            Some(n) => match n.checked_mul(4) {
+                Some(m) => m.checked_add(known),
+                None => None,
+            },
+            None => None,
+        };
+        (known.saturating_add(rest_lo), hi)
+    }
+}
+
+impl<'a> DoubleEndedIterator for EscapeAscii<'a> {
+    fn next_back(&mut self) -> Option<u8> {
+        loop {
+            if let Some(b) = self.back.next_back() { return Some(b); }
+            match self.bytes.next_back() {
+                Some(&byte) => self.back = EscapedByte::of(byte),
+                None => return self.front.next_back(),
+            }
+        }
+    }
+}
+
+impl crate::iter::FusedIterator for EscapeAscii<'_> {}
+
+impl crate::fmt::Display for EscapeAscii<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut rest = self.clone();
+        while let Some(b) = rest.next() {
+            f.write_char(b as char)?;
+        }
+        Ok(())
+    }
+}
+
+impl crate::fmt::Debug for EscapeAscii<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("EscapeAscii").finish_non_exhaustive()
+    }
+}
+
 impl [u8] {
     /// Without the ASCII whitespace at the start.
     pub const fn trim_ascii_start(&self) -> &[u8] {
