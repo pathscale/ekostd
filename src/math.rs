@@ -14,9 +14,9 @@
 //! Only the functions a caller here has actually needed. A math module that wraps all of
 //! `math.h` on speculation is the generality this crate exists to refuse.
 
-// libm is a separate library on Linux and part of libSystem on macOS, where `libm.dylib` is a
-// symlink to it. Naming it is correct on both and required on the first.
-#[link(name = "m")]
+// libm is a separate library on Linux and part of libSystem on Apple targets, so `m` is linked
+// only off Apple. On Apple the symbols come from libSystem, which every image already links.
+#[cfg_attr(not(target_vendor = "apple"), link(name = "m"))]
 extern "C" {
     fn log(x: f64) -> f64;
     fn pow(x: f64, y: f64) -> f64;
