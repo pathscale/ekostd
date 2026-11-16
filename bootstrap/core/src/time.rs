@@ -328,3 +328,240 @@ impl crate::ops::DivAssign<u32> for Duration {
         *self = *self / rhs;
     }
 }
+
+/// Rust's `try_from_secs!`: converts a non-negative float of seconds exactly, rounding to the nearest
+/// nanosecond with ties to even. `$mant_bits` and `$exp_bits` describe the float, `$offset` keeps the
+/// sub-second shift inside `$double_ty`. Returns from the enclosing function on a negative, too large or NaN value.
+macro_rules! try_from_secs {
+    (
+        secs = $secs:expr,
+        mantissa_bits = $mant_bits:literal,
+        exponent_bits = $exp_bits:literal,
+        offset = $offset:literal,
+        bits_ty = $bits_ty:ty,
+        double_ty = $double_ty:ty,
+    ) => {{
+        const MIN_EXP: i16 = 1 - (1i16 << $exp_bits) / 2;
+        const MANT_MASK: $bits_ty = (1 << $mant_bits) - 1;
+        const EXP_MASK: $bits_ty = (1 << $exp_bits) - 1;
+        const NANOS_PER_SEC: u32 = 1_000_000_000;
+        if $secs < 0.0 {
+            return Err(TryFromFloatSecsError { kind: TryFromFloatSecsErrorKind::Negative });
+        }
+        let bits = $secs.to_bits();
+        let mant = (bits & MANT_MASK) | (MANT_MASK + 1);
+        let exp = ((bits >> ($mant_bits as u32)) & EXP_MASK) as i16 + MIN_EXP;
+        let (secs, nanos) = if exp < -31 {
+            (0u64, 0u32)
+        } else if exp < 0 {
+            let t = (mant as $double_ty) << (($offset + exp) as u32);
+            let nanos_offset: u32 = $mant_bits + $offset;
+            let nanos_tmp = (NANOS_PER_SEC as u128) * (t as u128);
+            let nanos = (nanos_tmp >> nanos_offset) as u32;
+            let rem_mask = (1u128 << nanos_offset) - 1;
+            let rem_msb_mask = 1u128 << (nanos_offset - 1);
+            let rem = nanos_tmp & rem_mask;
+            let is_tie = rem == rem_msb_mask;
+            let is_even = (nanos & 1) == 0;
+            let rem_msb = nanos_tmp & rem_msb_mask == 0;
+            let add_ns = !(rem_msb || (is_even && is_tie));
+            let nanos = nanos + add_ns as u32;
+            if ($mant_bits == 23) || (nanos != NANOS_PER_SEC) { (0, nanos) } else { (1, 0) }
+        } else if exp < $mant_bits {
+            let secs = (mant >> (($mant_bits - exp) as u32)) as u64;
+            let t = ((mant << (exp as u32)) & MANT_MASK) as $double_ty;
+            let nanos_offset: u32 = $mant_bits;
+            let nanos_tmp = (NANOS_PER_SEC as $double_ty) * t;
+            let nanos = (nanos_tmp >> nanos_offset) as u32;
+            let one: $double_ty = 1;
+            let rem_mask = (one << nanos_offset) - 1;
+            let rem_msb_mask = one << (nanos_offset - 1);
+            let rem = nanos_tmp & rem_mask;
+            let is_tie = rem == rem_msb_mask;
+            let is_even = (nanos & 1) == 0;
+            let rem_msb = nanos_tmp & rem_msb_mask == 0;
+            let add_ns = !(rem_msb || (is_even && is_tie));
+            let nanos = nanos + add_ns as u32;
+            if ($mant_bits == 23) || (nanos != NANOS_PER_SEC) { (secs, nanos) } else { (secs + 1, 0) }
+        } else if exp < 64 {
+            ((mant as u64) << ((exp - $mant_bits) as u32), 0)
+        } else {
+            return Err(TryFromFloatSecsError { kind: TryFromFloatSecsErrorKind::OverflowOrNan });
+        };
+        Ok(Duration::new(secs, nanos))
+    }};
+}
+
+impl Duration {
+    /// One second.
+    pub const SECOND: Duration = Duration::from_secs(1);
+    /// One millisecond.
+    pub const MILLISECOND: Duration = Duration::from_millis(1);
+    /// One microsecond.
+    pub const MICROSECOND: Duration = Duration::from_micros(1);
+    /// One nanosecond.
+    pub const NANOSECOND: Duration = Duration::from_nanos(1);
+
+    /// The given number of minutes; panics when the seconds do not fit in a `u64`.
+    pub const fn from_mins(mins: u64) -> Duration {
+        if mins > u64::MAX / 60 {
+            crate::panic::panic_fmt(crate::fmt::Arguments::from_str("overflow in Duration::from_mins"));
+        }
+        Duration::from_secs(mins * 60)
+    }
+    /// The given number of hours; panics when the seconds do not fit in a `u64`.
+    pub const fn from_hours(hours: u64) -> Duration {
+        if hours > u64::MAX / (60 * 60) {
+            crate::panic::panic_fmt(crate::fmt::Arguments::from_str("overflow in Duration::from_hours"));
+        }
+        Duration::from_secs(hours * 60 * 60)
+    }
+
+    /// Exact conversion of `f64` seconds, rounded to the nearest nanosecond (ties to even).
+    pub fn try_from_secs_f64(secs: f64) -> crate::result::Result<Duration, TryFromFloatSecsError> {
+        try_from_secs!(
+            secs = secs,
+            mantissa_bits = 52,
+            exponent_bits = 11,
+            offset = 44,
+            bits_ty = u64,
+            double_ty = u128,
+        )
+    }
+    /// Exact conversion of `f32` seconds, rounded to the nearest nanosecond (ties to even).
+    pub fn try_from_secs_f32(secs: f32) -> crate::result::Result<Duration, TryFromFloatSecsError> {
+        try_from_secs!(
+            secs = secs,
+            mantissa_bits = 23,
+            exponent_bits = 8,
+            offset = 41,
+            bits_ty = u32,
+            double_ty = u64,
+        )
+    }
+    /// Like `try_from_secs_f32`, but panics for a negative, too large or non-finite value, with Rust's messages.
+    pub fn from_secs_f32(secs: f32) -> Duration {
+        match Duration::try_from_secs_f32(secs) {
+            Ok(value) => value,
+            Err(error) => match error.kind {
+                TryFromFloatSecsErrorKind::Negative => {
+                    panic!("cannot convert float seconds to Duration: value is negative")
+                }
+                TryFromFloatSecsErrorKind::OverflowOrNan => {
+                    panic!("cannot convert float seconds to Duration: value is either too big or NaN")
+                }
+            },
+        }
+    }
+
+    /// The duration in seconds as an `f32`.
+    pub const fn as_secs_f32(&self) -> f32 { (self.secs as f32) + (self.nanos as f32) / 1_000_000_000.0 }
+
+    /// `self` scaled by an `f64`, through `from_secs_f64` (panics like it).
+    pub fn mul_f64(self, rhs: f64) -> Duration { Duration::from_secs_f64(rhs * self.as_secs_f64()) }
+    /// `self` scaled by an `f32`, through `from_secs_f32` (panics like it).
+    pub fn mul_f32(self, rhs: f32) -> Duration { Duration::from_secs_f32(rhs * self.as_secs_f32()) }
+    /// `self` divided by an `f64`, through `from_secs_f64` (panics like it).
+    pub fn div_f64(self, rhs: f64) -> Duration { Duration::from_secs_f64(self.as_secs_f64() / rhs) }
+    /// `self` divided by an `f32`, through `from_secs_f32` (panics like it).
+    pub fn div_f32(self, rhs: f32) -> Duration { Duration::from_secs_f32(self.as_secs_f32() / rhs) }
+
+    /// The ratio of two durations, from their total nanoseconds as `f64`.
+    pub const fn div_duration_f64(self, rhs: Duration) -> f64 {
+        let self_nanos = (self.secs as f64) * 1_000_000_000.0 + (self.nanos as f64);
+        let rhs_nanos = (rhs.secs as f64) * 1_000_000_000.0 + (rhs.nanos as f64);
+        self_nanos / rhs_nanos
+    }
+    /// The ratio of two durations, from their total nanoseconds as `f32`.
+    pub const fn div_duration_f32(self, rhs: Duration) -> f32 {
+        let self_nanos = (self.secs as f32) * 1_000_000_000.0 + (self.nanos as f32);
+        let rhs_nanos = (rhs.secs as f32) * 1_000_000_000.0 + (rhs.nanos as f32);
+        self_nanos / rhs_nanos
+    }
+
+    /// `self * rhs`, or `Duration::MAX` when that overflows.
+    pub const fn saturating_mul(self, rhs: u32) -> Duration {
+        match self.checked_mul(rhs) { Some(value) => value, None => Duration::MAX }
+    }
+    /// The distance between two durations, whichever is larger.
+    pub const fn abs_diff(self, other: Duration) -> Duration {
+        match self.checked_sub(other) {
+            Some(value) => value,
+            None => match other.checked_sub(self) { Some(value) => value, None => Duration::ZERO },
+        }
+    }
+}
+
+impl crate::iter::Sum for Duration {
+    fn sum<I: crate::iter::Iterator<Item = Duration>>(mut iter: I) -> Duration {
+        let mut total = Duration::ZERO;
+        loop {
+            match iter.next() {
+                Some(item) => total = total.checked_add(item).expect("overflow in iter::sum"),
+                None => return total,
+            }
+        }
+    }
+}
+
+impl<'a> crate::iter::Sum<&'a Duration> for Duration {
+    fn sum<I: crate::iter::Iterator<Item = &'a Duration>>(mut iter: I) -> Duration {
+        let mut total = Duration::ZERO;
+        loop {
+            match iter.next() {
+                Some(item) => total = total.checked_add(*item).expect("overflow in iter::sum"),
+                None => return total,
+            }
+        }
+    }
+}
+
+/// Why `Duration::try_from_secs_f32` / `try_from_secs_f64` refused a value.
+pub struct TryFromFloatSecsError { kind: TryFromFloatSecsErrorKind }
+
+enum TryFromFloatSecsErrorKind { Negative, OverflowOrNan }
+impl Copy for TryFromFloatSecsErrorKind {}
+impl Clone for TryFromFloatSecsErrorKind { fn clone(&self) -> Self { *self } }
+impl PartialEq for TryFromFloatSecsErrorKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (TryFromFloatSecsErrorKind::Negative, TryFromFloatSecsErrorKind::Negative) => true,
+            (TryFromFloatSecsErrorKind::OverflowOrNan, TryFromFloatSecsErrorKind::OverflowOrNan) => true,
+            _ => false,
+        }
+    }
+}
+impl Eq for TryFromFloatSecsErrorKind {}
+impl crate::fmt::Debug for TryFromFloatSecsErrorKind {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str(match self {
+            TryFromFloatSecsErrorKind::Negative => "Negative",
+            TryFromFloatSecsErrorKind::OverflowOrNan => "OverflowOrNan",
+        })
+    }
+}
+
+impl Clone for TryFromFloatSecsError { fn clone(&self) -> Self { TryFromFloatSecsError { kind: self.kind } } }
+impl PartialEq for TryFromFloatSecsError {
+    fn eq(&self, other: &Self) -> bool { self.kind == other.kind }
+}
+impl Eq for TryFromFloatSecsError {}
+/// What `#[derive(Debug)]` prints in Rust: `TryFromFloatSecsError { kind: Negative }`.
+impl crate::fmt::Debug for TryFromFloatSecsError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("TryFromFloatSecsError").field("kind", &self.kind).finish()
+    }
+}
+/// Rust's message for each refusal, formatted like a `str` (width and fill apply).
+impl crate::fmt::Display for TryFromFloatSecsError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let text = match self.kind {
+            TryFromFloatSecsErrorKind::Negative => "cannot convert float seconds to Duration: value is negative",
+            TryFromFloatSecsErrorKind::OverflowOrNan => {
+                "cannot convert float seconds to Duration: value is either too big or NaN"
+            }
+        };
+        crate::fmt::Display::fmt(text, f)
+    }
+}
+impl crate::error::Error for TryFromFloatSecsError {}
