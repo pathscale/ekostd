@@ -401,6 +401,140 @@ fn sorts(run: &mut Run) {
     run.check(empty.is_empty() && one.len() == 1 && one[0] == 5, "sort tiny", 0);
 }
 
+fn rcs(run: &mut Run) {
+    struct D<'a>(&'a core::cell::Cell<u32>);
+    impl Clone for D<'_> {
+        fn clone(&self) -> Self { D(self.0) }
+    }
+    impl Drop for D<'_> {
+        fn drop(&mut self) { self.0.set(self.0.get() + 1); }
+    }
+
+    // from_raw takes back the reference into_raw gave out, sharing the counts of the same allocation.
+    let shared = core::cell::Cell::new(0u32);
+    let a = alloc::rc::Rc::new(D(&shared));
+    let b = a.clone();
+    let p = alloc::rc::Rc::into_raw(a);
+    let c = unsafe { alloc::rc::Rc::from_raw(p) };
+    run.check(alloc::rc::Rc::strong_count(&b) == 2, "rc from_raw shares the count", 0);
+    run.check(alloc::rc::Rc::ptr_eq(&b, &c), "rc from_raw shares the count", 1);
+    drop(c);
+    run.check(shared.get() == 0 && alloc::rc::Rc::strong_count(&b) == 1, "rc from_raw shares the count", 2);
+    drop(b);
+    run.check(shared.get() == 1, "rc from_raw shares the count", 3);
+
+    // A Weak upgrades while a strong reference lives and not after the value is dropped.
+    let weak_drops = core::cell::Cell::new(0u32);
+    let r = alloc::rc::Rc::new(D(&weak_drops));
+    let w = alloc::rc::Rc::downgrade(&r);
+    run.check(alloc::rc::Rc::weak_count(&r) == 1 && alloc::rc::Rc::strong_count(&r) == 1, "rc weak", 0);
+    run.check(w.upgrade().is_some(), "rc weak", 1);
+    run.check(alloc::rc::Rc::strong_count(&r) == 1 && w.strong_count() == 1 && w.weak_count() == 1, "rc weak", 2);
+    drop(r);
+    run.check(weak_drops.get() == 1, "rc weak", 3);
+    run.check(w.upgrade().is_none() && w.strong_count() == 0 && w.weak_count() == 0, "rc weak", 4);
+    drop(w);
+    run.check(weak_drops.get() == 1, "rc weak", 5);
+
+    // try_unwrap fails while another strong reference lives; with only a Weak left it moves the value out.
+    let unwrap_drops = core::cell::Cell::new(0u32);
+    let r = alloc::rc::Rc::new(D(&unwrap_drops));
+    let r2 = r.clone();
+    let r = match alloc::rc::Rc::try_unwrap(r) {
+        Ok(_) => {
+            run.check(false, "rc try_unwrap", 0);
+            r2.clone()
+        }
+        Err(back) => back,
+    };
+    run.check(alloc::rc::Rc::strong_count(&r) == 2 && unwrap_drops.get() == 0, "rc try_unwrap", 1);
+    drop(r2);
+    let w = alloc::rc::Rc::downgrade(&r);
+    match alloc::rc::Rc::try_unwrap(r) {
+        Ok(value) => {
+            run.check(unwrap_drops.get() == 0, "rc try_unwrap", 2);
+            run.check(w.upgrade().is_none(), "rc try_unwrap", 3);
+            drop(value);
+            run.check(unwrap_drops.get() == 1, "rc try_unwrap", 4);
+        }
+        Err(_) => run.check(false, "rc try_unwrap", 5),
+    }
+    drop(w);
+    run.check(unwrap_drops.get() == 1, "rc try_unwrap", 6);
+
+    // make_mut with a Weak alive moves the value into a new allocation: no clone, no drop, the Weak is cut off.
+    let make_drops = core::cell::Cell::new(0u32);
+    let mut r = alloc::rc::Rc::new(D(&make_drops));
+    let w = alloc::rc::Rc::downgrade(&r);
+    let _ = alloc::rc::Rc::make_mut(&mut r);
+    run.check(make_drops.get() == 0, "rc make_mut weak", 0);
+    run.check(w.upgrade().is_none(), "rc make_mut weak", 1);
+    run.check(alloc::rc::Rc::strong_count(&r) == 1 && alloc::rc::Rc::weak_count(&r) == 0, "rc make_mut weak", 2);
+    drop(w);
+    run.check(make_drops.get() == 0, "rc make_mut weak", 3);
+    drop(r);
+    run.check(make_drops.get() == 1, "rc make_mut weak", 4);
+
+    // make_mut with a second strong reference clones; the other keeps the old value.
+    let mut a = alloc::rc::Rc::new(5u32);
+    let b = a.clone();
+    *alloc::rc::Rc::make_mut(&mut a) = 7;
+    run.check(*a == 7 && *b == 5, "rc make_mut shared", 0);
+    run.check(!alloc::rc::Rc::ptr_eq(&a, &b), "rc make_mut shared", 1);
+    run.check(alloc::rc::Rc::strong_count(&a) == 1 && alloc::rc::Rc::strong_count(&b) == 1, "rc make_mut shared", 2);
+
+    // Weak::new points at no allocation.
+    let w = alloc::rc::Weak::<u32>::new();
+    let w2 = w.clone();
+    run.check(w.upgrade().is_none(), "rc weak new", 0);
+    run.check(w.strong_count() == 0 && w.weak_count() == 0, "rc weak new", 1);
+    run.check(w.ptr_eq(&w2), "rc weak new", 2);
+    drop(w);
+    drop(w2);
+
+    // get_mut only while no other strong reference and no Weak exists.
+    let mut a = alloc::rc::Rc::new(1u32);
+    run.check(alloc::rc::Rc::get_mut(&mut a).is_some(), "rc get_mut", 0);
+    let w = alloc::rc::Rc::downgrade(&a);
+    run.check(alloc::rc::Rc::get_mut(&mut a).is_none(), "rc get_mut", 1);
+    drop(w);
+    if let Some(v) = alloc::rc::Rc::get_mut(&mut a) {
+        *v = 2;
+    }
+    run.check(*a == 2, "rc get_mut", 2);
+
+    // into_inner and unwrap_or_clone.
+    let a = alloc::rc::Rc::new(3u32);
+    let b = a.clone();
+    run.check(alloc::rc::Rc::into_inner(a).is_none(), "rc into_inner", 0);
+    run.check(alloc::rc::Rc::into_inner(b) == Some(3), "rc into_inner", 1);
+    let a = alloc::rc::Rc::new(4u32);
+    let b = a.clone();
+    run.check(alloc::rc::Rc::unwrap_or_clone(a) == 4 && alloc::rc::Rc::strong_count(&b) == 1, "rc unwrap_or_clone", 0);
+    run.check(alloc::rc::Rc::unwrap_or_clone(b) == 4, "rc unwrap_or_clone", 1);
+
+    // increment_strong_count / decrement_strong_count through the raw pointer.
+    let count_drops = core::cell::Cell::new(0u32);
+    let p = alloc::rc::Rc::into_raw(alloc::rc::Rc::new(D(&count_drops)));
+    unsafe { alloc::rc::Rc::increment_strong_count(p) };
+    let a = unsafe { alloc::rc::Rc::from_raw(p) };
+    run.check(alloc::rc::Rc::strong_count(&a) == 2, "rc strong count raw", 0);
+    unsafe { alloc::rc::Rc::decrement_strong_count(p) };
+    run.check(alloc::rc::Rc::strong_count(&a) == 1 && count_drops.get() == 0, "rc strong count raw", 1);
+    drop(a);
+    run.check(count_drops.get() == 1, "rc strong count raw", 2);
+
+    // Many clone/drop pairs leave the count where it started.
+    let r = alloc::rc::Rc::new(1u32);
+    let mut i = 0u32;
+    while i < 100_000 {
+        let x = r.clone();
+        drop(x);
+        i += 1;
+    }
+    run.check(alloc::rc::Rc::strong_count(&r) == 1 && alloc::rc::Rc::weak_count(&r) == 0, "rc clone drop pairs", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -410,6 +544,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    rcs(&mut run);
     sorts(&mut run);
     // Descending inserts: every one lands at the front, which the sorted Vec paid for with a full move.
     let mut map = BTreeMap::new();
