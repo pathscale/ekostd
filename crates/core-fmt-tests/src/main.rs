@@ -929,7 +929,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "true false", "{} {}", b.fetch_xor(true, o), b.load(o));
         check!(r, "false true", "{} {}", b.fetch_nand(false, o), b.load(o));
         check!(r, "true false", "{} {}", b.fetch_not(o), b.load(o));
-        check!(r, "false false", "{} {}", b.fetch_nand(true, core::sync::atomic::Ordering::Relaxed), b.load(o));
+        check!(r, "false true", "{} {}", b.fetch_nand(true, core::sync::atomic::Ordering::Relaxed), b.load(o));
         let i8a = core::sync::atomic::AtomicI8::new(-5);
         check!(r, "-5 -2", "{} {}", i8a.fetch_add(3, o), i8a.load(o));
         let i8b = core::sync::atomic::AtomicI8::new(-1);
