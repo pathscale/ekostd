@@ -388,7 +388,25 @@ impl<A: Iterator, B: Iterator<Item = A::Item>> Iterator for Chain<A, B> {
         if let Some(ref mut b) = self.b { if let Some(x) = b.next() { return Some(x); } self.b = None; }
         None
     }
+    /// Adds up the hints of the halves not yet used up.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match (&self.a, &self.b) {
+            (Some(a), Some(b)) => {
+                let (a_lo, a_hi) = a.size_hint();
+                let (b_lo, b_hi) = b.size_hint();
+                let hi = match (a_hi, b_hi) {
+                    (Some(x), Some(y)) => x.checked_add(y),
+                    _ => None,
+                };
+                (a_lo.saturating_add(b_lo), hi)
+            }
+            (Some(a), None) => a.size_hint(),
+            (None, Some(b)) => b.size_hint(),
+            (None, None) => (0, Some(0)),
+        }
+    }
 }
+impl<A: FusedIterator, B: FusedIterator<Item = A::Item>> FusedIterator for Chain<A, B> {}
 impl<A: DoubleEndedIterator, B: DoubleEndedIterator<Item = A::Item>> DoubleEndedIterator for Chain<A, B> {
     fn next_back(&mut self) -> Option<A::Item> {
         if let Some(ref mut b) = self.b { if let Some(x) = b.next_back() { return Some(x); } self.b = None; }
@@ -750,7 +768,26 @@ impl<I: Iterator> Iterator for StepBy<I> {
         }
         self.iter.next()
     }
+    /// Counts the items left from the inner hint: the first call takes one item and then
+    /// every `step`-th, later calls skip `step - 1` items before each one.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lo, hi) = self.iter.size_hint();
+        let lo = self.left_from(lo);
+        let hi = match hi { Some(n) => Some(self.left_from(n)), None => None };
+        (lo, hi)
+    }
 }
+impl<I> StepBy<I> {
+    /// How many items `next` still yields when the inner iterator has `n` items left.
+    fn left_from(&self, n: usize) -> usize {
+        if self.first {
+            if n == 0 { 0 } else { 1 + (n - 1) / self.step }
+        } else {
+            n / self.step
+        }
+    }
+}
+impl<I: ExactSizeIterator> ExactSizeIterator for StepBy<I> {}
 
 /// Types that can be made by adding up an iterator. `Iterator::sum` goes through this.
 pub trait Sum<A = Self>: Sized {
