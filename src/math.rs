@@ -11,7 +11,7 @@
 //! and a scoring function that changes answers when a crate stops linking `std` is a bug nobody
 //! goes looking for. Declaring the symbol is smaller than vendoring the algorithm.
 //!
-//! Only the two functions a caller here has actually needed. A math module that wraps all of
+//! Only the functions a caller here has actually needed. A math module that wraps all of
 //! `math.h` on speculation is the generality this crate exists to refuse.
 
 // libm is a separate library on Linux and part of libSystem on macOS, where `libm.dylib` is a
@@ -20,6 +20,12 @@
 extern "C" {
     fn log(x: f64) -> f64;
     fn pow(x: f64, y: f64) -> f64;
+    #[link_name = "floor"]
+    fn c_floor(x: f64) -> f64;
+    #[link_name = "ceil"]
+    fn c_ceil(x: f64) -> f64;
+    #[link_name = "trunc"]
+    fn c_trunc(x: f64) -> f64;
 }
 
 /// The natural logarithm.
@@ -41,4 +47,19 @@ pub fn ln(x: f64) -> f64 {
 /// `i32` exponent converts it and loses nothing.
 pub fn powf(x: f64, y: f64) -> f64 {
     unsafe { pow(x, y) }
+}
+
+/// The largest integer not above `x`, as `f64::floor` would give it with `std`.
+pub fn floor(x: f64) -> f64 {
+    unsafe { c_floor(x) }
+}
+
+/// The smallest integer not below `x`, as `f64::ceil` would give it with `std`.
+pub fn ceil(x: f64) -> f64 {
+    unsafe { c_ceil(x) }
+}
+
+/// `x` with its fractional part dropped, rounding toward zero, as `f64::trunc` would.
+pub fn trunc(x: f64) -> f64 {
+    unsafe { c_trunc(x) }
 }
