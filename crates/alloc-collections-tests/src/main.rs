@@ -1168,6 +1168,40 @@ fn rc_slices(run: &mut Run) {
     run.check(w.upgrade().is_none(), "rc slice weak", 1);
 }
 
+fn alloc_misc(run: &mut Run) {
+    let r = [1, 2].repeat(3);
+    run.check(r.as_slice() == &[1, 2, 1, 2, 1, 2][..], "[T]::repeat three times", 1);
+    run.check([7u8; 0].repeat(5).is_empty(), "[T]::repeat of an empty slice", 2);
+    run.check([1].repeat(0).is_empty(), "[T]::repeat zero times", 3);
+
+    let joined = [alloc::vec![1, 2], alloc::vec![3]].join(&0);
+    run.check(joined.as_slice() == &[1, 2, 0, 3][..], "[Vec<T>]::join(&T)", 4);
+    let joined = [[1, 2], [3, 4]].join(&[9, 9][..]);
+    run.check(joined.as_slice() == &[1, 2, 9, 9, 3, 4][..], "[[T; N]]::join(&[T])", 5);
+    let joined = ["a", "b", "c"].join(", ");
+    run.check(joined.as_str() == "a, b, c", "[&str]::join(&str)", 6);
+    let joined = [alloc::string::String::from("x")].join("-");
+    run.check(joined.as_str() == "x", "[String]::join of one element", 7);
+    let empty: [&str; 0] = [];
+    run.check(empty.join(",").is_empty(), "[&str; 0]::join is empty", 8);
+
+    run.check("a-b-c".replacen('-', "+", 1).as_str() == "a+b-c", "str::replacen first match", 9);
+    run.check("aaaa".replacen("aa", "b", 5).as_str() == "bb", "str::replacen non-overlapping, count above matches", 10);
+    run.check("abc".replacen("b", "", 0).as_str() == "abc", "str::replacen count 0", 11);
+    run.check("héé".replacen('é', "e", 1).as_str() == "heé", "str::replacen multi-byte char", 12);
+
+    let uninit = alloc::boxed::Box::<u64>::new_uninit();
+    let boxed = alloc::boxed::Box::write(uninit, 9);
+    run.check(*boxed == 9, "Box::new_uninit then Box::write", 13);
+    let unit = alloc::boxed::Box::<()>::new_uninit();
+    let unit = alloc::boxed::Box::write(unit, ());
+    run.check(*unit == (), "Box::<()>::new_uninit round trip", 14);
+    let mut slot = alloc::boxed::Box::<u32>::new_uninit();
+    slot.write(5);
+    let slot = unsafe { slot.assume_init() };
+    run.check(*slot == 5, "Box<MaybeUninit<T>>::assume_init", 15);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -1177,6 +1211,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    alloc_misc(&mut run);
     rc_slices(&mut run);
     vecs_api(&mut run);
     btrees_api(&mut run);
