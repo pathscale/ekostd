@@ -4,6 +4,14 @@ use crate::boxed::Box;
 use crate::vec::Vec;
 use core::ffi::CStr;
 
+impl CStr {
+    /// The bytes before the NUL as text, with each invalid sequence replaced by U+FFFD.
+    #[rustc_allow_incoherent_impl]
+    pub fn to_string_lossy(&self) -> crate::borrow::Cow<'_, str> {
+        crate::string::String::from_utf8_lossy(self.to_bytes())
+    }
+}
+
 /// An owned, NUL-terminated string with no NUL inside.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CString {

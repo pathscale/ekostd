@@ -33,6 +33,7 @@ pub type c_size_t = usize;
 pub type c_ssize_t = isize;
 #[repr(transparent)]
 #[lang = "CStr"]
+#[rustc_has_incoherent_inherent_impls]
 pub struct CStr { bytes: [c_char] }
 pub struct FromBytesWithNulError { position: Option<usize> }
 impl Copy for FromBytesWithNulError {}

@@ -131,10 +131,10 @@ impl<T: ?Sized> Arc<T> {
 
     pub fn make_mut(this: &mut Self) -> &mut T
     where
-        T: Sized + Clone,
+        T: CloneToArc,
     {
         if Self::get_mut(this).is_none() {
-            *this = Self::new((**this).clone());
+            *this = (**this).clone_to_arc();
         }
         unsafe { &mut (*this.ptr.as_ptr()).value }
     }
@@ -252,6 +252,13 @@ impl<T: ?Sized> Weak<T> {
             }
         }
         Self { ptr: this.ptr }
+    }
+}
+
+impl<T: ?Sized> Weak<T> {
+    /// Whether both point to the same allocation (or both are `Weak::new`).
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        self.ptr.as_ptr() as *const () == other.ptr.as_ptr() as *const ()
     }
 }
 
@@ -423,4 +430,15 @@ impl<T> core::iter::FromIterator<T> for Arc<[T]> {
         let items: Vec<T> = iter.into_iter().collect();
         Arc::from(items)
     }
+}
+
+/// What `Arc::make_mut` needs to copy the value of a shared allocation: a sized `Clone` value or a slice of them (Rust: `CloneToUninit`).
+pub trait CloneToArc {
+    fn clone_to_arc(&self) -> Arc<Self>;
+}
+impl<T: Clone> CloneToArc for T {
+    fn clone_to_arc(&self) -> Arc<T> { Arc::new(self.clone()) }
+}
+impl<T: Clone> CloneToArc for [T] {
+    fn clone_to_arc(&self) -> Arc<[T]> { Arc::from(self) }
 }

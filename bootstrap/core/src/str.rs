@@ -268,6 +268,11 @@ impl str {
 
     pub fn rsplit<P: Pattern>(&self, pat: P) -> RSplit<'_, P> { RSplit { haystack: self, end: self.len(), pattern: pat, done: false } }
 
+    /// At most `n` pieces, cut at the last matches; the first piece is the rest.
+    pub fn rsplitn<P: Pattern>(&self, n: usize, pat: P) -> RSplitN<'_, P> {
+        RSplitN { inner: self.rsplit(pat), count: n }
+    }
+
     pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> SplitN<'_, P> { SplitN { inner: self.split(pat), count: n } }
 
     pub fn escape_default(&self) -> EscapeDefault<'_> {
@@ -1134,6 +1139,21 @@ impl<'a, P: Pattern> crate::iter::Iterator for RSplit<'a, P> {
         }
         self.done = true;
         Some(&self.haystack[..self.end])
+    }
+}
+
+pub struct RSplitN<'a, P> { inner: RSplit<'a, P>, count: usize }
+impl<'a, P: Pattern> crate::iter::Iterator for RSplitN<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        match self.count {
+            0 => None,
+            1 => {
+                self.count = 0;
+                if self.inner.done { None } else { self.inner.done = true; Some(&self.inner.haystack[..self.inner.end]) }
+            }
+            _ => { self.count -= 1; self.inner.next() }
+        }
     }
 }
 

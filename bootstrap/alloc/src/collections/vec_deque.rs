@@ -4,6 +4,10 @@ use core::iter::FromIterator;
 
 pub struct VecDeque<T> { items: Vec<T> }
 impl<T> VecDeque<T> {
+    /// Removes and returns the element at `index`, or `None` past the end; later elements move up.
+    pub fn remove(&mut self, index: usize) -> Option<T> {
+        if index < self.items.len() { Some(self.items.remove(index)) } else { None }
+    }
     pub const fn new() -> Self { Self { items: Vec::new() } }
     pub fn with_capacity(capacity: usize) -> Self { Self { items: Vec::with_capacity(capacity) } }
     pub fn len(&self) -> usize { self.items.len() }

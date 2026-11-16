@@ -221,7 +221,45 @@ impl String {
     }
 }
 
+/// The characters `String::drain` removed (taken out when it is called).
+pub struct Drain { removed: String, front: usize, back: usize }
+impl Iterator for Drain {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        let ch = self.removed[self.front..self.back].chars().next()?;
+        self.front += ch.len_utf8();
+        Some(ch)
+    }
+}
+impl core::iter::DoubleEndedIterator for Drain {
+    fn next_back(&mut self) -> Option<char> {
+        let ch = self.removed[self.front..self.back].chars().next_back()?;
+        self.back -= ch.len_utf8();
+        Some(ch)
+    }
+}
+
 impl String {
+    /// Removes the characters in `range`, which the iterator yields.
+    pub fn drain<R: core::ops::RangeBounds<usize>>(&mut self, range: R) -> Drain {
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(&n) => n,
+            core::ops::Bound::Excluded(&n) => n + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(&n) => n + 1,
+            core::ops::Bound::Excluded(&n) => n,
+            core::ops::Bound::Unbounded => self.len(),
+        };
+        assert!(self.as_str().is_char_boundary(start));
+        assert!(self.as_str().is_char_boundary(end));
+        let removed = String::from(&self[start..end]);
+        self.vec.drain(start..end);
+        let len = removed.len();
+        Drain { removed, front: 0, back: len }
+    }
+
     pub fn insert(&mut self, idx: usize, ch: char) {
         let mut buffer = [0u8; 4];
         self.insert_str(idx, ch.encode_utf8(&mut buffer));

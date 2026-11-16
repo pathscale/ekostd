@@ -354,3 +354,9 @@ All taken from the Rust standard library semantics; each is what a frontend unit
 - `[T]::sort_by_cached_key` (alloc), `Windows: DoubleEndedIterator`.
 - `DoubleEndedIterator` for `str::{CharIndices, SplitWhitespace, Lines, Split, SplitInclusive}`: `Split` and `SplitInclusive` gained an `end` field.
 - `Ord`/`PartialOrd`/`PartialEq`/`Eq` for tuples up to arity 12 (was 8).
+
+## 2026-11-16, agent FRONT: items for the ekod graph (ekod check exit 0 after these)
+- `fmt::Debug` for tuples up to arity 12 (was 8).
+- `Arc::make_mut` on `Arc<[T]>` as well as `Arc<T>`: bound is now the trait `CloneToArc` (Rust: `CloneToUninit`).
+- `sync::Weak::ptr_eq`, `VecDeque::remove`, `CStr::to_string_lossy` (needs `#[rustc_has_incoherent_inherent_impls]` on `CStr`), `str::rsplitn`.
+- `String::drain`: the removed characters are taken out when it is called and the iterator owns them (Rust removes on drop; differs only if the `Drain` is leaked).

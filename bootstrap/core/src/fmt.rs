@@ -975,4 +975,6 @@ macro_rules! tuple_debug {
     )*};
 }
 tuple_debug!((A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
-    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10, L 11));
