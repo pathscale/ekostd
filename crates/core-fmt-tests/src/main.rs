@@ -920,6 +920,49 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         }
         check!(r, "4", "{}", drops.get());
     }
+    { // lw5-e: atomics fetch_xor/fetch_nand/fetch_not, AtomicI8/I16, from_ptr, From/Default/Debug/into_inner, Ordering Debug
+        let o = core::sync::atomic::Ordering::SeqCst;
+        let a = core::sync::atomic::AtomicU32::new(0b1100);
+        check!(r, "12 6", "{} {}", a.fetch_xor(0b1010, o), a.load(o));
+        check!(r, "6 4294967289", "{} {}", a.fetch_nand(0b0110, o), a.load(o));
+        let b = core::sync::atomic::AtomicBool::new(true);
+        check!(r, "true false", "{} {}", b.fetch_xor(true, o), b.load(o));
+        check!(r, "false true", "{} {}", b.fetch_nand(false, o), b.load(o));
+        check!(r, "true false", "{} {}", b.fetch_not(o), b.load(o));
+        check!(r, "false false", "{} {}", b.fetch_nand(true, core::sync::atomic::Ordering::Relaxed), b.load(o));
+        let i8a = core::sync::atomic::AtomicI8::new(-5);
+        check!(r, "-5 -2", "{} {}", i8a.fetch_add(3, o), i8a.load(o));
+        let i8b = core::sync::atomic::AtomicI8::new(-1);
+        check!(r, "-1 -16", "{} {}", i8b.fetch_xor(0x0F, core::sync::atomic::Ordering::AcqRel), i8b.load(o));
+        let i16a = core::sync::atomic::AtomicI16::new(7);
+        check!(r, "7 9", "{} {}", i16a.fetch_max(9, o), i16a.load(o));
+        check!(r, "9 3", "{} {}", i16a.fetch_min(3, o), i16a.load(o));
+        check!(r, "-3", "{}", core::sync::atomic::AtomicI8::from(-3).into_inner());
+        check!(r, "0", "{:?}", core::sync::atomic::AtomicI16::default());
+        let mut x: u64 = 1;
+        let ax = unsafe { core::sync::atomic::AtomicU64::from_ptr(&mut x as *mut u64) };
+        ax.store(5, o);
+        check!(r, "5", "{}", x);
+        let mut flag = false;
+        let af = unsafe { core::sync::atomic::AtomicBool::from_ptr(&mut flag as *mut bool) };
+        af.store(true, o);
+        check!(r, "true", "{}", flag);
+        let mut byte: u8 = 7;
+        let mut slot: *mut u8 = core::ptr::null_mut::<u8>();
+        let ap = unsafe { core::sync::atomic::AtomicPtr::from_ptr(&mut slot as *mut *mut u8) };
+        ap.store(&mut byte as *mut u8, o);
+        check!(r, "7", "{}", unsafe { *slot });
+        check!(r, "true", "{:?}", core::sync::atomic::AtomicBool::new(true));
+        check!(r, "0x0", "{:?}", core::sync::atomic::AtomicPtr::<u8>::default());
+        check!(r, "0x0", "{:?}", core::sync::atomic::AtomicPtr::<u8>::from(core::ptr::null_mut::<u8>()).into_inner());
+        check!(r, "AcqRel", "{:?}", core::sync::atomic::Ordering::AcqRel);
+        check!(r, "Relaxed Release Acquire SeqCst", "{:?} {:?} {:?} {:?}",
+            core::sync::atomic::Ordering::Relaxed, core::sync::atomic::Ordering::Release,
+            core::sync::atomic::Ordering::Acquire, core::sync::atomic::Ordering::SeqCst);
+        check!(r, "3", "{}", core::sync::atomic::AtomicU16::from(3).into_inner());
+        check!(r, "false", "{}", core::sync::atomic::AtomicBool::default().into_inner());
+        check!(r, "true", "{}", core::sync::atomic::AtomicBool::from(true).into_inner());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
