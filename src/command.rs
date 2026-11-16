@@ -4,8 +4,8 @@
 //! caller that needs to decide when to stop waiting, because how long is too long is that
 //! caller's question and not this crate's.
 //!
-//! Still no stdin and no working directory: each is a way to get fork and exec wrong and nothing
-//! has wanted them. What was added is an environment, and reading both pipes at once with
+//! Still no stdin: it is a way to get fork and exec wrong and nothing has wanted it. What was added is a
+//! working directory (`chdir` in the child), an environment, and reading both pipes at once with
 //! `poll`, which is a fix rather than a feature: draining stdout to end of file and then stderr
 //! deadlocks whenever the child fills the stderr buffer first, 16 KB on macOS.
 
@@ -41,6 +41,8 @@ pub struct Command {
     overrides_buf: Vec<u8>,
     overrides_offsets: Vec<usize>,
     overrides_key_lens: Vec<usize>,
+    /// The child's working directory, NUL-terminated; empty means it inherits this process's.
+    cwd: Vec<u8>,
     invalid_input: bool,
 }
 
@@ -260,8 +262,14 @@ unsafe fn exec_child(
     tries_offsets: &[usize],
     argv: &[*const libc::c_char],
     envp: &[*const libc::c_char],
+    cwd: &[u8],
 ) -> libc::c_int {
     unsafe {
+        // Before the pipe ends move and before any candidate is tried, so a relative program
+        // and a relative argument both resolve against the directory that was asked for.
+        if !cwd.is_empty() && libc::chdir(cwd.as_ptr().cast()) != 0 {
+            return 127;
+        }
         // Its own process group, so that killing it kills what it started. A compiler
         // driver spawns real work and a signal sent to the driver alone orphans that
         // work, which keeps running against a deadline nobody is watching any more.
@@ -321,7 +329,23 @@ impl Command {
             overrides_buf: Vec::new(),
             overrides_offsets: Vec::new(),
             overrides_key_lens: Vec::new(),
+            cwd: Vec::new(),
         }
+    }
+
+    /// Run it in a directory. `chdir` happens in the child after the fork and before `execve`; a
+    /// directory that cannot be entered ends the child with status 127, like a program that is
+    /// not found.
+    pub fn current_dir(mut self, dir: impl AsRef<Path>) -> Command {
+        let bytes = dir.as_ref().as_bytes();
+        if bytes.is_empty() || contains_byte(bytes, 0) {
+            self.invalid_input = true;
+            return self;
+        }
+        self.cwd.clear();
+        self.cwd.extend_from_slice(bytes);
+        self.cwd.push(0);
+        self
     }
 
     /// Add one argument.
@@ -449,7 +473,7 @@ impl Command {
             // touches was built above, before the fork.
             unsafe {
                 let code =
-                    exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp);
+                    exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp, &self.cwd);
                 libc::_exit(code);
             }
         }
