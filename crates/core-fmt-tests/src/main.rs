@@ -492,6 +492,39 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "(2, Some(2))", "{:?}", c.size_hint());
         check!(r, "(0, Some(0))", "{:?}", (0..0).chain(0..0).size_hint());
     }
+    { // lw4-a: char API: ASCII classes, from_digit, UTF-16, escape_unicode/escape_default, make_ascii_*, constants, str escapes
+        check!(r, "true false", "{} {}", 'a'.is_ascii_lowercase(), 'A'.is_ascii_lowercase());
+        check!(r, "true false", "{} {}", '~'.is_ascii_graphic(), ' '.is_ascii_graphic());
+        check!(r, "true false", "{} {}", '\x7f'.is_ascii_control(), '\u{80}'.is_ascii_control());
+        check!(r, "true false", "{} {}", '7'.is_ascii_octdigit(), '8'.is_ascii_octdigit());
+        check!(r, "Some('b')", "{:?}", char::from_digit(11, 16));
+        check!(r, "None", "{:?}", char::from_digit(10, 10));
+        check!(r, "Some('z')", "{:?}", core::char::from_digit(35, 36));
+        check!(r, "1 2", "{} {}", 'ß'.len_utf16(), '\u{1D11E}'.len_utf16());
+        let mut units = [0u16; 2];
+        let encoded = '\u{1D11E}'.encode_utf16(&mut units);
+        check!(r, "2 d834 dd1e", "{} {:x} {:x}", encoded.len(), encoded[0], encoded[1]);
+        check!(r, "[\\n]", "[{}]", '\n'.escape_default());
+        check!(r, "[\\\"]", "[{}]", '"'.escape_default());
+        check!(r, "[\\']", "[{}]", '\''.escape_default());
+        check!(r, "[\\u{7f}]", "[{}]", '\u{7f}'.escape_default());
+        check!(r, "[\\u{e9}]", "[{}]", 'é'.escape_default());
+        check!(r, "[a]", "[{}]", 'a'.escape_default());
+        check!(r, "2", "{}", '\n'.escape_default().len());
+        check!(r, "[\\u{61}]", "[{}]", 'a'.escape_unicode());
+        check!(r, "[\\u{0}]", "[{}]", '\0'.escape_unicode());
+        check!(r, "[\\u{10ffff}]", "[{}]", '\u{10ffff}'.escape_unicode());
+        check!(r, "6", "{}", 'a'.escape_unicode().len());
+        let mut q = 'q';
+        q.make_ascii_uppercase();
+        let mut e = 'é';
+        e.make_ascii_uppercase();
+        check!(r, "Q é", "{} {}", q, e);
+        check!(r, "65533 0", "{} {}", char::REPLACEMENT_CHARACTER as u32, char::MIN as u32);
+        check!(r, "[\\u{61}\\u{62}\\u{a}]", "[{}]", "ab\n".escape_unicode());
+        check!(r, "[a\\'b\\\"\\n]", "[{}]", "a'b\"\n".escape_debug());
+        check!(r, "[\\u{301}x\u{301}]", "[{}]", "\u{301}x\u{301}".escape_debug());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
