@@ -828,6 +828,20 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         hb!("[]", core::fmt::Error);
         hb!("[4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0]", core::alloc::Layout::new::<u32>());
     }
+    { // lanes-w3 23: Utf8Error Display (Rust wording)
+        match core::str::from_utf8(&[0x61, 0xff]) {
+            Err(e) => check!(r, "invalid utf-8 sequence of 1 bytes from index 1", "{}", e),
+            Ok(_) => check!(r, "invalid utf-8 sequence of 1 bytes from index 1", "{}", "Ok"),
+        }
+        match core::str::from_utf8(&[0xe2, 0x28, 0xa1]) {
+            Err(e) => check!(r, "invalid utf-8 sequence of 1 bytes from index 0", "{}", e),
+            Ok(_) => check!(r, "invalid utf-8 sequence of 1 bytes from index 0", "{}", "Ok"),
+        }
+        match core::str::from_utf8(&[0x61, 0xe2, 0x82]) {
+            Err(e) => check!(r, "incomplete utf-8 byte sequence from index 1", "{}", e),
+            Ok(_) => check!(r, "incomplete utf-8 byte sequence from index 1", "{}", "Ok"),
+        }
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
