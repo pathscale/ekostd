@@ -204,6 +204,15 @@ impl char {
 }
 
 impl char {
+    pub const fn eq_ignore_ascii_case(&self, other: &char) -> bool {
+        self.to_ascii_lowercase() == other.to_ascii_lowercase()
+    }
+    pub const fn is_ascii_punctuation(&self) -> bool {
+        matches!(*self, '!'..='/' | ':'..='@' | '['..='`' | '{'..='~')
+    }
+}
+
+impl char {
     pub const fn to_ascii_uppercase(&self) -> char {
         if *self >= 'a' && *self <= 'z' { ((*self as u8) - 32) as char } else { *self }
     }
@@ -217,7 +226,7 @@ impl char {
             c => c > '\x7f' && crate::unicode::alphabetic::lookup(c),
         }
     }
-    fn is_numeric(self) -> bool {
+    pub fn is_numeric(self) -> bool {
         match self {
             '0'..='9' => true,
             c => c > '\x7f' && crate::unicode::n::lookup(c),
@@ -253,6 +262,29 @@ impl char {
         let [a, b, c] = crate::unicode::conversions::to_lower(self);
         let len = if b == '\0' { 1 } else if c == '\0' { 2 } else { 3 };
         ToLowercase { chars: [a, b, c], pos: 0, len }
+    }
+    pub fn is_lowercase(self) -> bool {
+        match self {
+            'a'..='z' => true,
+            '\0'..='\u{A9}' => false,
+            _ => crate::unicode::lowercase::lookup(self),
+        }
+    }
+    /// Rust: `Lowercase`, `Uppercase` or titlecase letter (`Lt`).
+    pub fn is_cased(self) -> bool {
+        match self {
+            'a'..='z' | 'A'..='Z' => true,
+            '\0'..='\u{A9}' => false,
+            _ => crate::unicode::lowercase::lookup(self) || crate::unicode::uppercase::lookup(self) || crate::unicode::lt::lookup(self),
+        }
+    }
+    /// Rust: the `Case_Ignorable` property (the final-sigma rule of `str::to_lowercase`).
+    pub fn is_case_ignorable(self) -> bool {
+        if self.is_ascii() {
+            matches!(self, '\'' | '.' | ':' | '^' | '`')
+        } else {
+            crate::unicode::case_ignorable::lookup(self)
+        }
     }
     pub fn is_uppercase(self) -> bool {
         match self {

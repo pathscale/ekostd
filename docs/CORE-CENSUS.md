@@ -343,3 +343,14 @@ Two errors, both from in-flight unwinding removal by another agent, not library 
   `Option::transpose`, `saturating_mul`, `rotate_right`, `div_ceil`, `abs`, `abs_diff`,
   `MaybeUninit::assume_init_read`, `alloc::LayoutErr`.
 - Three integer type mismatches on shifts (`foldhash`), where our shift impls are narrower than Rust's.
+
+## 2026-11-16, agent FRONT: items for the frontend-relax workspace (check exit 0 after these)
+
+All taken from the Rust standard library semantics; each is what a frontend unit calls.
+- `char::is_lowercase`, `is_cased`, `is_case_ignorable` (made `is_numeric` public); tables `unicode::{lowercase, lt, case_ignorable}` copied verbatim from `unicode_data.rs` (`lowercase::lookup` is not `const`, as `bitset_search` here is not).
+- `str::to_lowercase` with the final-sigma rule (`map_uppercase_sigma`), `str::rmatch_indices` (returns `Rev<MatchIndices>`).
+- `char::eq_ignore_ascii_case`, `char::is_ascii_punctuation`.
+- `String::insert`, `String::remove`.
+- `[T]::sort_by_cached_key` (alloc), `Windows: DoubleEndedIterator`.
+- `DoubleEndedIterator` for `str::{CharIndices, SplitWhitespace, Lines, Split, SplitInclusive}`: `Split` and `SplitInclusive` gained an `end` field.
+- `Ord`/`PartialOrd`/`PartialEq`/`Eq` for tuples up to arity 12 (was 8).

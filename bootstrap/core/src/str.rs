@@ -227,13 +227,13 @@ impl str {
     /// The pieces between matches. A pattern that matches nothing at all, such as an empty string,
     /// ends the splitting: what is left comes out as the last piece.
     pub fn split<P: Pattern>(&self, pat: P) -> Split<'_, P> {
-        Split { haystack: self, start: 0, finished: false, pattern: pat }
+        Split { haystack: self, start: 0, end: self.len(), finished: false, pattern: pat }
     }
 
     /// As `split`, with each match kept at the end of the piece before it. A match at the very end
     /// is not followed by an empty piece.
     pub fn split_inclusive<P: Pattern>(&self, pat: P) -> SplitInclusive<'_, P> {
-        SplitInclusive { haystack: self, start: 0, finished: false, pattern: pat }
+        SplitInclusive { haystack: self, start: 0, end: self.len(), finished: false, pattern: pat }
     }
 
     /// What lies before the first match, and what lies after it.
@@ -287,6 +287,11 @@ impl str {
     }
 
     /// The matches, left to right and not overlapping, with the byte index each starts at.
+    /// The matches from the right, with the byte index each starts at.
+    pub fn rmatch_indices<P: Pattern>(&self, pat: P) -> crate::iter::Rev<MatchIndices<'_, P>> {
+        self.match_indices(pat).rev()
+    }
+
     pub fn match_indices<P: Pattern>(&self, pat: P) -> MatchIndices<'_, P> {
         MatchIndices { haystack: self, pattern: pat, pos: 0, back: self.len(), done: false }
     }
@@ -808,6 +813,7 @@ impl crate::iter::Iterator for Chars<'_> {
 pub struct Split<'a, P> {
     haystack: &'a str,
     start: usize,
+    end: usize,
     finished: bool,
     pattern: P,
 }
@@ -817,7 +823,7 @@ impl<'a, P: Pattern> crate::iter::Iterator for Split<'a, P> {
         if self.finished {
             return None;
         }
-        match self.pattern.find_in(self.haystack, self.start) {
+        match self.pattern.find_in(&self.haystack[..self.end], self.start) {
             Some((start, end)) if end > start => {
                 let piece = &self.haystack[self.start..start];
                 self.start = end;
@@ -825,25 +831,48 @@ impl<'a, P: Pattern> crate::iter::Iterator for Split<'a, P> {
             }
             _ => {
                 self.finished = true;
-                Some(&self.haystack[self.start..])
+                Some(&self.haystack[self.start..self.end])
             }
         }
+    }
+}
+/// Pieces taken from the back are cut at the last non-empty matches, as in `rsplit`.
+impl<'a, P: Pattern> crate::iter::DoubleEndedIterator for Split<'a, P> {
+    fn next_back(&mut self) -> Option<&'a str> {
+        if self.finished {
+            return None;
+        }
+        let mut i = self.end;
+        while i > self.start {
+            i -= 1;
+            if !self.haystack.is_char_boundary(i) { continue; }
+            if let Some(len) = self.pattern.prefix_len(&self.haystack[i..self.end]) {
+                if len > 0 {
+                    let piece = &self.haystack[i + len..self.end];
+                    self.end = i;
+                    return Some(piece);
+                }
+            }
+        }
+        self.finished = true;
+        Some(&self.haystack[self.start..self.end])
     }
 }
 
 pub struct SplitInclusive<'a, P> {
     haystack: &'a str,
     start: usize,
+    end: usize,
     finished: bool,
     pattern: P,
 }
 impl<'a, P: Pattern> crate::iter::Iterator for SplitInclusive<'a, P> {
     type Item = &'a str;
     fn next(&mut self) -> Option<&'a str> {
-        if self.finished || self.start == self.haystack.len() {
+        if self.finished || self.start == self.end {
             return None;
         }
-        match self.pattern.find_in(self.haystack, self.start) {
+        match self.pattern.find_in(&self.haystack[..self.end], self.start) {
             Some((start, end)) if end > start => {
                 let piece = &self.haystack[self.start..end];
                 self.start = end;
@@ -851,9 +880,35 @@ impl<'a, P: Pattern> crate::iter::Iterator for SplitInclusive<'a, P> {
             }
             _ => {
                 self.finished = true;
-                Some(&self.haystack[self.start..])
+                Some(&self.haystack[self.start..self.end])
             }
         }
+    }
+}
+impl<'a, P: Pattern> crate::iter::DoubleEndedIterator for SplitInclusive<'a, P> {
+    fn next_back(&mut self) -> Option<&'a str> {
+        if self.finished || self.start == self.end {
+            return None;
+        }
+        // The last piece ends at `end`, terminator included; it starts after the match before that terminator.
+        let mut limit = self.end;
+        if let Some(len) = self.pattern.suffix_len(&self.haystack[self.start..self.end]) {
+            limit -= len;
+        }
+        let mut i = limit;
+        while i > self.start {
+            i -= 1;
+            if !self.haystack.is_char_boundary(i) { continue; }
+            if let Some(len) = self.pattern.prefix_len(&self.haystack[i..limit]) {
+                if len > 0 {
+                    let piece = &self.haystack[i + len..self.end];
+                    self.end = i + len;
+                    return Some(piece);
+                }
+            }
+        }
+        self.finished = true;
+        Some(&self.haystack[self.start..self.end])
     }
 }
 
@@ -875,6 +930,40 @@ impl<'a> crate::iter::Iterator for Lines<'a> {
             Some(line) => line,
             None => line,
         })
+    }
+}
+
+impl<'a> crate::iter::DoubleEndedIterator for Lines<'a> {
+    fn next_back(&mut self) -> Option<&'a str> {
+        let line = self.inner.next_back()?;
+        let line = match line.strip_suffix('\n') {
+            Some(line) => line,
+            None => return Some(line),
+        };
+        Some(match line.strip_suffix('\r') {
+            Some(line) => line,
+            None => line,
+        })
+    }
+}
+
+impl crate::iter::DoubleEndedIterator for CharIndices<'_> {
+    fn next_back(&mut self) -> Option<(usize, char)> {
+        let ch = self.iter.next_back()?;
+        Some((self.front_offset + self.iter.as_str().len(), ch))
+    }
+}
+
+impl<'a> crate::iter::DoubleEndedIterator for SplitWhitespace<'a> {
+    fn next_back(&mut self) -> Option<&'a str> {
+        let rest = self.rest.trim_end_matches(|c: char| c.is_whitespace());
+        if rest.is_empty() { self.rest = ""; return None; }
+        let start = match rest.rfind(|c: char| c.is_whitespace()) {
+            Some(at) => at + rest[at..].chars().next().map_or(1, |c| c.len_utf8()),
+            None => 0,
+        };
+        self.rest = &rest[..start];
+        Some(&rest[start..])
     }
 }
 
@@ -1056,7 +1145,7 @@ impl<'a, P: Pattern> crate::iter::Iterator for SplitN<'a, P> {
             0 => None,
             1 => {
                 self.count = 0;
-                if self.inner.finished { None } else { self.inner.finished = true; Some(&self.inner.haystack[self.inner.start..]) }
+                if self.inner.finished { None } else { self.inner.finished = true; Some(&self.inner.haystack[self.inner.start..self.inner.end]) }
             }
             _ => { self.count -= 1; self.inner.next() }
         }

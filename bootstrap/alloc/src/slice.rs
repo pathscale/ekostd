@@ -1,4 +1,19 @@
 impl<T> [T] {
+    /// Sorts by a key computed once per element; equal keys keep their order.
+    #[rustc_allow_incoherent_impl]
+    pub fn sort_by_cached_key<K, F>(&mut self, mut f: F) where F: FnMut(&T) -> K, K: Ord {
+        let len = self.len();
+        if len < 2 { return; }
+        let mut indices: crate::vec::Vec<(K, usize)> = crate::vec::Vec::with_capacity(len);
+        for (i, x) in self.iter().enumerate() { indices.push((f(x), i)); }
+        indices.sort();
+        for i in 0..len {
+            let mut index = indices[i].1;
+            while index < i { index = indices[index].1; }
+            indices[i].1 = index;
+            self.swap(i, index);
+        }
+    }
     #[rustc_allow_incoherent_impl]
     pub fn to_vec(&self) -> crate::vec::Vec<T> where T: Clone {
         let mut result = crate::vec::Vec::with_capacity(self.len());

@@ -222,6 +222,20 @@ impl String {
 }
 
 impl String {
+    pub fn insert(&mut self, idx: usize, ch: char) {
+        let mut buffer = [0u8; 4];
+        self.insert_str(idx, ch.encode_utf8(&mut buffer));
+    }
+
+    pub fn remove(&mut self, idx: usize) -> char {
+        let ch = match self[idx..].chars().next() {
+            Some(ch) => ch,
+            None => panic!("cannot remove a char from the end of a string"),
+        };
+        self.vec.drain(idx..idx + ch.len_utf8());
+        ch
+    }
+
     pub fn insert_str(&mut self, idx: usize, string: &str) {
         assert!(self.as_str().is_char_boundary(idx));
         self.vec.splice(idx..idx, string.bytes());

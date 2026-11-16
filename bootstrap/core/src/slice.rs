@@ -1010,6 +1010,17 @@ pub struct Windows<'a, T: 'a> {
     size: usize,
 }
 
+impl<'a, T> crate::iter::DoubleEndedIterator for Windows<'a, T> {
+    fn next_back(&mut self) -> Option<&'a [T]> {
+        if self.size > self.rest.len() {
+            return None;
+        }
+        let window = &self.rest[self.rest.len() - self.size..];
+        self.rest = &self.rest[..self.rest.len() - 1];
+        Some(window)
+    }
+}
+
 impl<'a, T> Iterator for Windows<'a, T> {
     type Item = &'a [T];
     fn next(&mut self) -> Option<&'a [T]> {

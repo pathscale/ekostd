@@ -15,6 +15,21 @@ impl str {
         out
     }
 
+    /// A copy with every character replaced by its lowercase mapping, with Rust's final-sigma rule (Σ becomes ς at the
+    /// end of a word, else σ).
+    #[rustc_allow_incoherent_impl]
+    pub fn to_lowercase(&self) -> crate::string::String {
+        let mut out = crate::string::String::with_capacity(self.len());
+        for (i, c) in self.char_indices() {
+            if c == 'Σ' {
+                out.push(map_uppercase_sigma(self, i));
+            } else {
+                out.extend(c.to_lowercase());
+            }
+        }
+        out
+    }
+
     /// A copy with the ASCII capitals made lower case; other characters are unchanged.
     #[rustc_allow_incoherent_impl]
     pub fn to_ascii_lowercase(&self) -> crate::string::String {
@@ -68,4 +83,16 @@ impl str {
         out.push_str(&self[last..]);
         out
     }
+}
+
+fn map_uppercase_sigma(from: &str, i: usize) -> char {
+    fn case_ignorable_then_cased<I: Iterator<Item = char>>(iter: I) -> bool {
+        match iter.skip_while(|&c| c.is_case_ignorable()).next() {
+            Some(c) => c.is_cased(),
+            None => false,
+        }
+    }
+    let is_word_final = case_ignorable_then_cased(from[..i].chars().rev())
+        && !case_ignorable_then_cased(from[i + 'Σ'.len_utf8()..].chars());
+    if is_word_final { 'ς' } else { 'σ' }
 }
