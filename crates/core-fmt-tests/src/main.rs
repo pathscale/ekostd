@@ -1027,6 +1027,51 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "true", "{}", u8::try_from(300i32).unwrap_err() == u8::try_from(-1i32).unwrap_err());
         check!(r, "true", "{}", u8::try_from(5i32) == Ok(5));
     }
+    { // lw5-h: Duration API (Sum, unit constants, float conversions and arithmetic, saturating_mul, abs_diff)
+        let parts = [Duration::from_secs(1), Duration::from_millis(1500)];
+        check!(r, "2.5s", "{:?}", parts.iter().sum::<Duration>());
+        let total: Duration = parts.into_iter().sum();
+        check!(r, "2.5s", "{:?}", total);
+        check!(r, "0ns", "{:?}", [Duration::ZERO; 0].iter().sum::<Duration>());
+        check!(r, "1s", "{:?}", Duration::SECOND);
+        check!(r, "1ms", "{:?}", Duration::MILLISECOND);
+        check!(r, "1µs", "{:?}", Duration::MICROSECOND);
+        check!(r, "1ns", "{:?}", Duration::NANOSECOND);
+        check!(r, "120s", "{:?}", Duration::from_mins(2));
+        check!(r, "3600s", "{:?}", Duration::from_hours(1));
+        check!(r, "1.5s", "{:?}", Duration::from_secs_f32(1.5));
+        check!(r, "2.700000048s", "{:?}", Duration::from_secs_f32(2.7));
+        check!(r, "0ns", "{:?}", Duration::from_secs_f32(1e-20));
+        check!(r, "2.7s", "{:?}", Duration::from_secs_f64(2.7));
+        check!(r, "1", "{}", Duration::from_secs(1).as_secs_f32());
+        check!(r, "2.5", "{}", Duration::from_millis(2500).as_secs_f32());
+        check!(r, "true", "{}", Duration::try_from_secs_f64(-1.0).is_err());
+        check!(r, "Err(TryFromFloatSecsError { kind: Negative })", "{:?}", Duration::try_from_secs_f64(-1.0));
+        check!(r, "Err(TryFromFloatSecsError { kind: OverflowOrNan })", "{:?}", Duration::try_from_secs_f64(f64::INFINITY));
+        check!(r, "Ok(500ms)", "{:?}", Duration::try_from_secs_f64(0.5));
+        check!(r, "Ok(1.5s)", "{:?}", Duration::try_from_secs_f32(1.5));
+        if let Err(e) = Duration::try_from_secs_f64(-1.0) {
+            check!(r, "cannot convert float seconds to Duration: value is negative", "{}", e);
+        } else {
+            check!(r, "Err", "{}", "Ok");
+        }
+        if let Err(e) = Duration::try_from_secs_f32(f32::NAN) {
+            check!(r, "cannot convert float seconds to Duration: value is either too big or NaN", "{}", e);
+        } else {
+            check!(r, "Err", "{}", "Ok");
+        }
+        check!(r, "true", "{}", Duration::try_from_secs_f32(-2.0) == Duration::try_from_secs_f64(-3.0).map(|_| Duration::ZERO));
+        check!(r, "3s", "{:?}", Duration::from_secs(2).mul_f64(1.5));
+        check!(r, "3s", "{:?}", Duration::from_secs(2).mul_f32(1.5));
+        check!(r, "1.5s", "{:?}", Duration::from_secs(3).div_f64(2.0));
+        check!(r, "1.5s", "{:?}", Duration::from_secs(3).div_f32(2.0));
+        check!(r, "1.5", "{}", Duration::from_secs(3).div_duration_f64(Duration::from_secs(2)));
+        check!(r, "0.5", "{}", Duration::from_millis(500).div_duration_f32(Duration::from_secs(1)));
+        check!(r, "true", "{}", Duration::MAX.saturating_mul(2) == Duration::MAX);
+        check!(r, "3s", "{:?}", Duration::from_secs(1).saturating_mul(3));
+        check!(r, "500ms", "{:?}", Duration::from_secs(1).abs_diff(Duration::from_millis(1500)));
+        check!(r, "500ms", "{:?}", Duration::from_millis(1500).abs_diff(Duration::from_secs(1)));
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
