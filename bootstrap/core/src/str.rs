@@ -1199,7 +1199,7 @@ impl crate::fmt::Debug for Utf8Error {
 impl crate::fmt::Display for Utf8Error {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
         match self.error_len {
-            Some(_) => crate::write!(f, "invalid utf-8 sequence starting at index {}", self.valid_up_to),
+            Some(error_len) => crate::write!(f, "invalid utf-8 sequence of {} bytes from index {}", error_len, self.valid_up_to),
             None => crate::write!(f, "incomplete utf-8 byte sequence from index {}", self.valid_up_to),
         }
     }
