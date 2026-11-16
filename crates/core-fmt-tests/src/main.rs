@@ -620,6 +620,73 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "None", "{:?}", a.first_chunk::<4>());
         check!(r, "Some(([1, 2], [3]))", "{:?}", a.split_last_chunk::<1>());
     }
+    { // lw4-d: select_nth / disjoint / ascii
+        let mut v = [5, 1, 4, 2, 3];
+        let (lo, mid, hi) = v.select_nth_unstable(2);
+        let mut parted = true;
+        for x in lo.iter() { if *x > 3 { parted = false; } }
+        for x in hi.iter() { if *x < 3 { parted = false; } }
+        check!(r, "3 true 2 2", "{} {} {} {}", *mid, parted, lo.len(), hi.len());
+        let mut w = [1, 9, 3];
+        let (_, top, _) = w.select_nth_unstable_by(0, |a, b| b.cmp(a));
+        check!(r, "9", "{}", *top);
+        let mut k = [1, 2, 3, 4, 5];
+        let (_, least, _) = k.select_nth_unstable_by_key(4, |x: &i32| -x);
+        check!(r, "1", "{}", *least);
+
+        let mut a = [0i32; 200];
+        let mut seed: u32 = 12345;
+        let mut i = 0;
+        while i < 200 {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            a[i] = ((seed >> 16) % 1000) as i32;
+            i += 1;
+        }
+        let mut sorted = a;
+        sorted.sort_unstable_by(|x, y| x.cmp(y));
+        let mut same = true;
+        for &at in [0usize, 57, 199].iter() {
+            let mut c = a;
+            let (before, nth, after) = c.select_nth_unstable(at);
+            let pivot = *nth;
+            if pivot != sorted[at] || before.len() != at { same = false; }
+            for x in before.iter() { if *x > pivot { same = false; } }
+            for x in after.iter() { if *x < pivot { same = false; } }
+        }
+        check!(r, "true", "{}", same);
+
+        let mut d = [1, 2, 3, 4];
+        if let Ok([x, y]) = d.get_disjoint_mut([0, 2]) {
+            let t = *x;
+            *x = *y;
+            *y = t;
+        }
+        check!(r, "[3, 2, 1, 4]", "{:?}", d);
+        match d.get_disjoint_mut([1, 1]) {
+            Err(e) => check!(r, "Err(OverlappingIndices) there were overlapping indices", "Err({:?}) {}", e, e),
+            Ok(_) => check!(r, "Err(OverlappingIndices) there were overlapping indices", "Ok"),
+        }
+        match d.get_disjoint_mut([4]) {
+            Err(e) => check!(r, "Err(IndexOutOfBounds) an index is out of bounds", "Err({:?}) {}", e, e),
+            Ok(_) => check!(r, "Err(IndexOutOfBounds) an index is out of bounds", "Ok"),
+        }
+
+        let mut h = *b"Hello, World";
+        h.make_ascii_uppercase();
+        check!(r, "HELLO, WORLD", "{}", match core::str::from_utf8(&h) { Ok(s) => s, Err(_) => "<invalid UTF-8>" });
+        let mut g = [0u8; 3];
+        g.copy_from_slice("ÀB".as_bytes());
+        g.make_ascii_lowercase();
+        check!(r, "Àb", "{}", match core::str::from_utf8(&g) { Ok(s) => s, Err(_) => "<invalid UTF-8>" });
+        check!(r, "true false", "{} {}", b"Ferris".eq_ignore_ascii_case(b"FERRIS"), b"a".eq_ignore_ascii_case(b"ab"));
+
+        let raw = b"0\t\r\n'\"\\\x9d";
+        check!(r, "0\\t\\r\\n\\'\\\"\\\\\\x9d", "{}", raw.escape_ascii());
+        check!(r, "17", "{}", raw.escape_ascii().count());
+        let mut back = raw.escape_ascii();
+        check!(r, "Some(100) Some(57) Some(48)", "{:?} {:?} {:?}", back.next_back(), back.next_back(), back.next());
+        check!(r, "EscapeAscii { .. }", "{:?}", raw.escape_ascii());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
