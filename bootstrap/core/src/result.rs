@@ -53,21 +53,19 @@ impl<T, E> Result<T, E> {
         match self { Ok(value) => value, Err(_) => unsafe { crate::hint::unreachable_unchecked() } }
     }
 
-    pub fn unwrap(self) -> T {
+    #[track_caller]
+    pub fn unwrap(self) -> T where E: crate::fmt::Debug {
         match self {
             Ok(value) => value,
-            Err(_) => crate::panic::panic_nounwind("called `Result::unwrap()` on an `Err` value"),
+            Err(error) => crate::panic::unwrap_failed("called `Result::unwrap()` on an `Err` value", &error),
         }
     }
 
     #[track_caller]
-    pub fn expect(self, msg: &str) -> T {
+    pub fn expect(self, msg: &str) -> T where E: crate::fmt::Debug {
         match self {
             Ok(value) => value,
-            Err(_) => {
-                let _ = msg;
-                crate::panic::panic_nounwind("called `Result::expect()` on an `Err` value")
-            }
+            Err(error) => crate::panic::unwrap_failed(msg, &error),
         }
     }
 
@@ -217,7 +215,7 @@ impl<T, E> Result<T, E> {
         T: crate::fmt::Debug,
     {
         match self {
-            Ok(_) => crate::panic::panic_nounwind("called `Result::unwrap_err()` on an `Ok` value"),
+            Ok(value) => crate::panic::unwrap_failed("called `Result::unwrap_err()` on an `Ok` value", &value),
             Err(error) => error,
         }
     }
@@ -231,7 +229,7 @@ impl<T, E> Result<T, E> {
     #[track_caller]
     pub fn expect_err(self, msg: &str) -> E where T: crate::fmt::Debug {
         match self {
-            Ok(_) => { let _ = msg; crate::panic::panic_nounwind("called `Result::expect_err()` on an `Ok` value") }
+            Ok(value) => crate::panic::unwrap_failed(msg, &value),
             Err(error) => error,
         }
     }

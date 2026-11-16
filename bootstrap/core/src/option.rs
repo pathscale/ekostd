@@ -45,7 +45,7 @@ impl<T> Option<T> {
     {
         match self {
             Some(value) => value,
-            None => crate::panic::panic_nounwind("called `Option::unwrap()` on a `None` value"),
+            None => crate::panic::panic_fmt(crate::fmt::Arguments::from_str("called `Option::unwrap()` on a `None` value")),
         }
     }
 
@@ -54,10 +54,7 @@ impl<T> Option<T> {
     {
         match self {
             Some(value) => value,
-            None => {
-                let _ = msg;
-                crate::panic::panic_nounwind("called `Option::expect()` on a `None` value")
-            }
+            None => crate::panic::panic_display(&msg),
         }
     }
 

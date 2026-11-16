@@ -146,7 +146,7 @@ impl<T: core::fmt::Display + ?Sized> ToString for T {
     }
 }
 impl core::fmt::Write for String { fn write_str(&mut self, s:&str)->core::fmt::Result { self.push_str(s); Ok(()) } }
-impl core::fmt::Display for String { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result { f.write_str(self.as_str()) } }
+impl core::fmt::Display for String { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result { core::fmt::Display::fmt(self.as_str(), f) } }
 impl core::fmt::Debug for String { fn fmt(&self,f:&mut core::fmt::Formatter<'_>)->core::fmt::Result { core::fmt::Debug::fmt(self.as_str(),f) } }
 impl PartialEq for String { fn eq(&self, other:&Self)->bool { self.as_str()==other.as_str() } }
 impl Eq for String {}

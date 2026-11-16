@@ -103,6 +103,23 @@ pub const fn panic_fmt(args: fmt::Arguments<'_>) -> ! {
     unsafe { panic_impl(&info) }
 }
 
+/// `Option::expect` and similar: panics with `message` at the caller's location, as Rust's `panic_display`.
+#[track_caller]
+#[rustc_do_not_const_check]
+#[inline(never)]
+#[cold]
+pub const fn panic_display<T: fmt::Display + ?crate::marker::Sized>(message: &T) -> ! {
+    panic_fmt(crate::format_args!("{}", message))
+}
+
+/// `Result::unwrap`, `Result::expect` and their `_err` forms: `message: error` at the caller's location.
+#[track_caller]
+#[inline(never)]
+#[cold]
+pub fn unwrap_failed(message: &str, error: &dyn fmt::Debug) -> ! {
+    panic_fmt(crate::format_args!("{}: {:?}", message, error))
+}
+
 #[lang = "panic_nounwind"]
 #[rustc_nounwind]
 #[rustc_do_not_const_check]

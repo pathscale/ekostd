@@ -41,3 +41,13 @@ impl<T: 'static + ?Sized> Any for T {
     fn type_id(&self) -> TypeId { TypeId::of::<T>() }
 }
 pub const fn type_name<T: ?Sized>() -> &'static str { "<type>" }
+
+impl crate::fmt::Debug for dyn Any {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("Any { .. }") }
+}
+impl crate::fmt::Debug for dyn Any + crate::marker::Send {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("Any { .. }") }
+}
+impl crate::fmt::Debug for dyn Any + crate::marker::Send + crate::marker::Sync {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("Any { .. }") }
+}

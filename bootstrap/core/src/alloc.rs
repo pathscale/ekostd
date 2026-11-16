@@ -11,6 +11,14 @@ impl crate::clone::Clone for Layout {
 }
 
 pub struct LayoutError;
+impl crate::fmt::Debug for LayoutError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("LayoutError") }
+}
+impl crate::fmt::Display for LayoutError {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("invalid parameters to Layout::from_size_align")
+    }
+}
 
 impl Layout {
     pub const fn from_size_align(size: usize, align: usize) -> Result<Self, LayoutError> {

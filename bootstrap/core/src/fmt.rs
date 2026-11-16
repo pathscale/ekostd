@@ -33,10 +33,19 @@ struct Options { flags: u32, width: u16, precision: u16 }
 impl Copy for Options {}
 impl Clone for Options { fn clone(&self) -> Self { *self } }
 mod flags {
+    pub const SIGN_PLUS: u32 = 1 << 21;
+    pub const SIGN_MINUS: u32 = 1 << 22;
     pub const ALTERNATE: u32 = 1 << 23;
+    pub const ZERO_PAD: u32 = 1 << 24;
+    pub const DEBUG_LOWER_HEX: u32 = 1 << 25;
+    pub const DEBUG_UPPER_HEX: u32 = 1 << 26;
     pub const WIDTH: u32 = 1 << 27;
     pub const PRECISION: u32 = 1 << 28;
+    pub const ALIGN_SHIFT: u32 = 29;
+    pub const ALIGN_BITS: u32 = 3 << 29;
+    pub const ALIGN_RIGHT: u32 = 1 << 29;
     pub const ALIGN_UNKNOWN: u32 = 3 << 29;
+    pub const FILL: u32 = (1 << 21) - 1;
     /// The flag value of a placeholder without options.
     pub const DEFAULT: u32 = ' ' as u32 | ALIGN_UNKNOWN;
 }
@@ -393,17 +402,17 @@ pub fn write(output: &mut dyn Write, args: Arguments<'_>) -> Result {
                 options.precision = precision;
             }
             if index >= args.args.len() { return Err(Error); }
-            // Width, fill, alignment, sign, zero-padding and `x?` are not implemented by the formatting
-            // traits here: reject them rather than silently formatting incorrectly. `#` and precision are
-            // carried to the impl, which may honour them.
-            if options.flags & !(flags::ALTERNATE | flags::PRECISION) != flags::DEFAULT { return Err(Error); }
             attempt!(args.args[index].format(&mut Formatter { writer: output, options }));
         }
     }
     Err(Error)
 }
-fn number(mut value: u128, radix: u128, upper: bool, f: &mut Formatter<'_>) -> Result {
+fn number(value: u128, radix: u128, upper: bool, f: &mut Formatter<'_>) -> Result {
     let mut bytes = [0u8; 128];
+    f.write_str(digits(value, radix, upper, &mut bytes))
+}
+/// The digits of `value` in `radix`, most significant first, written at the end of `bytes`.
+fn digits(mut value: u128, radix: u128, upper: bool, bytes: &mut [u8; 128]) -> &str {
     let mut start = 128;
     loop {
         let digit = (value % radix) as u8;
@@ -414,7 +423,7 @@ fn number(mut value: u128, radix: u128, upper: bool, f: &mut Formatter<'_>) -> R
         if value == 0 { break; }
     }
     let s = unsafe { crate::slice::from_raw_parts(bytes.as_ptr().add(start), 128 - start) };
-    f.write_str(unsafe { crate::str::from_utf8_unchecked(s) })
+    unsafe { crate::str::from_utf8_unchecked(s) }
 }
 fn escaped(c: char, quote: char, f: &mut Formatter<'_>) -> Result {
     match c {
@@ -432,16 +441,22 @@ fn escaped(c: char, quote: char, f: &mut Formatter<'_>) -> Result {
     }
 }
 impl Display for bool {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str(if *self { "true" } else { "false" }) }
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(if *self { "true" } else { "false" }) }
 }
 impl Debug for bool { fn fmt(&self, f: &mut Formatter<'_>) -> Result { Display::fmt(self, f) } }
-impl Display for char { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_char(*self) } }
+impl Display for char {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        if f.options.flags & (flags::WIDTH | flags::PRECISION) == 0 { return f.write_char(*self); }
+        let mut bytes = [0u8; 4];
+        f.pad(self.encode_utf8(&mut bytes))
+    }
+}
 impl Debug for char {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         attempt!(f.write_char('\'')); attempt!(escaped(*self, '\'', f)); f.write_char('\'')
     }
 }
-impl Display for str { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str(self) } }
+impl Display for str { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(self) } }
 impl Debug for str {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         attempt!(f.write_char('"'));
@@ -476,26 +491,40 @@ reference!(Binary); reference!(Octal); reference!(LowerExp); reference!(UpperExp
 macro_rules! integer {
     ($t:ty, $u:ty, $signed:expr) => {
         impl Display for $t {
+            #[allow(unused_comparisons)]
             fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-                let value = *self as $u as u128;
-                if $signed && *self < 0 {
-                    attempt!(f.write_str("-"));
-                    number((!(*self as $u) + 1) as u128, 10, false, f)
-                } else { number(value, 10, false, f) }
+                let negative = $signed && *self < 0;
+                let magnitude = if negative { (!(*self as $u)).wrapping_add(1) } else { *self as $u };
+                let mut buf = [0u8; 128];
+                f.pad_integral(!negative, "", digits(magnitude as u128, 10, false, &mut buf))
             }
         }
-        impl Debug for $t { fn fmt(&self, f: &mut Formatter<'_>) -> Result { Display::fmt(self, f) } }
+        impl Debug for $t {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                if f.debug_lower_hex() { LowerHex::fmt(self, f) }
+                else if f.debug_upper_hex() { UpperHex::fmt(self, f) }
+                else { Display::fmt(self, f) }
+            }
+        }
         impl LowerHex for $t {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 16, false, f) }
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let mut buf = [0u8; 128]; f.pad_integral(true, "0x", digits(*self as $u as u128, 16, false, &mut buf))
+            }
         }
         impl UpperHex for $t {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 16, true, f) }
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let mut buf = [0u8; 128]; f.pad_integral(true, "0x", digits(*self as $u as u128, 16, true, &mut buf))
+            }
         }
         impl Binary for $t {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 2, false, f) }
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let mut buf = [0u8; 128]; f.pad_integral(true, "0b", digits(*self as $u as u128, 2, false, &mut buf))
+            }
         }
         impl Octal for $t {
-            fn fmt(&self, f: &mut Formatter<'_>) -> Result { number(*self as $u as u128, 8, false, f) }
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let mut buf = [0u8; 128]; f.pad_integral(true, "0o", digits(*self as $u as u128, 8, false, &mut buf))
+            }
         }
     };
 }
@@ -506,8 +535,20 @@ integer!(i64, u64, true); integer!(u64, u64, false);
 integer!(i128, u128, true); integer!(u128, u128, false);
 integer!(isize, usize, true); integer!(usize, usize, false);
 impl<T: ?Sized> Pointer for *const T {
+    /// As Rust: always `0x`-prefixed lower hex; `#` zero-extends to the full pointer width.
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        attempt!(f.write_str("0x")); number(*self as *const () as usize as u128, 16, false, f)
+        let old = f.options;
+        if f.alternate() {
+            f.options.flags |= flags::ZERO_PAD;
+            if f.width().is_none() {
+                f.options.flags |= flags::WIDTH;
+                f.options.width = (crate::mem::size_of::<usize>() * 2) as u16 + 2;
+            }
+        }
+        f.options.flags |= flags::ALTERNATE;
+        let result = LowerHex::fmt(&(*self as *const () as usize), f);
+        f.options = old;
+        result
     }
 }
 impl<T: ?Sized> Pointer for *mut T {
@@ -588,8 +629,6 @@ impl<'b, 'a: 'b> DebugTuple<'b, 'a> {
 }
 
 impl<'a> Formatter<'a> {
-    /// Writes `s`. Width, fill and precision are not supported by this formatter and are ignored.
-    pub fn pad(&mut self, s: &str) -> Result { self.write_str(s) }
     pub fn debug_struct<'b>(&'b mut self, name: &str) -> DebugStruct<'b, 'a> {
         let failed = self.write_str(name).is_err();
         DebugStruct { fmt: self, failed, fields: false }
@@ -635,8 +674,9 @@ impl Debug for ! {
 const DEC_DIGITS: &[u8] = b"0123456789";
 
 fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Formatter<'_>) -> Result {
+    if let Some(precision) = f.precision() { return float_exact(val, exp_char, precision, f); }
     if val.is_nan() {
-        return f.write_str("NaN");
+        return f.pad_number("", "NaN", 0, "");
     }
     let mut buf = [0u8; 64];
     let mut pos: usize = 0;
@@ -650,7 +690,7 @@ fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Form
         buf[pos + 1] = b'n';
         buf[pos + 2] = b'f';
         pos += 3;
-        return f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) });
+        return finish_float(f, &buf[..pos]);
     }
     if x == 0.0 {
         buf[pos] = b'0';
@@ -664,7 +704,7 @@ fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Form
             buf[pos + 1] = b'0';
             pos += 2;
         }
-        return f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) });
+        return finish_float(f, &buf[..pos]);
     }
 
     let mut exp10: i32 = 0;
@@ -853,7 +893,7 @@ fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Form
         }
     }
 
-    f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..pos]) })
+    finish_float(f, &buf[..pos])
 }
 
 impl Display for f32 {
@@ -978,3 +1018,370 @@ tuple_debug!((A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3,
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10, L 11));
+
+/// Alignment requested by a placeholder: `<`, `>` or `^`.
+pub enum Alignment { Left, Right, Center }
+impl Copy for Alignment {}
+impl Clone for Alignment { fn clone(&self) -> Self { *self } }
+
+/// Character count of UTF-8 text: every byte that is not a continuation byte starts a character.
+fn char_count(s: &str) -> usize {
+    let bytes = s.as_bytes();
+    let mut count = 0;
+    let mut i = 0;
+    while i < bytes.len() { if bytes[i] & 0xC0 != 0x80 { count += 1; } i += 1; }
+    count
+}
+
+impl<'a> Formatter<'a> {
+    /// The fill character (space unless the placeholder names one).
+    pub fn fill(&self) -> char { unsafe { crate::intrinsics::transmute::<u32, char>(self.options.flags & flags::FILL) } }
+    pub fn align(&self) -> Option<Alignment> {
+        match (self.options.flags & flags::ALIGN_BITS) >> flags::ALIGN_SHIFT {
+            0 => Some(Alignment::Left), 1 => Some(Alignment::Right), 2 => Some(Alignment::Center), _ => None,
+        }
+    }
+    pub fn width(&self) -> Option<usize> {
+        if self.options.flags & flags::WIDTH != 0 { Some(self.options.width as usize) } else { None }
+    }
+    pub fn precision(&self) -> Option<usize> {
+        if self.options.flags & flags::PRECISION != 0 { Some(self.options.precision as usize) } else { None }
+    }
+    pub fn sign_plus(&self) -> bool { self.options.flags & flags::SIGN_PLUS != 0 }
+    pub fn sign_minus(&self) -> bool { self.options.flags & flags::SIGN_MINUS != 0 }
+    pub fn sign_aware_zero_pad(&self) -> bool { self.options.flags & flags::ZERO_PAD != 0 }
+    fn debug_lower_hex(&self) -> bool { self.options.flags & flags::DEBUG_LOWER_HEX != 0 }
+    fn debug_upper_hex(&self) -> bool { self.options.flags & flags::DEBUG_UPPER_HEX != 0 }
+    fn min_width(&self) -> usize { match self.width() { Some(width) => width, None => 0 } }
+
+    /// Writes the fill owed before a value of `count` missing columns and returns the fill and count owed after it.
+    fn padding(&mut self, count: usize, default: Alignment) -> crate::result::Result<(char, usize), Error> {
+        let fill = self.fill();
+        let align = match self.align() { Some(align) => align, None => default };
+        let before = match align { Alignment::Left => 0, Alignment::Right => count, Alignment::Center => count / 2 };
+        let mut i = 0;
+        while i < before { attempt!(self.writer.write_char(fill)); i += 1; }
+        Ok((fill, count - before))
+    }
+    fn post_padding(&mut self, (fill, count): (char, usize)) -> Result {
+        let mut i = 0;
+        while i < count { attempt!(self.writer.write_char(fill)); i += 1; }
+        Ok(())
+    }
+    /// Sign-aware zero padding: fill `0`, aligned right.
+    fn set_zero_fill(&mut self) {
+        self.options.flags = (self.options.flags & !(flags::FILL | flags::ALIGN_BITS)) | '0' as u32 | flags::ALIGN_RIGHT;
+    }
+
+    /// Writes an integer's digits `buf` with its sign, the `#` prefix, width, fill, alignment and `0`, as Rust.
+    pub fn pad_integral(&mut self, is_nonnegative: bool, prefix: &str, buf: &str) -> Result {
+        let mut width = buf.len();
+        let sign = if !is_nonnegative { width += 1; "-" } else if self.sign_plus() { width += 1; "+" } else { "" };
+        let prefix = if self.alternate() { width += char_count(prefix); prefix } else { "" };
+        let min = self.min_width();
+        if width >= min {
+            attempt!(self.writer.write_str(sign));
+            attempt!(self.writer.write_str(prefix));
+            self.writer.write_str(buf)
+        } else if self.sign_aware_zero_pad() {
+            let old = self.options;
+            self.set_zero_fill();
+            attempt!(self.writer.write_str(sign));
+            attempt!(self.writer.write_str(prefix));
+            let post = attempt!(self.padding(min - width, Alignment::Right));
+            attempt!(self.writer.write_str(buf));
+            attempt!(self.post_padding(post));
+            self.options = old;
+            Ok(())
+        } else {
+            let post = attempt!(self.padding(min - width, Alignment::Right));
+            attempt!(self.writer.write_str(sign));
+            attempt!(self.writer.write_str(prefix));
+            attempt!(self.writer.write_str(buf));
+            self.post_padding(post)
+        }
+    }
+
+    /// Writes `s` truncated to the precision (in characters) and padded to the width, left aligned by default, as Rust.
+    pub fn pad(&mut self, s: &str) -> Result {
+        if self.options.flags & (flags::WIDTH | flags::PRECISION) == 0 { return self.writer.write_str(s); }
+        let (s, count) = match self.precision() {
+            Some(max) => {
+                let bytes = s.as_bytes();
+                let mut end = 0;
+                let mut count = 0;
+                while end < bytes.len() && count < max {
+                    let lead = bytes[end];
+                    end += if lead < 0x80 { 1 } else if lead < 0xE0 { 2 } else if lead < 0xF0 { 3 } else { 4 };
+                    count += 1;
+                }
+                (unsafe { crate::str::from_utf8_unchecked(&bytes[..end]) }, count)
+            }
+            None => (s, char_count(s)),
+        };
+        let min = self.min_width();
+        if count < min {
+            let post = attempt!(self.padding(min - count, Alignment::Left));
+            attempt!(self.writer.write_str(s));
+            self.post_padding(post)
+        } else {
+            self.writer.write_str(s)
+        }
+    }
+
+    /// Writes a formatted number `sign`, `body`, `zeros` zero digits and `suffix` (all ASCII), padded as Rust pads floats.
+    fn pad_number(&mut self, sign: &str, body: &str, zeros: usize, suffix: &str) -> Result {
+        let len = sign.len() + body.len() + zeros + suffix.len();
+        let min = self.min_width();
+        if len >= min {
+            attempt!(self.writer.write_str(sign));
+            return self.write_number_rest(body, zeros, suffix);
+        }
+        if self.sign_aware_zero_pad() {
+            let old = self.options;
+            attempt!(self.writer.write_str(sign));
+            self.set_zero_fill();
+            let post = attempt!(self.padding(min - len, Alignment::Right));
+            attempt!(self.write_number_rest(body, zeros, suffix));
+            attempt!(self.post_padding(post));
+            self.options = old;
+            Ok(())
+        } else {
+            let post = attempt!(self.padding(min - len, Alignment::Right));
+            attempt!(self.writer.write_str(sign));
+            attempt!(self.write_number_rest(body, zeros, suffix));
+            self.post_padding(post)
+        }
+    }
+    fn write_number_rest(&mut self, body: &str, mut zeros: usize, suffix: &str) -> Result {
+        attempt!(self.writer.write_str(body));
+        const ZEROS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+        while zeros > 0 {
+            let n = if zeros < ZEROS.len() { zeros } else { ZEROS.len() };
+            attempt!(self.writer.write_str(unsafe { crate::str::from_utf8_unchecked(&ZEROS.as_bytes()[..n]) }));
+            zeros -= n;
+        }
+        self.writer.write_str(suffix)
+    }
+}
+
+/// Pads float text produced by `fmt_float_f64` (a leading `-` is its sign).
+fn finish_float(f: &mut Formatter<'_>, bytes: &[u8]) -> Result {
+    let (sign, body) = if !bytes.is_empty() && bytes[0] == b'-' { ("-", &bytes[1..]) }
+        else if f.sign_plus() { ("+", bytes) } else { ("", bytes) };
+    f.pad_number(sign, unsafe { crate::str::from_utf8_unchecked(body) }, 0, "")
+}
+
+/// Fixed-size unsigned integer, little-endian 32-bit limbs; 1152 bits hold every finite f64 scaled as below.
+struct Big { limbs: [u32; 36] }
+impl Big {
+    fn from_u64(value: u64) -> Self {
+        let mut limbs = [0u32; 36];
+        limbs[0] = value as u32;
+        limbs[1] = (value >> 32) as u32;
+        Big { limbs }
+    }
+    fn is_zero(&self) -> bool {
+        let mut i = 0;
+        while i < 36 { if self.limbs[i] != 0 { return false; } i += 1; }
+        true
+    }
+    fn shl(&mut self, n: usize) {
+        let words = n / 32;
+        let bits = (n % 32) as u32;
+        let mut i = 36;
+        while i > 0 {
+            i -= 1;
+            let mut value = 0u32;
+            if i >= words {
+                value = self.limbs[i - words] << bits;
+                if bits != 0 && i > words { value |= self.limbs[i - words - 1] >> (32 - bits); }
+            }
+            self.limbs[i] = value;
+        }
+    }
+    fn shr(&mut self, n: usize) {
+        let words = n / 32;
+        let bits = (n % 32) as u32;
+        let mut i = 0;
+        while i < 36 {
+            let mut value = 0u32;
+            if i + words < 36 {
+                value = self.limbs[i + words] >> bits;
+                if bits != 0 && i + words + 1 < 36 { value |= self.limbs[i + words + 1] << (32 - bits); }
+            }
+            self.limbs[i] = value;
+            i += 1;
+        }
+    }
+    /// Keeps only the low `n` bits.
+    fn mask_low(&mut self, n: usize) {
+        let words = n / 32;
+        let bits = (n % 32) as u32;
+        let mut i = words;
+        while i < 36 {
+            if i == words && bits != 0 { self.limbs[i] &= (1u32 << bits) - 1; } else { self.limbs[i] = 0; }
+            i += 1;
+        }
+    }
+    fn mul_small(&mut self, factor: u32) {
+        let mut carry = 0u64;
+        let mut i = 0;
+        while i < 36 {
+            let value = self.limbs[i] as u64 * factor as u64 + carry;
+            self.limbs[i] = value as u32;
+            carry = value >> 32;
+            i += 1;
+        }
+    }
+    /// Returns `self >> n` (known to be below 2^32) and keeps the low `n` bits.
+    fn take_high(&mut self, n: usize) -> u32 {
+        let words = n / 32;
+        let bits = n % 32;
+        let low = self.limbs[words] as u64;
+        let high = if words + 1 < 36 { self.limbs[words + 1] as u64 } else { 0 };
+        let value = ((low | (high << 32)) >> bits) as u32;
+        self.mask_low(n);
+        value
+    }
+    fn div_small(&mut self, divisor: u32) -> u32 {
+        let mut remainder = 0u64;
+        let mut i = 36;
+        while i > 0 {
+            i -= 1;
+            let value = (remainder << 32) | self.limbs[i] as u64;
+            self.limbs[i] = (value / divisor as u64) as u32;
+            remainder = value % divisor as u64;
+        }
+        remainder as u32
+    }
+    /// Decimal digits (ASCII, most significant first, `0` for zero) into `out`; returns their count.
+    fn write_decimal(mut self, out: &mut [u8]) -> usize {
+        let mut reversed = [0u8; 360];
+        let mut len = 0;
+        loop {
+            let mut chunk = self.div_small(1_000_000_000);
+            let last = self.is_zero();
+            let mut k = 0;
+            while k < 9 && (!last || chunk != 0 || k == 0) {
+                reversed[len] = b'0' + (chunk % 10) as u8;
+                chunk /= 10;
+                len += 1;
+                k += 1;
+            }
+            if last { break; }
+        }
+        let mut i = 0;
+        while i < len { out[i] = reversed[len - 1 - i]; i += 1; }
+        len
+    }
+}
+
+/// Adds one unit in the last place of the ASCII digits `digits[..len]` (skipping `.`); returns true when it carried
+/// out of the first digit (all digits were 9 and are now 0).
+fn round_up(digits: &mut [u8], len: usize) -> bool {
+    let mut i = len;
+    while i > 0 {
+        i -= 1;
+        if digits[i] == b'.' { continue; }
+        if digits[i] == b'9' { digits[i] = b'0'; } else { digits[i] += 1; return false; }
+    }
+    true
+}
+
+/// Whether discarding `rest` (ASCII digits) after a kept digit `last` rounds up: above half, or exactly half with
+/// an odd `last` (ties to even, as Rust's exact float formatting).
+fn rounds_up(rest: &[u8], last: u8) -> bool {
+    if rest.is_empty() || rest[0] < b'5' { return false; }
+    if rest[0] > b'5' { return true; }
+    let mut i = 1;
+    while i < rest.len() { if rest[i] != b'0' { return true; } i += 1; }
+    (last - b'0') % 2 == 1
+}
+
+/// `{:.N}` and `{:.Ne}` of a float: the exact binary value expanded to decimal, then rounded ties-to-even.
+fn float_exact(val: f64, exp_char: u8, precision: usize, f: &mut Formatter<'_>) -> Result {
+    if val.is_nan() { return f.pad_number("", "NaN", 0, ""); }
+    let sign = if val.is_sign_negative() { "-" } else if f.sign_plus() { "+" } else { "" };
+    if val.is_infinite() { return f.pad_number(sign, "inf", 0, ""); }
+    let bits = val.to_bits();
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (mantissa, exponent) = if biased == 0 { (fraction, -1074) } else { (fraction | (1u64 << 52), biased - 1075) };
+    // int: integer-part digits; frac: every fractional digit (a binary fraction terminates in decimal).
+    let mut int = [0u8; 320];
+    let mut frac = [0u8; 1080];
+    let mut frac_len = 0usize;
+    let mut big = Big::from_u64(mantissa);
+    let int_len = if exponent >= 0 {
+        big.shl(exponent as usize);
+        big.write_decimal(&mut int)
+    } else {
+        let shift = (-exponent) as usize;
+        let mut whole = Big { limbs: big.limbs };
+        whole.shr(shift);
+        big.mask_low(shift);
+        while !big.is_zero() {
+            big.mul_small(10);
+            frac[frac_len] = b'0' + big.take_high(shift) as u8;
+            frac_len += 1;
+        }
+        whole.write_decimal(&mut int)
+    };
+    // out[0] is room for a carry digit.
+    let mut out = [0u8; 1408];
+    if exp_char == 0 {
+        let kept = if precision < frac_len { precision } else { frac_len };
+        let mut len = 1;
+        let mut i = 0;
+        while i < int_len { out[len] = int[i]; len += 1; i += 1; }
+        if precision > 0 { out[len] = b'.'; len += 1; }
+        i = 0;
+        while i < kept { out[len] = frac[i]; len += 1; i += 1; }
+        let last = if kept > 0 { frac[kept - 1] } else { int[int_len - 1] };
+        let mut start = 1;
+        if rounds_up(&frac[kept..frac_len], last) && round_up(&mut out[1..], len - 1) { out[0] = b'1'; start = 0; }
+        let body = unsafe { crate::str::from_utf8_unchecked(&out[start..len]) };
+        return f.pad_number(sign, body, precision - kept, "");
+    }
+    // Scientific: significant digits from the first non-zero digit.
+    let mut sig = [0u8; 1400];
+    let mut sig_len = 0;
+    let mut exp10: i32;
+    if !(int_len == 1 && int[0] == b'0') {
+        exp10 = int_len as i32 - 1;
+        let mut i = 0;
+        while i < int_len { sig[sig_len] = int[i]; sig_len += 1; i += 1; }
+        i = 0;
+        while i < frac_len { sig[sig_len] = frac[i]; sig_len += 1; i += 1; }
+    } else {
+        let mut first = 0;
+        while first < frac_len && frac[first] == b'0' { first += 1; }
+        exp10 = if first < frac_len { -(first as i32) - 1 } else { 0 };
+        let mut i = first;
+        while i < frac_len { sig[sig_len] = frac[i]; sig_len += 1; i += 1; }
+    }
+    if sig_len == 0 { sig[0] = b'0'; sig_len = 1; }
+    let keep = precision + 1;
+    let kept = if keep < sig_len { keep } else { sig_len };
+    if rounds_up(&sig[kept..sig_len], sig[kept - 1]) && round_up(&mut sig, kept) {
+        sig[0] = b'1';
+        exp10 += 1;
+    }
+    let mut len = 0;
+    out[len] = sig[0]; len += 1;
+    if precision > 0 { out[len] = b'.'; len += 1; }
+    let mut i = 1;
+    while i < kept { out[len] = sig[i]; len += 1; i += 1; }
+    let mut suffix = [0u8; 8];
+    let mut suffix_len = 0;
+    suffix[suffix_len] = exp_char; suffix_len += 1;
+    if exp10 < 0 { suffix[suffix_len] = b'-'; suffix_len += 1; }
+    let mut magnitude = [0u8; 128];
+    let text = digits(if exp10 < 0 { (-exp10) as u128 } else { exp10 as u128 }, 10, false, &mut magnitude).as_bytes();
+    i = 0;
+    while i < text.len() { suffix[suffix_len] = text[i]; suffix_len += 1; i += 1; }
+    let body = unsafe { crate::str::from_utf8_unchecked(&out[..len]) };
+    let suffix = unsafe { crate::str::from_utf8_unchecked(&suffix[..suffix_len]) };
+    f.pad_number(sign, body, keep - kept, suffix)
+}
