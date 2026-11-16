@@ -1119,6 +1119,35 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "Cycle { orig: OnceWith(Some(_)), iter: OnceWith(Some(_)) }", "{:?}", core::iter::once_with(|| 1).cycle());
     }
 
+    { // lw5-b: iter compare / sorted / try_rfold / sum and product for Option, Result, Wrapping
+        check!(r, "true", "{}", [1, 2].iter().lt([1, 3].iter()));
+        check!(r, "false", "{}", [1, 2].iter().lt([1, 2].iter()));
+        check!(r, "true", "{}", [1, 2].iter().le([1, 2].iter()));
+        check!(r, "true", "{}", [1, 2, 3].iter().gt([1, 2].iter()));
+        check!(r, "false", "{}", [1, 2].iter().ge([1, 2, 3].iter()));
+        check!(r, "false", "{}", [1.0, f64::NAN].iter().lt([1.0, 2.0].iter()));
+        check!(r, "false", "{}", [1.0, f64::NAN].iter().ge([1.0, 2.0].iter()));
+        check!(r, "true", "{}", [1, 2, 2, 9].iter().is_sorted());
+        check!(r, "false", "{}", [1, 3, 2].iter().is_sorted());
+        check!(r, "true", "{}", core::iter::empty::<i32>().is_sorted());
+        check!(r, "false", "{}", [1.0, f64::NAN].iter().is_sorted());
+        check!(r, "true", "{}", [3, 2, 1].iter().is_sorted_by(|a, b| a >= b));
+        check!(r, "true", "{}", ["c", "bb", "aaa"].iter().is_sorted_by_key(|s| s.len()));
+        check!(r, "false", "{}", ["aa", "b"].iter().is_sorted_by_key(|s| s.len()));
+        let mut it = [1, 2, 3, 4].iter();
+        let folded = it.try_rfold(0, |a, &x| if x == 2 { None } else { Some(a + x) });
+        check!(r, "None", "{:?}", folded);
+        check!(r, "Some(1)", "{:?}", it.next_back());
+        let mut whole = [1, 2, 3].iter();
+        check!(r, "Some(6)", "{:?}", whole.try_rfold(0, |a, &x| Some(a + x)));
+        check!(r, "Some(3)", "{:?}", [Some(1i32), Some(2)].into_iter().sum::<Option<i32>>());
+        check!(r, "None", "{:?}", [Some(1i32), None, Some(3)].into_iter().sum::<Option<i32>>());
+        check!(r, "Some(6)", "{:?}", [Some(2i32), Some(3)].into_iter().product::<Option<i32>>());
+        check!(r, "Ok(6)", "{:?}", [Ok::<i32, u8>(2), Ok(3)].into_iter().product::<Result<i32, u8>>());
+        check!(r, "Err(7)", "{:?}", [Ok::<i32, u8>(1), Err(7), Err(8)].into_iter().sum::<Result<i32, u8>>());
+        check!(r, "4", "{}", [core::num::Wrapping(250u8), core::num::Wrapping(10)].iter().sum::<core::num::Wrapping<u8>>().0);
+        check!(r, "0", "{}", [core::num::Wrapping(16u8), core::num::Wrapping(16)].into_iter().product::<core::num::Wrapping<u8>>().0);
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
