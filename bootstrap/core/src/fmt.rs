@@ -58,29 +58,23 @@ impl<'a> Formatter<'a> {
     pub fn write_fmt(&mut self, args: Arguments<'_>) -> Result { write(self.writer, args) }
     pub fn debug_map(&mut self) -> DebugMap<'_, 'a> {
         let failed = self.write_str("{").is_err();
-        DebugMap { fmt: self, failed, fields: false, has_key: false }
+        DebugMap { fmt: self, failed, fields: false, has_key: false, on_newline: true }
     }
     pub fn debug_set(&mut self) -> DebugSet<'_, 'a> {
         let failed = self.write_str("{").is_err();
-        DebugSet { fmt: self, failed, fields: false }
+        DebugSet { inner: DebugInner { fmt: self, failed, fields: false } }
     }
     pub fn debug_list(&mut self) -> DebugList<'_, 'a> {
         let failed = self.write_str("[").is_err();
-        DebugList { fmt: self, failed, fields: false }
+        DebugList { inner: DebugInner { fmt: self, failed, fields: false } }
     }
+    // The `*_finish` helpers are what `#[derive(Debug)]` lowers to; they go through the builders so `{:#?}` is
+    // honoured exactly as by the builders.
     pub fn debug_tuple_field1_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug) -> Result {
-        attempt!(self.write_str(name));
-        attempt!(self.write_str("("));
-        attempt!(value1.fmt(self));
-        self.write_str(")")
+        self.debug_tuple_fields_finish(name, &[value1])
     }
     pub fn debug_tuple_field2_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug) -> Result {
-        attempt!(self.write_str(name));
-        attempt!(self.write_str("("));
-        attempt!(value1.fmt(self));
-        attempt!(self.write_str(", "));
-        attempt!(value2.fmt(self));
-        self.write_str(")")
+        self.debug_tuple_fields_finish(name, &[value1, value2])
     }
     pub fn debug_tuple_field3_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug, value3: &dyn Debug) -> Result {
         self.debug_tuple_fields_finish(name, &[value1, value2, value3])
@@ -92,15 +86,10 @@ impl<'a> Formatter<'a> {
         self.debug_tuple_fields_finish(name, &[value1, value2, value3, value4, value5])
     }
     pub fn debug_tuple_fields_finish<'b>(&'b mut self, name: &str, values: &[&dyn Debug]) -> Result {
-        attempt!(self.write_str(name));
-        attempt!(self.write_str("("));
+        let mut builder = self.debug_tuple(name);
         let mut i = 0;
-        while i < values.len() {
-            if i != 0 { attempt!(self.write_str(", ")); }
-            attempt!(values[i].fmt(self));
-            i += 1;
-        }
-        self.write_str(")")
+        while i < values.len() { builder.field(values[i]); i += 1; }
+        builder.finish()
     }
     pub fn debug_struct_field1_finish<'b>(&'b mut self, name: &str, name1: &str, value1: &dyn Debug) -> Result {
         self.debug_struct_fields_finish(name, &[name1], &[value1])
@@ -118,77 +107,125 @@ impl<'a> Formatter<'a> {
         self.debug_struct_fields_finish(name, &[name1, name2, name3, name4, name5], &[value1, value2, value3, value4, value5])
     }
     pub fn debug_struct_fields_finish<'b>(&'b mut self, name: &str, names: &[&str], values: &[&dyn Debug]) -> Result {
-        attempt!(self.write_str(name));
-        attempt!(self.write_str(" { "));
+        let mut builder = self.debug_struct(name);
         let mut i = 0;
-        while i < names.len() && i < values.len() {
-            if i != 0 { attempt!(self.write_str(", ")); }
-            attempt!(self.write_str(names[i]));
-            attempt!(self.write_str(": "));
-            attempt!(values[i].fmt(self));
-            i += 1;
-        }
-        self.write_str(" }")
+        while i < names.len() && i < values.len() { builder.field(names[i], values[i]); i += 1; }
+        builder.finish()
+    }
+    /// Writes `text` through the `{:#?}` indenting adapter; `on_newline` is the adapter's state.
+    fn indented_str(&mut self, on_newline: &mut bool, text: &str) -> Result {
+        PadAdapter { inner: &mut *self.writer, on_newline }.write_str(text)
+    }
+    /// Formats `value` through the `{:#?}` indenting adapter, with this formatter's options.
+    fn indented_value(&mut self, on_newline: &mut bool, value: &dyn Debug) -> Result {
+        let mut adapter = PadAdapter { inner: &mut *self.writer, on_newline };
+        let mut inner = Formatter { writer: &mut adapter, options: self.options };
+        value.fmt(&mut inner)
+    }
+    /// One `{:#?}` entry: `    value,\n`.
+    fn indented_entry(&mut self, value: &dyn Debug) -> Result {
+        let mut on_newline = true;
+        attempt!(self.indented_value(&mut on_newline, value));
+        self.indented_str(&mut on_newline, ",\n")
+    }
+    /// The `{:#?}` marker of a non-exhaustive builder that has entries: `    ..\n`.
+    fn indented_rest(&mut self) -> Result {
+        let mut on_newline = true;
+        self.indented_str(&mut on_newline, "..\n")
     }
 }
-pub struct DebugList<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+
+/// Rust's `PadAdapter`: what `{:#?}` writes one level down, with four spaces at the start of every line.
+struct PadAdapter<'w> { inner: &'w mut dyn Write, on_newline: &'w mut bool }
+impl Write for PadAdapter<'_> {
+    fn write_str(&mut self, s: &str) -> Result {
+        let bytes = s.as_bytes();
+        let mut start = 0;
+        while start < bytes.len() {
+            let mut end = start;
+            while end < bytes.len() && bytes[end] != b'\n' { end += 1; }
+            if end < bytes.len() { end += 1; }
+            if *self.on_newline { attempt!(self.inner.write_str("    ")); }
+            *self.on_newline = bytes[end - 1] == b'\n';
+            // Split after a `\n` byte, which is never inside a multi-byte character.
+            attempt!(self.inner.write_str(unsafe { crate::str::from_utf8_unchecked(&bytes[start..end]) }));
+            start = end;
+        }
+        Ok(())
+    }
+    fn write_char(&mut self, c: char) -> Result {
+        if *self.on_newline { attempt!(self.inner.write_str("    ")); }
+        *self.on_newline = c == '\n';
+        self.inner.write_char(c)
+    }
+}
+
+/// The entries of a list or set: `a, b` or, under `{:#?}`, one indented line each.
+struct DebugInner<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+impl<'b, 'a: 'b> DebugInner<'b, 'a> {
+    fn entry(&mut self, entry: &dyn Debug) {
+        if !self.failed {
+            self.failed = if self.fmt.alternate() {
+                (!self.fields && self.fmt.write_str("\n").is_err()) || self.fmt.indented_entry(entry).is_err()
+            } else {
+                (self.fields && self.fmt.write_str(", ").is_err()) || entry.fmt(self.fmt).is_err()
+            };
+        }
+        self.fields = true;
+    }
+    fn finish_non_exhaustive(&mut self, close: &str) -> Result {
+        if self.failed { return Err(Error); }
+        if !self.fields { attempt!(self.fmt.write_str("..")); }
+        else if self.fmt.alternate() { attempt!(self.fmt.indented_rest()); }
+        else { attempt!(self.fmt.write_str(", ..")); }
+        self.fmt.write_str(close)
+    }
+    fn finish(&mut self, close: &str) -> Result {
+        if self.failed { return Err(Error); }
+        self.fmt.write_str(close)
+    }
+}
+
+pub struct DebugList<'b, 'a: 'b> { inner: DebugInner<'b, 'a> }
 impl<'b, 'a: 'b> DebugList<'b, 'a> {
-    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self {
-        if !self.failed {
-            let prefix = if self.fields { ", " } else { "" };
-            self.failed = self.fmt.write_str(prefix).is_err() || entry.fmt(self.fmt).is_err();
-        }
-        self.fields = true;
-        self
-    }
+    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self { self.inner.entry(entry); self }
     pub fn entries<D: Debug, I: crate::iter::IntoIterator<Item = D>>(&mut self, entries: I) -> &mut Self {
         for entry in entries {
             self.entry(&entry);
         }
         self
     }
-    pub fn finish_non_exhaustive(&mut self) -> Result {
-        if self.failed { return Err(Error); }
-        self.fmt.write_str(if self.fields { ", ..]" } else { "..]" })
-    }
-    pub fn finish(&mut self) -> Result {
-        if self.failed { return Err(Error); }
-        self.fmt.write_str("]")
-    }
+    pub fn finish_non_exhaustive(&mut self) -> Result { self.inner.finish_non_exhaustive("]") }
+    pub fn finish(&mut self) -> Result { self.inner.finish("]") }
 }
 
-pub struct DebugSet<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+pub struct DebugSet<'b, 'a: 'b> { inner: DebugInner<'b, 'a> }
 impl<'b, 'a: 'b> DebugSet<'b, 'a> {
-    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self {
-        if !self.failed {
-            let prefix = if self.fields { ", " } else { "" };
-            self.failed = self.fmt.write_str(prefix).is_err() || entry.fmt(self.fmt).is_err();
-        }
-        self.fields = true;
-        self
-    }
+    pub fn entry(&mut self, entry: &dyn Debug) -> &mut Self { self.inner.entry(entry); self }
     pub fn entries<D: Debug, I: crate::iter::IntoIterator<Item = D>>(&mut self, entries: I) -> &mut Self {
         for entry in entries {
             self.entry(&entry);
         }
         self
     }
-    pub fn finish_non_exhaustive(&mut self) -> Result {
-        if self.failed { return Err(Error); }
-        self.fmt.write_str(if self.fields { ", ..}" } else { "..}" })
-    }
-    pub fn finish(&mut self) -> Result {
-        if self.failed { return Err(Error); }
-        self.fmt.write_str("}")
-    }
+    pub fn finish_non_exhaustive(&mut self) -> Result { self.inner.finish_non_exhaustive("}") }
+    pub fn finish(&mut self) -> Result { self.inner.finish("}") }
 }
 
-pub struct DebugMap<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool, has_key: bool }
+/// `{k: v, ..}`; under `{:#?}` one indented `k: v,` line per entry, the key and its value through one adapter state.
+pub struct DebugMap<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool, has_key: bool, on_newline: bool }
 impl<'b, 'a: 'b> DebugMap<'b, 'a> {
     pub fn key(&mut self, key: &dyn Debug) -> &mut Self {
         if !self.failed {
-            let prefix = if self.fields { ", " } else { "" };
-            self.failed = self.fmt.write_str(prefix).is_err() || key.fmt(self.fmt).is_err();
+            self.failed = if self.fmt.alternate() {
+                self.on_newline = true;
+                (!self.fields && self.fmt.write_str("\n").is_err())
+                    || self.fmt.indented_value(&mut self.on_newline, key).is_err()
+                    || self.fmt.indented_str(&mut self.on_newline, ": ").is_err()
+            } else {
+                (self.fields && self.fmt.write_str(", ").is_err()) || key.fmt(self.fmt).is_err()
+                    || self.fmt.write_str(": ").is_err()
+            };
         }
         self.fields = true;
         self.has_key = true;
@@ -196,7 +233,12 @@ impl<'b, 'a: 'b> DebugMap<'b, 'a> {
     }
     pub fn value(&mut self, value: &dyn Debug) -> &mut Self {
         if !self.failed {
-            self.failed = self.fmt.write_str(": ").is_err() || value.fmt(self.fmt).is_err();
+            self.failed = if self.fmt.alternate() {
+                self.fmt.indented_value(&mut self.on_newline, value).is_err()
+                    || self.fmt.indented_str(&mut self.on_newline, ",\n").is_err()
+            } else {
+                value.fmt(self.fmt).is_err()
+            };
         }
         self.has_key = false;
         self
@@ -212,7 +254,10 @@ impl<'b, 'a: 'b> DebugMap<'b, 'a> {
     }
     pub fn finish_non_exhaustive(&mut self) -> Result {
         if self.failed { return Err(Error); }
-        self.fmt.write_str(if self.fields { ", ..}" } else { "..}" })
+        if !self.fields { attempt!(self.fmt.write_str("..")); }
+        else if self.fmt.alternate() { attempt!(self.fmt.indented_rest()); }
+        else { attempt!(self.fmt.write_str(", ..")); }
+        self.fmt.write_str("}")
     }
     pub fn finish(&mut self) -> Result {
         if self.failed { return Err(Error); }
@@ -232,27 +277,22 @@ pub trait UpperExp { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 pub trait Pointer { fn fmt(&self, f: &mut Formatter<'_>) -> Result; }
 
 impl Debug for () {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.write_str("()") }
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad("()") }
 }
 impl<A: Debug, B: Debug> Debug for (A, B) {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        attempt!(f.write_str("("));
-        attempt!(Debug::fmt(&self.0, f));
-        attempt!(f.write_str(", "));
-        attempt!(Debug::fmt(&self.1, f));
-        f.write_str(")")
+        let mut tuple = f.debug_tuple("");
+        tuple.field(&self.0);
+        tuple.field(&self.1);
+        tuple.finish()
     }
 }
 impl<T: Debug> Debug for [T] {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        attempt!(f.write_str("["));
+        let mut list = f.debug_list();
         let mut i = 0;
-        while i < self.len() {
-            if i != 0 { attempt!(f.write_str(", ")); }
-            attempt!(Debug::fmt(&self[i], f));
-            i += 1;
-        }
-        f.write_str("]")
+        while i < self.len() { list.entry(&self[i]); i += 1; }
+        list.finish()
     }
 }
 impl<T: Debug, const N: usize> Debug for [T; N] {
@@ -264,27 +304,16 @@ impl<T: Debug> Debug for Option<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             None => f.write_str("None"),
-            Some(value) => {
-                attempt!(f.write_str("Some("));
-                attempt!(Debug::fmt(value, f));
-                f.write_str(")")
-            }
+            Some(value) => f.debug_tuple_field1_finish("Some", value),
         }
     }
 }
 impl<T: Debug, E: Debug> Debug for crate::result::Result<T, E> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
-            Ok(value) => {
-                attempt!(f.write_str("Ok("));
-                attempt!(Debug::fmt(value, f));
-            }
-            Err(error) => {
-                attempt!(f.write_str("Err("));
-                attempt!(Debug::fmt(error, f));
-            }
+            Ok(value) => f.debug_tuple_field1_finish("Ok", value),
+            Err(error) => f.debug_tuple_field1_finish("Err", error),
         }
-        f.write_str(")")
     }
 }
 
@@ -574,9 +603,8 @@ impl<T: ?Sized> Display for *mut T {
 impl<T: ?Sized> Pointer for &T {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { Pointer::fmt(&(*self as *const T), f) }
 }
-
-
-/// Builder behind `Formatter::debug_struct`. Writes `Name { a: 1, b: 2 }`, or `Name` with no fields.
+/// Builder behind `Formatter::debug_struct`. Writes `Name { a: 1, b: 2 }`, or `Name` with no fields; under `{:#?}`
+/// `Name {\n    a: 1,\n    b: 2,\n}`, as Rust.
 pub struct DebugStruct<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
 impl<'b, 'a: 'b> DebugStruct<'b, 'a> {
     pub fn field(&mut self, name: &str, value: &dyn Debug) -> &mut Self {
@@ -588,6 +616,14 @@ impl<'b, 'a: 'b> DebugStruct<'b, 'a> {
         self
     }
     fn entry(&mut self, first: bool, name: &str, value: &dyn Debug) -> Result {
+        if self.fmt.alternate() {
+            if first { attempt!(self.fmt.write_str(" {\n")); }
+            let mut on_newline = true;
+            attempt!(self.fmt.indented_str(&mut on_newline, name));
+            attempt!(self.fmt.indented_str(&mut on_newline, ": "));
+            attempt!(self.fmt.indented_value(&mut on_newline, value));
+            return self.fmt.indented_str(&mut on_newline, ",\n");
+        }
         attempt!(self.fmt.write_str(if first { " { " } else { ", " }));
         attempt!(self.fmt.write_str(name));
         attempt!(self.fmt.write_str(": "));
@@ -595,36 +631,50 @@ impl<'b, 'a: 'b> DebugStruct<'b, 'a> {
     }
     pub fn finish_non_exhaustive(&mut self) -> Result {
         if self.failed { return Err(Error); }
-        self.fmt.write_str(if self.fields { ", .. }" } else { " { .. }" })
+        if !self.fields { return self.fmt.write_str(" { .. }"); }
+        if !self.fmt.alternate() { return self.fmt.write_str(", .. }"); }
+        attempt!(self.fmt.indented_rest());
+        self.fmt.write_str("}")
     }
     pub fn finish(&mut self) -> Result {
         if self.failed { return Err(Error); }
-        if self.fields { self.fmt.write_str(" }") } else { Ok(()) }
+        if !self.fields { return Ok(()); }
+        self.fmt.write_str(if self.fmt.alternate() { "}" } else { " }" })
     }
 }
 
-/// Builder behind `Formatter::debug_tuple`. Writes `Name(1, 2)`, or `Name` with no fields.
-pub struct DebugTuple<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: bool }
+/// Builder behind `Formatter::debug_tuple`. Writes `Name(1, 2)`, or `Name` with no fields; under `{:#?}`
+/// `Name(\n    1,\n    2,\n)`. A one-field tuple with an empty name is `(1,)`, as Rust.
+pub struct DebugTuple<'b, 'a: 'b> { fmt: &'b mut Formatter<'a>, failed: bool, fields: usize, empty_name: bool }
 impl<'b, 'a: 'b> DebugTuple<'b, 'a> {
     pub fn field(&mut self, value: &dyn Debug) -> &mut Self {
         if !self.failed {
-            let first = !self.fields;
+            let first = self.fields == 0;
             self.failed = self.entry(first, value).is_err();
         }
-        self.fields = true;
+        self.fields += 1;
         self
     }
     fn entry(&mut self, first: bool, value: &dyn Debug) -> Result {
+        if self.fmt.alternate() {
+            if first { attempt!(self.fmt.write_str("(\n")); }
+            return self.fmt.indented_entry(value);
+        }
         attempt!(self.fmt.write_str(if first { "(" } else { ", " }));
         value.fmt(self.fmt)
     }
     pub fn finish_non_exhaustive(&mut self) -> Result {
         if self.failed { return Err(Error); }
-        self.fmt.write_str(if self.fields { ", ..)" } else { "(..)" })
+        if self.fields == 0 { return self.fmt.write_str("(..)"); }
+        if !self.fmt.alternate() { return self.fmt.write_str(", ..)"); }
+        attempt!(self.fmt.indented_rest());
+        self.fmt.write_str(")")
     }
     pub fn finish(&mut self) -> Result {
         if self.failed { return Err(Error); }
-        if self.fields { self.fmt.write_str(")") } else { Ok(()) }
+        if self.fields == 0 { return Ok(()); }
+        if self.fields == 1 && self.empty_name && !self.fmt.alternate() { attempt!(self.fmt.write_str(",")); }
+        self.fmt.write_str(")")
     }
 }
 
@@ -635,7 +685,7 @@ impl<'a> Formatter<'a> {
     }
     pub fn debug_tuple<'b>(&'b mut self, name: &str) -> DebugTuple<'b, 'a> {
         let failed = self.write_str(name).is_err();
-        DebugTuple { fmt: self, failed, fields: false }
+        DebugTuple { fmt: self, failed, fields: 0, empty_name: name.is_empty() }
     }
 }
 
@@ -657,17 +707,6 @@ impl Debug for crate::alloc::Layout {
     }
 }
 
-impl<A: Debug, B: Debug, C: Debug> Debug for (A, B, C) {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        attempt!(f.write_str("("));
-        attempt!(Debug::fmt(&self.0, f));
-        attempt!(f.write_str(", "));
-        attempt!(Debug::fmt(&self.1, f));
-        attempt!(f.write_str(", "));
-        attempt!(Debug::fmt(&self.2, f));
-        f.write_str(")")
-    }
-}
 impl Debug for ! {
     fn fmt(&self, _f: &mut Formatter<'_>) -> Result { match *self {} }
 }
@@ -1014,7 +1053,7 @@ macro_rules! tuple_debug {
         }
     )*};
 }
-tuple_debug!((A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+tuple_debug!((A 0) (A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10, L 11));
