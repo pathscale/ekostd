@@ -619,6 +619,46 @@ fn heaps(run: &mut Run) {
     run.check(roomy.capacity() >= 10 && roomy.is_empty(), "heap misc with_capacity", 0);
 }
 
+fn arc_layouts(run: &mut Run) {
+    // ArcInner starts with AtomicUsize counts; no value below needs a larger alignment.
+    let align = core::mem::align_of::<AtomicUsize>();
+    let top = || (NEXT.load(Ordering::Relaxed) + align - 1) & !(align - 1);
+
+    let start = top();
+    drop(alloc::sync::Arc::new(7u8));
+    let u8_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(u8_back, "arc u8 dealloc layout", 0);
+
+    let start = top();
+    drop(alloc::sync::Arc::new([1u8; 3]));
+    let array_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(array_back, "arc u8 dealloc layout", 1);
+
+    let start = top();
+    drop(alloc::sync::Arc::new(5u16));
+    let u16_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(u16_back, "arc u8 dealloc layout", 2);
+
+    let start = top();
+    drop(alloc::sync::Arc::<[u8]>::from(&[1u8, 2, 3][..]));
+    let slice_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(slice_back, "arc slice dealloc layout", 0);
+
+    let start = top();
+    drop(alloc::sync::Arc::<str>::from("abcde"));
+    let str_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(str_back, "arc slice dealloc layout", 1);
+
+    let start = top();
+    let strong = alloc::sync::Arc::new(9u8);
+    let weak = alloc::sync::Arc::downgrade(&strong);
+    drop(strong);
+    let held = NEXT.load(Ordering::Relaxed) > start;
+    drop(weak);
+    let weak_back = NEXT.load(Ordering::Relaxed) == start;
+    run.check(held && weak_back, "arc weak dealloc layout", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -628,6 +668,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    arc_layouts(&mut run);
     heaps(&mut run);
     rcs(&mut run);
     sorts(&mut run);
