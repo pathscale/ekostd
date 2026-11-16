@@ -788,6 +788,46 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "None", "{:?}", o.get());
         check!(r, "Some(4)", "{:?}", core::cell::OnceCell::from(4).into_inner());
     }
+    { // lw4-g: hash impls for 1-tuples, 9..12-tuples, Ordering, Bound, ranges, Wrapping, ManuallyDrop, Pin, fmt::Error, Layout
+        struct Rec { b: [u8; 64], n: usize }
+        impl core::hash::Hasher for Rec {
+            fn finish(&self) -> u64 { self.n as u64 }
+            fn write(&mut self, bytes: &[u8]) {
+                for &x in bytes {
+                    if self.n < 64 { self.b[self.n] = x; self.n += 1; }
+                }
+            }
+        }
+        fn bytes<T: core::hash::Hash + ?Sized>(t: &T) -> (usize, [u8; 64]) {
+            let mut rec = Rec { b: [0; 64], n: 0 };
+            t.hash(&mut rec);
+            (rec.n, rec.b)
+        }
+        macro_rules! hb {
+            ($want:expr, $v:expr) => {{
+                let (n, b) = bytes(&$v);
+                check!(r, $want, "{:?}", &b[..n]);
+            }};
+        }
+        hb!("[7]", (7u8,));
+        hb!("[1, 2, 3, 4, 5, 6, 7, 8, 9]", (1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8));
+        hb!("[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]",
+            (1u8, 2u8, 3u8, 4u8, 5u8, 6u8, 7u8, 8u8, 9u8, 10u8, 11u8, 12u8));
+        hb!("[255]", core::cmp::Ordering::Less);
+        hb!("[1]", core::cmp::Ordering::Greater);
+        hb!("[0, 0, 0, 0, 0, 0, 0, 0, 7]", core::ops::Bound::Included(7u8));
+        hb!("[2, 0, 0, 0, 0, 0, 0, 0]", core::ops::Bound::<u8>::Unbounded);
+        hb!("[1, 3]", 1u8..3u8);
+        hb!("[5]", 5u8..);
+        hb!("[4]", ..4u8);
+        hb!("[4]", ..=4u8);
+        hb!("[]", ..);
+        hb!("[9]", core::num::Wrapping(9u8));
+        hb!("[3]", core::mem::ManuallyDrop::new(3u8));
+        hb!("[6]", core::pin::Pin::new(&6u8));
+        hb!("[]", core::fmt::Error);
+        hb!("[4, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0]", core::alloc::Layout::new::<u32>());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
