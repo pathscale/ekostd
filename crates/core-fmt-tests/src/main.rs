@@ -453,6 +453,27 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "(0, Some(0))", "{:?}", e.size_hint());
     }
 
+    { // lw2-g: FlatMap from the back, FlatMap and Flatten size_hint
+        check!(r, "21201110", "{}", [1, 2].iter().flat_map(|&x| x * 10..x * 10 + 2).rev().fold(0, |a, x| a * 100 + x));
+        let mut f = [1, 2, 3].iter().flat_map(|&x| x * 10..x * 10 + 2);
+        check!(r, "Some(10)", "{:?}", f.next());
+        check!(r, "Some(31)", "{:?}", f.next_back());
+        check!(r, "Some(30)", "{:?}", f.next_back());
+        check!(r, "Some(11)", "{:?}", f.next());
+        check!(r, "Some(20)", "{:?}", f.next());
+        check!(r, "Some(21)", "{:?}", f.next_back());
+        check!(r, "None", "{:?}", f.next());
+        check!(r, "None", "{:?}", f.next_back());
+        check!(r, "(0, None)", "{:?}", [1u8].iter().flat_map(|&x| 0..x).size_hint());
+        let mut h = [1, 2].iter().flat_map(|&x| 0..x);
+        h.next();
+        h.next();
+        check!(r, "(1, Some(1))", "{:?}", h.size_hint());
+        check!(r, "6510", "{}", [0..2, 5..7].iter().cloned().flatten().rev().fold(0, |a, x| a * 10 + x));
+        let mut fl = [0..3].into_iter().flatten();
+        fl.next();
+        check!(r, "(2, Some(2))", "{:?}", fl.size_hint());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
