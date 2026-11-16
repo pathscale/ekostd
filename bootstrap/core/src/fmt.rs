@@ -717,13 +717,14 @@ fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Form
     if val.is_nan() {
         return f.pad_number("", "NaN", 0, "");
     }
-    let mut buf = [0u8; 64];
+    // Display of the smallest subnormal is `0.`, 323 zeros and its digits; every layout fits with the sign.
+    let mut buf = [0u8; 400];
     let mut pos: usize = 0;
     if val.is_sign_negative() {
         buf[pos] = b'-';
         pos += 1;
     }
-    let mut x = val.abs();
+    let x = val.abs();
     if x.is_infinite() {
         buf[pos] = b'i';
         buf[pos + 1] = b'n';
@@ -746,193 +747,221 @@ fn fmt_float_f64(val: f64, is_f32: bool, exp_char: u8, debug: bool, f: &mut Form
         return finish_float(f, &buf[..pos]);
     }
 
-    let mut exp10: i32 = 0;
-    let mut step = 0usize;
-    while step < 24 {
-        if x < 1e16 {
-            break;
-        }
-        x /= 1e16;
-        exp10 += 16;
-        step += 1;
-    }
-    let mut step2 = 0usize;
-    while step2 < 24 {
-        if x >= 1e-15 {
-            break;
-        }
-        x *= 1e16;
-        exp10 -= 16;
-        step2 += 1;
-    }
-    let mut step3 = 0usize;
-    while step3 < 20 {
-        if x < 10.0 {
-            break;
-        }
-        x /= 10.0;
-        exp10 += 1;
-        step3 += 1;
-    }
-    let mut step4 = 0usize;
-    while step4 < 20 {
-        if x >= 1.0 {
-            break;
-        }
-        x *= 10.0;
-        exp10 -= 1;
-        step4 += 1;
-    }
+    // Decode the value in its own type as Rust does: v = mant * 2^exp, rounding interval
+    // ((mant - minus) * 2^exp, (mant + plus) * 2^exp), inclusive when the stored mantissa is even.
+    let (stored, stored_exp, normal, min_norm) = if is_f32 {
+        let bits = (val as f32).to_bits();
+        let biased = ((bits >> 23) & 0xff) as i32;
+        let fraction = (bits & 0x7f_ffff) as u64;
+        if biased == 0 { (fraction << 1, -150, false, 1u64 << 23) } else { (fraction | (1u64 << 23), biased - 150, true, 1u64 << 23) }
+    } else {
+        let bits = val.to_bits();
+        let biased = ((bits >> 52) & 0x7ff) as i32;
+        let fraction = bits & ((1u64 << 52) - 1);
+        if biased == 0 { (fraction << 1, -1075, false, 1u64 << 52) } else { (fraction | (1u64 << 52), biased - 1075, true, 1u64 << 52) }
+    };
+    let inclusive = (stored & 1) == 0;
+    let (mant, minus, plus, exp) = if !normal {
+        (stored, 1, 1, stored_exp)
+    } else if stored == min_norm {
+        (stored << 2, 1, 2, stored_exp - 2)
+    } else {
+        (stored << 1, 1, 1, stored_exp - 1)
+    };
+    let mut digits = [0u8; 32];
+    let (len, k) = shortest_digits(mant, minus, plus, exp, inclusive, &mut digits);
 
-    let ndigits: usize = if is_f32 { 7 } else { 15 };
-    let mut digits = [0usize; 16];
-    let mut i = 0usize;
-    while i <= ndigits {
-        let mut d: usize = 0;
-        while d < 9 {
-            if x < ((d + 1) as f64) {
-                break;
-            }
-            d += 1;
+    let use_exp = if exp_char != 0 {
+        true
+    } else if debug {
+        if is_f32 {
+            let a = x as f32;
+            !(a >= 1e-4f32 && a < 1e16f32)
+        } else {
+            !(x >= 1e-4 && x < 1e16)
         }
-        digits[i] = d;
-        x = (x - (d as f64)) * 10.0;
-        i += 1;
-    }
-
-    if digits[ndigits] >= 5 {
-        let mut carry: usize = 1;
-        let mut j = ndigits;
-        while j > 0 {
-            if carry == 0 {
-                break;
-            }
-            j -= 1;
-            let sum = digits[j] + carry;
-            if sum >= 10 {
-                digits[j] = sum - 10;
-                carry = 1;
-            } else {
-                digits[j] = sum;
-                carry = 0;
-            }
-        }
-        if carry > 0 {
-            digits[0] = 1;
-            let mut k = 1usize;
-            while k < ndigits {
-                digits[k] = 0;
-                k += 1;
-            }
-            exp10 += 1;
-        }
-    }
-
-    let mut len = ndigits;
-    while len > 1 {
-        if digits[len - 1] != 0 {
-            break;
-        }
-        len -= 1;
-    }
-
-    let use_exp = exp_char != 0 || exp10 < -4 || exp10 >= (ndigits as i32);
+    } else {
+        false
+    };
     if use_exp {
-        let ec = if exp_char != 0 { exp_char } else { b'e' };
-        buf[pos] = DEC_DIGITS[digits[0]];
+        buf[pos] = digits[0];
         pos += 1;
         if len > 1 {
             buf[pos] = b'.';
             pos += 1;
-            let mut k = 1usize;
-            while k < len {
-                buf[pos] = DEC_DIGITS[digits[k]];
+            let mut i = 1usize;
+            while i < len {
+                buf[pos] = digits[i];
                 pos += 1;
-                k += 1;
+                i += 1;
             }
         }
-        buf[pos] = ec;
+        buf[pos] = if exp_char != 0 { exp_char } else { b'e' };
         pos += 1;
-        let mut e_abs: usize = if exp10 < 0 {
+        let e = k - 1;
+        let mut e_abs: usize = if e < 0 {
             buf[pos] = b'-';
             pos += 1;
-            (-exp10) as usize
+            (-e) as usize
         } else {
-            exp10 as usize
+            e as usize
         };
         let mut e_buf = [0u8; 8];
         let mut e_len: usize = 0;
-        let mut es = 0usize;
-        while es < 8 {
+        loop {
             e_buf[e_len] = DEC_DIGITS[e_abs % 10];
             e_len += 1;
             e_abs /= 10;
             if e_abs == 0 {
                 break;
             }
-            es += 1;
         }
         while e_len > 0 {
             e_len -= 1;
             buf[pos] = e_buf[e_len];
             pos += 1;
         }
-    } else if exp10 < 0 {
+    } else if k <= 0 {
         buf[pos] = b'0';
-        pos += 1;
-        buf[pos] = b'.';
-        pos += 1;
-        let mut z = (-exp10 - 1) as usize;
+        buf[pos + 1] = b'.';
+        pos += 2;
+        let mut z = (-k) as usize;
         while z > 0 {
             buf[pos] = b'0';
             pos += 1;
             z -= 1;
         }
-        let mut k = 0;
-        while k < len {
-            buf[pos] = DEC_DIGITS[digits[k]];
+        let mut i = 0usize;
+        while i < len {
+            buf[pos] = digits[i];
             pos += 1;
-            k += 1;
+            i += 1;
+        }
+    } else if (k as usize) < len {
+        let int_digits = k as usize;
+        let mut i = 0usize;
+        while i < int_digits {
+            buf[pos] = digits[i];
+            pos += 1;
+            i += 1;
+        }
+        buf[pos] = b'.';
+        pos += 1;
+        while i < len {
+            buf[pos] = digits[i];
+            pos += 1;
+            i += 1;
         }
     } else {
-        let int_digits = (exp10 as usize) + 1;
-        if int_digits >= len {
-            let mut k = 0;
-            while k < len {
-                buf[pos] = DEC_DIGITS[digits[k]];
-                pos += 1;
-                k += 1;
-            }
-            let mut z = int_digits - len;
-            while z > 0 {
-                buf[pos] = b'0';
-                pos += 1;
-                z -= 1;
-            }
-            if debug {
-                buf[pos] = b'.';
-                pos += 1;
-                buf[pos] = b'0';
-                pos += 1;
-            }
-        } else {
-            let mut k = 0;
-            while k < int_digits {
-                buf[pos] = DEC_DIGITS[digits[k]];
-                pos += 1;
-                k += 1;
-            }
-            buf[pos] = b'.';
+        let mut i = 0usize;
+        while i < len {
+            buf[pos] = digits[i];
             pos += 1;
-            while k < len {
-                buf[pos] = DEC_DIGITS[digits[k]];
-                pos += 1;
-                k += 1;
-            }
+            i += 1;
+        }
+        let mut z = k as usize - len;
+        while z > 0 {
+            buf[pos] = b'0';
+            pos += 1;
+            z -= 1;
+        }
+        if debug {
+            buf[pos] = b'.';
+            buf[pos + 1] = b'0';
+            pos += 2;
         }
     }
 
     finish_float(f, &buf[..pos])
+}
+
+/// Shortest digits that read back (round to nearest even) as the decoded value `mant * 2^exp` whose rounding
+/// interval is `((mant - minus) * 2^exp, (mant + plus) * 2^exp)`, its ends included when `inclusive`: Steele &
+/// White / Dragon4 free format with exact bignums, choosing the closest candidate as Rust's shortest mode does.
+/// Writes ASCII digits d1..dn into `out` and returns `(n, k)` with the value close to 0.d1..dn * 10^k.
+fn shortest_digits(mant: u64, minus: u64, plus: u64, exp: i32, inclusive: bool, out: &mut [u8; 32]) -> (usize, i32) {
+    // value = r / s, interval half-widths mm / s below and mp / s above.
+    let mut r = Big::from_u64(mant);
+    let mut mm = Big::from_u64(minus);
+    let mut mp = Big::from_u64(plus);
+    let mut s = Big::from_u64(1);
+    if exp >= 0 {
+        r.shl(exp as usize);
+        mm.shl(exp as usize);
+        mp.shl(exp as usize);
+    } else {
+        s.shl((-exp) as usize);
+    }
+    // Lower estimate of k: floor((bit length of mant + plus - 1 + exp) * log10(2)) - 1, where 1292913986 is
+    // floor(log10(2) * 2^32); the loop below raises it to the exact k.
+    let mut high = mant + plus;
+    let mut bits = 0i64;
+    while high != 0 {
+        bits += 1;
+        high >>= 1;
+    }
+    let mut k = ((((bits - 1 + exp as i64) * 1_292_913_986) >> 32) - 1) as i32;
+    if k >= 0 {
+        s.mul_pow10(k as usize);
+    } else {
+        let n = (-k) as usize;
+        r.mul_pow10(n);
+        mm.mul_pow10(n);
+        mp.mul_pow10(n);
+    }
+    // k is exact once the upper end of the interval lies below 10^k (or at it when the end is excluded).
+    loop {
+        let mut top = Big { limbs: r.limbs };
+        top.add(&mp);
+        let c = s.compare(&top);
+        if c < 0 || (inclusive && c == 0) {
+            s.mul_small(10);
+            k += 1;
+        } else {
+            break;
+        }
+    }
+    r.mul_small(10);
+    mm.mul_small(10);
+    mp.mul_small(10);
+    let mut n = 0usize;
+    let mut down;
+    let mut up;
+    loop {
+        let mut d = 0u8;
+        while r.compare(&s) >= 0 {
+            r.sub(&s);
+            d += 1;
+        }
+        out[n] = b'0' + d;
+        n += 1;
+        // down: the digits so far are inside the interval; up: the digits plus one unit in the last place are.
+        let c_down = r.compare(&mm);
+        down = c_down < 0 || (inclusive && c_down == 0);
+        let mut top = Big { limbs: r.limbs };
+        top.add(&mp);
+        let c_up = s.compare(&top);
+        up = c_up < 0 || (inclusive && c_up == 0);
+        if down || up {
+            break;
+        }
+        r.mul_small(10);
+        mm.mul_small(10);
+        mp.mul_small(10);
+    }
+    if up {
+        let mut twice = Big { limbs: r.limbs };
+        twice.shl(1);
+        if !down || twice.compare(&s) >= 0 {
+            if round_up(out, n) {
+                out[0] = b'1';
+                out[n] = b'0';
+                n += 1;
+                k += 1;
+            }
+        }
+    }
+    (n, k)
 }
 
 impl Display for f32 {
@@ -1293,6 +1322,53 @@ impl Big {
             remainder = value % divisor as u64;
         }
         remainder as u32
+    }
+    fn add(&mut self, other: &Big) {
+        let mut carry = 0u64;
+        let mut i = 0;
+        while i < 36 {
+            let value = self.limbs[i] as u64 + other.limbs[i] as u64 + carry;
+            self.limbs[i] = value as u32;
+            carry = value >> 32;
+            i += 1;
+        }
+    }
+    /// `self -= other`; `other` must not exceed `self`.
+    fn sub(&mut self, other: &Big) {
+        let mut borrow = 0i64;
+        let mut i = 0;
+        while i < 36 {
+            let value = self.limbs[i] as i64 - other.limbs[i] as i64 - borrow;
+            if value < 0 {
+                self.limbs[i] = (value + (1i64 << 32)) as u32;
+                borrow = 1;
+            } else {
+                self.limbs[i] = value as u32;
+                borrow = 0;
+            }
+            i += 1;
+        }
+    }
+    /// -1, 0 or 1 as `self` is below, equal to or above `other`.
+    fn compare(&self, other: &Big) -> i32 {
+        let mut i = 36;
+        while i > 0 {
+            i -= 1;
+            if self.limbs[i] != other.limbs[i] { return if self.limbs[i] < other.limbs[i] { -1 } else { 1 }; }
+        }
+        0
+    }
+    fn mul_pow10(&mut self, mut n: usize) {
+        while n >= 9 {
+            self.mul_small(1_000_000_000);
+            n -= 9;
+        }
+        let mut factor = 1u32;
+        while n > 0 {
+            factor *= 10;
+            n -= 1;
+        }
+        self.mul_small(factor);
     }
     /// Decimal digits (ASCII, most significant first, `0` for zero) into `out`; returns their count.
     fn write_decimal(mut self, out: &mut [u8]) -> usize {
