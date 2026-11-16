@@ -379,7 +379,17 @@ const impl ZeroablePrimitive for char { fn is_zero(self) -> bool { self as u32 =
 #[repr(transparent)]
 pub struct NonZero<T: ZeroablePrimitive>(T);
 impl<T: ZeroablePrimitive> NonZero<T> {
-    pub const fn new(n: T) -> Option<Self> where T: [const] ZeroablePrimitive { if n.is_zero() { None } else { Some(Self(n)) } }
+    pub const fn new(n: T) -> Option<Self> {
+        // A zero primitive is all zero bytes; reading them needs no trait, so this stays callable in a constant.
+        let bytes = &n as *const T as *const u8;
+        let mut i = 0;
+        let mut zero = true;
+        while i < crate::mem::size_of::<T>() {
+            if unsafe { *bytes.add(i) } != 0 { zero = false; }
+            i += 1;
+        }
+        if zero { None } else { Some(Self(n)) }
+    }
     pub const unsafe fn new_unchecked(n: T) -> Self { Self(n) }
     pub const fn get(self) -> T { self.0 }
 }
@@ -1210,3 +1220,17 @@ macro_rules! saturating_impl {
     )*};
 }
 saturating_impl!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+macro_rules! float_total_cmp { ($($f:ident $i:ident $u:ident $shift:expr),*) => {$(
+    impl $f {
+        pub fn total_cmp(&self, other: &Self) -> crate::cmp::Ordering {
+            let mut left = self.to_bits() as $i;
+            let mut right = other.to_bits() as $i;
+            // Negative values flip all but the sign bit, so that the integer order is the total order.
+            left ^= (((left >> $shift) as $u) >> 1) as $i;
+            right ^= (((right >> $shift) as $u) >> 1) as $i;
+            left.cmp(&right)
+        }
+    }
+)*}; }
+float_total_cmp!(f32 i32 u32 31, f64 i64 u64 63);

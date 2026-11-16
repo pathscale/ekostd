@@ -251,6 +251,29 @@ impl str {
 
     pub fn get<I: SliceIndex<str>>(&self, i: I) -> Option<&I::Output> { i.get(self) }
 
+    pub fn matches<P: Pattern>(&self, pat: P) -> Matches<'_, P> { Matches { inner: self.match_indices(pat) } }
+
+    pub fn rsplit_once<P: Pattern>(&self, mut pat: P) -> Option<(&str, &str)> {
+        let mut i = self.len();
+        loop {
+            if self.is_char_boundary(i) {
+                if let Some(len) = pat.prefix_len(&self[i..]) {
+                    if len > 0 { return Some((&self[..i], &self[i + len..])); }
+                }
+            }
+            if i == 0 { return None; }
+            i -= 1;
+        }
+    }
+
+    pub fn rsplit<P: Pattern>(&self, pat: P) -> RSplit<'_, P> { RSplit { haystack: self, end: self.len(), pattern: pat, done: false } }
+
+    pub fn splitn<P: Pattern>(&self, n: usize, pat: P) -> SplitN<'_, P> { SplitN { inner: self.split(pat), count: n } }
+
+    pub fn escape_default(&self) -> EscapeDefault<'_> {
+        EscapeDefault { chars: self.chars(), buf: ['\0'; 10], pos: 0, len: 0 }
+    }
+
     pub fn is_ascii(&self) -> bool { self.as_bytes().is_ascii() }
 
     /// The byte index of the last match.
@@ -981,5 +1004,95 @@ impl<'a, P: Pattern> crate::iter::DoubleEndedIterator for MatchIndices<'a, P> {
         }
         self.done = true;
         None
+    }
+}
+
+pub struct Matches<'a, P> { inner: MatchIndices<'a, P> }
+impl<'a, P: Pattern> crate::iter::Iterator for Matches<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> { self.inner.next().map(|(_, piece)| piece) }
+}
+impl<'a, P: Pattern> crate::iter::DoubleEndedIterator for Matches<'a, P> {
+    fn next_back(&mut self) -> Option<&'a str> { self.inner.next_back().map(|(_, piece)| piece) }
+}
+
+pub struct RSplit<'a, P> { haystack: &'a str, end: usize, pattern: P, done: bool }
+impl<'a, P: Pattern> crate::iter::Iterator for RSplit<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        if self.done { return None; }
+        let mut i = self.end;
+        while i > 0 {
+            i -= 1;
+            if !self.haystack.is_char_boundary(i) { continue; }
+            if let Some(len) = self.pattern.prefix_len(&self.haystack[i..self.end]) {
+                if len > 0 {
+                    let piece = &self.haystack[i + len..self.end];
+                    self.end = i;
+                    return Some(piece);
+                }
+            }
+        }
+        self.done = true;
+        Some(&self.haystack[..self.end])
+    }
+}
+
+pub struct SplitN<'a, P> { inner: Split<'a, P>, count: usize }
+impl<'a, P: Pattern> crate::iter::Iterator for SplitN<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        match self.count {
+            0 => None,
+            1 => {
+                self.count = 0;
+                if self.inner.finished { None } else { self.inner.finished = true; Some(&self.inner.haystack[self.inner.start..]) }
+            }
+            _ => { self.count -= 1; self.inner.next() }
+        }
+    }
+}
+
+/// The characters of a string with each escaped as `char::escape_default` does.
+pub struct EscapeDefault<'a> { chars: Chars<'a>, buf: [char; 10], pos: usize, len: usize }
+impl<'a> crate::iter::Iterator for EscapeDefault<'a> {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len {
+            let c = self.chars.next()?;
+            self.pos = 0;
+            self.len = 0;
+            let mut push = |this: &mut Self, ch: char| { this.buf[this.len] = ch; this.len += 1; };
+            match c {
+                '\t' => { push(self, '\\'); push(self, 't'); }
+                '\r' => { push(self, '\\'); push(self, 'r'); }
+                '\n' => { push(self, '\\'); push(self, 'n'); }
+                '\\' | '\'' | '"' => { push(self, '\\'); push(self, c); }
+                '\u{20}'..='\u{7e}' => push(self, c),
+                _ => {
+                    push(self, '\\'); push(self, 'u'); push(self, '{');
+                    let value = c as u32;
+                    let mut digits = 1;
+                    while digits < 6 && (value >> (4 * digits)) != 0 { digits += 1; }
+                    let mut shift = digits;
+                    while shift > 0 {
+                        shift -= 1;
+                        let d = (value >> (4 * shift)) & 0xf;
+                        push(self, if d < 10 { (b'0' + d as u8) as char } else { (b'a' + d as u8 - 10) as char });
+                    }
+                    push(self, '}');
+                }
+            }
+        }
+        let c = self.buf[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+}
+impl crate::fmt::Display for EscapeDefault<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut it = EscapeDefault { chars: self.chars.clone(), buf: self.buf, pos: self.pos, len: self.len };
+        while let Some(c) = crate::iter::Iterator::next(&mut it) { f.write_char(c)?; }
+        Ok(())
     }
 }

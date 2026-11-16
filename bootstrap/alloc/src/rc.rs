@@ -110,3 +110,21 @@ impl<T: ?Sized + core::fmt::Debug> core::fmt::Debug for Rc<T> { fn fmt(&self, f:
 impl<T: ?Sized + core::fmt::Display> core::fmt::Display for Rc<T> { fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result { core::fmt::Display::fmt(&**self, f) } }
 impl<T: Default> Default for Rc<T> { fn default() -> Self { Self::new(T::default()) } }
 impl<T> From<T> for Rc<T> { fn from(value: T) -> Self { Self::new(value) } }
+
+impl<T> Rc<T> {
+    /// The value, when this is the only strong reference; otherwise the reference back.
+    pub fn try_unwrap(this: Self) -> Result<T, Self> {
+        if Self::strong_count(&this) != 1 { return Err(this); }
+        let this = ManuallyDrop::new(this);
+        let counts = unsafe { this.counts.as_ref() };
+        counts.strong.set(0);
+        let value = unsafe { core::ptr::read(this.value.as_ptr()) };
+        // Free the allocation of the value without dropping it again.
+        unsafe { drop(crate::boxed::Box::from_raw(this.value.as_ptr() as *mut ManuallyDrop<T>)) };
+        if counts.weak.get() == 0 { unsafe { drop(crate::boxed::Box::from_raw(this.counts.as_ptr())) }; }
+        Ok(value)
+    }
+}
+
+impl<T: ?Sized> core::marker::Unpin for Rc<T> {}
+impl<T: ?Sized> core::marker::Unpin for Weak<T> {}

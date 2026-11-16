@@ -315,9 +315,14 @@ impl<T: core::fmt::Debug> core::fmt::Debug for Vec<T> {
     }
 }
 
-impl<T: PartialEq> PartialEq for Vec<T> {
-    fn eq(&self, other: &Self) -> bool { self.as_slice() == other.as_slice() }
+impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for Vec<T> {
+    fn eq(&self, other: &Vec<U>) -> bool { self.as_slice() == other.as_slice() }
 }
+impl<T: PartialEq<U>, U> PartialEq<[U]> for Vec<T> { fn eq(&self, other: &[U]) -> bool { self.as_slice() == other } }
+impl<T: PartialEq<U>, U> PartialEq<&[U]> for Vec<T> { fn eq(&self, other: &&[U]) -> bool { self.as_slice() == *other } }
+impl<T: PartialEq<U>, U> PartialEq<&mut [U]> for Vec<T> { fn eq(&self, other: &&mut [U]) -> bool { self.as_slice() == &**other } }
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<[U; N]> for Vec<T> { fn eq(&self, other: &[U; N]) -> bool { self.as_slice() == other.as_slice() } }
+impl<T: PartialEq<U>, U, const N: usize> PartialEq<&[U; N]> for Vec<T> { fn eq(&self, other: &&[U; N]) -> bool { self.as_slice() == other.as_slice() } }
 
 impl<T: Eq> Eq for Vec<T> {}
 
@@ -502,3 +507,45 @@ impl<T: PartialOrd> PartialOrd for Vec<T> {
 impl<T: Ord> Ord for Vec<T> {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering { Ord::cmp(&**self, &**other) }
 }
+
+impl<T> Vec<T> {
+    /// Replaces `range` with `replace_with`; the removed elements come out of the returned iterator.
+    /// The replacement happens at once, where `std` defers it until the iterator is dropped.
+    pub fn splice<R: core::ops::RangeBounds<usize>, I: IntoIterator<Item = T>>(&mut self, range: R, replace_with: I) -> IntoIter<T> {
+        let len = self.length;
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(&n) => n,
+            core::ops::Bound::Excluded(&n) => n + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(&n) => n + 1,
+            core::ops::Bound::Excluded(&n) => n,
+            core::ops::Bound::Unbounded => len,
+        };
+        assert!(start <= end && end <= len);
+        let mut tail = self.split_off(end);
+        let removed = self.split_off(start);
+        self.extend(replace_with);
+        self.append(&mut tail);
+        removed.into_iter()
+    }
+
+    pub fn dedup_by<F: FnMut(&mut T, &mut T) -> bool>(&mut self, mut same: F) {
+        if self.length < 2 { return; }
+        let mut write = 1;
+        for read in 1..self.length {
+            unsafe {
+                let p = self.pointer.as_ptr();
+                if same(&mut *p.add(read), &mut *p.add(write - 1)) {
+                    ptr::drop_in_place(p.add(read));
+                } else {
+                    if read != write { p.add(write).write(p.add(read).read()); }
+                    write += 1;
+                }
+            }
+        }
+        self.length = write;
+    }
+}
+impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for [T] { fn eq(&self, other: &Vec<U>) -> bool { *self == other[..] } }

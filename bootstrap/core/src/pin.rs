@@ -11,7 +11,6 @@ impl<Ptr: crate::ops::LegacyReceiver> crate::ops::LegacyReceiver for Pin<Ptr> {}
 impl<P, T: Unpin> Pin<P> where P: Deref<Target = T> {
     pub fn new(pointer: P) -> Self { Self { pointer } }
     pub fn into_inner(self) -> P { self.pointer }
-    pub fn get_mut(&mut self) -> &mut P::Target where P: DerefMut { self.pointer.deref_mut() }
 }
 impl<P> Pin<P> where P: Deref {
     #[lang = "new_unchecked"]
@@ -22,7 +21,6 @@ impl<P> Pin<P> where P: Deref {
 impl<P> Pin<P> where P: DerefMut {
     pub fn as_mut(&mut self) -> Pin<&mut P::Target> { Pin { pointer: self.pointer.deref_mut() } }
     pub unsafe fn into_inner_unchecked(self) -> P { self.pointer }
-    pub unsafe fn get_unchecked_mut(&mut self) -> &mut P::Target { self.pointer.deref_mut() }
 }
 impl<P: Deref> Deref for Pin<P> {
     type Target = P::Target;
@@ -41,4 +39,10 @@ pub macro pin($value:expr $(,)?) {
     $crate::pin::Pin {
         pointer: &mut { $value },
     }
+}
+
+impl<'a, T: ?Sized> Pin<&'a mut T> {
+    pub fn get_mut(self) -> &'a mut T where T: Unpin { self.pointer }
+    pub unsafe fn get_unchecked_mut(self) -> &'a mut T { self.pointer }
+    pub fn into_ref(self) -> Pin<&'a T> { Pin { pointer: self.pointer } }
 }

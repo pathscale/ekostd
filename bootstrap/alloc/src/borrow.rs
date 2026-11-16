@@ -89,3 +89,10 @@ impl<B: ?Sized + ToOwned + core::hash::Hash> core::hash::Hash for Cow<'_, B> {
 impl<'a, B: ?Sized + ToOwned> Borrow<B> for Cow<'a, B> {
     fn borrow(&self) -> &B { self.as_ref() }
 }
+
+impl<'a, T: Clone + PartialEq<U>, U> PartialEq<crate::vec::Vec<U>> for Cow<'a, [T]> {
+    fn eq(&self, other: &crate::vec::Vec<U>) -> bool { self.as_ref() == other.as_slice() }
+}
+impl<'a, T: Clone + PartialEq<U>, U> PartialEq<&[U]> for Cow<'a, [T]> {
+    fn eq(&self, other: &&[U]) -> bool { self.as_ref() == *other }
+}

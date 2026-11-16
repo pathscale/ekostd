@@ -85,6 +85,9 @@ pub auto trait Unpin {}
 
 impl<T: PointeeSized> Unpin for &T {}
 impl<T: PointeeSized> Unpin for &mut T {}
+impl<T: PointeeSized> Unpin for *const T {}
+impl<T: PointeeSized> Unpin for *mut T {}
+impl<T: PointeeSized> Unpin for PhantomData<T> {}
 
 #[lang = "unsafe_unpin"]
 pub unsafe auto trait UnsafeUnpin {}

@@ -407,3 +407,18 @@ impl<A: PointeeSized + PartialEq<B>, B: PointeeSized> PartialEq<&B> for &mut A {
 impl<A: PointeeSized + PartialEq<B>, B: PointeeSized> PartialEq<&mut B> for &A {
     fn eq(&self, other: &&mut B) -> bool { PartialEq::eq(&**self, &**other) }
 }
+
+impl Ordering {
+    pub const fn reverse(self) -> Ordering {
+        match self { Less => Greater, Equal => Equal, Greater => Less }
+    }
+}
+
+impl Ordering {
+    pub const fn is_eq(self) -> bool { match self { Equal => true, _ => false } }
+    pub const fn is_ne(self) -> bool { match self { Equal => false, _ => true } }
+    pub const fn is_lt(self) -> bool { match self { Less => true, _ => false } }
+    pub const fn is_gt(self) -> bool { match self { Greater => true, _ => false } }
+    pub const fn is_le(self) -> bool { match self { Greater => false, _ => true } }
+    pub const fn is_ge(self) -> bool { match self { Less => false, _ => true } }
+}

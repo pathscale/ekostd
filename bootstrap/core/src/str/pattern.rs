@@ -123,3 +123,9 @@ impl<const N: usize> Pattern for [char; N] {
         self.as_slice().suffix_len(haystack)
     }
 }
+
+impl Pattern for &&str {
+    fn find_in(&mut self, haystack: &str, from: usize) -> Option<(usize, usize)> { let mut s: &str = **self; s.find_in(haystack, from) }
+    fn prefix_len(&mut self, haystack: &str) -> Option<usize> { let mut s: &str = **self; s.prefix_len(haystack) }
+    fn suffix_len(&mut self, haystack: &str) -> Option<usize> { let mut s: &str = **self; s.suffix_len(haystack) }
+}

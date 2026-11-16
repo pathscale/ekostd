@@ -43,3 +43,19 @@ impl str {
         unsafe { crate::string::String::from_utf8_unchecked(bytes) }
     }
 }
+
+impl str {
+    /// A new string with every match of `from` replaced by `to`.
+    #[rustc_allow_incoherent_impl]
+    pub fn replace<P: core::str::pattern::Pattern>(&self, from: P, to: &str) -> crate::string::String {
+        let mut out = crate::string::String::new();
+        let mut last = 0;
+        for (start, matched) in self.match_indices(from) {
+            out.push_str(&self[last..start]);
+            out.push_str(to);
+            last = start + matched.len();
+        }
+        out.push_str(&self[last..]);
+        out
+    }
+}

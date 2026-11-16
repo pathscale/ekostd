@@ -210,3 +210,16 @@ impl<T> core::iter::FromIterator<T> for Box<[T]> {
         iter.into_iter().collect::<crate::vec::Vec<T>>().into_boxed_slice()
     }
 }
+
+impl<T: ?Sized> core::marker::Unpin for Box<T> {}
+
+impl<Args: core::marker::Tuple, F: FnMut<Args> + ?Sized> FnMut<Args> for Box<F> {
+    extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output {
+        <F as FnMut<Args>>::call_mut(&mut **self, args)
+    }
+}
+impl<Args: core::marker::Tuple, F: Fn<Args> + ?Sized> Fn<Args> for Box<F> {
+    extern "rust-call" fn call(&self, args: Args) -> Self::Output {
+        <F as Fn<Args>>::call(&**self, args)
+    }
+}

@@ -89,6 +89,29 @@ pub trait Iterator {
         match best { Some((_, x)) => Some(x), None => None }
     }
     /// The item whose key is smallest; the first of several equal ones.
+    fn ne<I>(self, other: I) -> bool where I: IntoIterator, Self::Item: PartialEq<I::Item>, Self: Sized { !self.eq(other) }
+    fn reduce<F: FnMut(Self::Item, Self::Item) -> Self::Item>(mut self, mut f: F) -> Option<Self::Item> where Self: Sized {
+        let mut accum = self.next()?;
+        while let Some(item) = self.next() { accum = f(accum, item); }
+        Some(accum)
+    }
+    fn partition<B, F>(mut self, mut f: F) -> (B, B)
+    where Self: Sized, B: Default + Extend<Self::Item>, F: FnMut(&Self::Item) -> bool {
+        let mut left = B::default();
+        let mut right = B::default();
+        while let Some(item) = self.next() {
+            if f(&item) { left.extend(Some(item)); } else { right.extend(Some(item)); }
+        }
+        (left, right)
+    }
+    fn max_by<F: FnMut(&Self::Item, &Self::Item) -> crate::cmp::Ordering>(mut self, mut compare: F) -> Option<Self::Item> where Self: Sized {
+        let mut best = self.next()?;
+        while let Some(item) = self.next() {
+            // The last of several equal maxima wins.
+            if compare(&best, &item) != crate::cmp::Ordering::Greater { best = item; }
+        }
+        Some(best)
+    }
     fn min_by<F: FnMut(&Self::Item, &Self::Item) -> crate::cmp::Ordering>(mut self, mut compare: F) -> Option<Self::Item> where Self: Sized {
         let mut best = self.next()?;
         while let Some(item) = self.next() {
@@ -325,6 +348,32 @@ impl<A: Clone, B: Clone> Clone for Zip<A, B> { fn clone(&self) -> Self { Self { 
 impl<A: Iterator, B: Iterator> Iterator for Zip<A, B> {
     type Item = (A::Item, B::Item);
     fn next(&mut self) -> Option<(A::Item, B::Item)> { Some((self.a.next()?, self.b.next()?)) }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (a_lower, a_upper) = self.a.size_hint();
+        let (b_lower, b_upper) = self.b.size_hint();
+        let lower = if a_lower < b_lower { a_lower } else { b_lower };
+        let upper = match (a_upper, b_upper) {
+            (Some(x), Some(y)) => Some(if x < y { x } else { y }),
+            (Some(x), None) => Some(x),
+            (None, Some(y)) => Some(y),
+            (None, None) => None,
+        };
+        (lower, upper)
+    }
+}
+impl<A: ExactSizeIterator, B: ExactSizeIterator> ExactSizeIterator for Zip<A, B> {}
+impl<A: DoubleEndedIterator + ExactSizeIterator, B: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for Zip<A, B> {
+    fn next_back(&mut self) -> Option<(A::Item, B::Item)> {
+        let a_len = self.a.len();
+        let b_len = self.b.len();
+        // Drop the unmatched tail of the longer side first.
+        if a_len > b_len { for _ in 0..a_len - b_len { self.a.next_back(); } }
+        if b_len > a_len { for _ in 0..b_len - a_len { self.b.next_back(); } }
+        match (self.a.next_back(), self.b.next_back()) {
+            (Some(x), Some(y)) => Some((x, y)),
+            _ => None,
+        }
+    }
 }
 
 pub struct Chain<A, B> { a: Option<A>, b: Option<B> }
@@ -358,6 +407,16 @@ impl<I: Iterator> Iterator for Take<I> {
     }
 }
 impl<I: ExactSizeIterator> ExactSizeIterator for Take<I> {}
+impl<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for Take<I> {
+    fn next_back(&mut self) -> Option<I::Item> {
+        if self.n == 0 { return None; }
+        // Drop what lies beyond the first `n` items, then the next from the back is ours.
+        let mut extra = self.iter.len().saturating_sub(self.n);
+        while extra > 0 { self.iter.next_back(); extra -= 1; }
+        self.n -= 1;
+        self.iter.next_back()
+    }
+}
 
 pub struct Skip<I> { iter: I, n: usize }
 impl<I: Clone> Clone for Skip<I> { fn clone(&self) -> Self { Self { iter: self.iter.clone(), n: self.n } } }
@@ -540,7 +599,7 @@ macro_rules! impl_step {
     )* };
 }
 
-impl_step!(u8, u16, u32, u64, usize, i8, i16, i32, i64, isize);
+impl_step!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 
 impl<A: Step> Iterator for Range<A> {
     type Item = A;

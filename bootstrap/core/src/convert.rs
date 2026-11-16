@@ -321,3 +321,6 @@ const impl From<char> for u32 { fn from(c: char) -> u32 { c as u32 } }
 const impl From<char> for u64 { fn from(c: char) -> u64 { c as u64 } }
 const impl From<char> for u128 { fn from(c: char) -> u128 { c as u128 } }
 const impl From<u8> for char { fn from(i: u8) -> char { i as char } }
+
+impl From<bool> for f32 { fn from(value: bool) -> f32 { if value { 1.0 } else { 0.0 } } }
+impl From<bool> for f64 { fn from(value: bool) -> f64 { if value { 1.0 } else { 0.0 } } }

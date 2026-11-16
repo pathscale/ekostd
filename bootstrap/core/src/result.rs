@@ -216,3 +216,24 @@ impl<T, E> Result<T, E> {
         }
     }
 }
+
+impl<T, E> Result<T, E> {
+    pub fn inspect<F: FnOnce(&T)>(self, f: F) -> Self {
+        if let Ok(value) = &self { f(value); }
+        self
+    }
+    #[track_caller]
+    pub fn expect_err(self, msg: &str) -> E where T: crate::fmt::Debug {
+        match self {
+            Ok(_) => { let _ = msg; crate::panic::panic_nounwind("called `Result::expect_err()` on an `Ok` value") }
+            Err(error) => error,
+        }
+    }
+}
+
+impl<T, E> Result<T, E> {
+    pub fn inspect_err<F: FnOnce(&E)>(self, f: F) -> Self {
+        if let Err(error) = &self { f(error); }
+        self
+    }
+}

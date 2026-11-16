@@ -203,3 +203,34 @@ impl core::str::pattern::Pattern for &String {
     fn prefix_len(&mut self, haystack: &str) -> Option<usize> { self.as_str().prefix_len(haystack) }
     fn suffix_len(&mut self, haystack: &str) -> Option<usize> { self.as_str().suffix_len(haystack) }
 }
+
+impl String {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), crate::collections::TryReserveError> {
+        self.vec.try_reserve(additional)
+    }
+}
+
+impl String {
+    pub fn insert_str(&mut self, idx: usize, string: &str) {
+        assert!(self.as_str().is_char_boundary(idx));
+        self.vec.splice(idx..idx, string.bytes());
+    }
+
+    pub fn replace_range<R: core::ops::RangeBounds<usize>>(&mut self, range: R, replace_with: &str) {
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(&n) => n,
+            core::ops::Bound::Excluded(&n) => n + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(&n) => n + 1,
+            core::ops::Bound::Excluded(&n) => n,
+            core::ops::Bound::Unbounded => self.len(),
+        };
+        assert!(self.as_str().is_char_boundary(start));
+        assert!(self.as_str().is_char_boundary(end));
+        self.vec.splice(start..end, replace_with.bytes());
+    }
+}
+impl From<String> for Vec<u8> { fn from(string: String) -> Vec<u8> { string.vec } }
+impl From<&str> for Vec<u8> { fn from(string: &str) -> Vec<u8> { Vec::from(string.as_bytes()) } }

@@ -234,3 +234,23 @@ impl<T, E> Option<Result<T, E>> {
 
 /// The iterator `Option::into_iter` returns.
 pub type IntoIter<A> = crate::iter::Once<A>;
+
+impl<T> Option<T> {
+    pub fn as_slice(&self) -> &[T] {
+        match self {
+            Some(value) => crate::slice::from_ref(value),
+            None => &[],
+        }
+    }
+}
+
+impl<T> Option<T> {
+    pub fn inspect<F: crate::ops::FnOnce(&T)>(self, f: F) -> Self {
+        if let Some(value) = &self { f(value); }
+        self
+    }
+}
+
+impl<T> From<T> for Option<T> {
+    fn from(value: T) -> Option<T> { Some(value) }
+}

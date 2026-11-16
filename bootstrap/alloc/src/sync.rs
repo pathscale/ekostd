@@ -389,3 +389,18 @@ impl<T> Arc<T> {
         Ok(value)
     }
 }
+
+impl<T: ?Sized> core::marker::Unpin for Arc<T> {}
+impl<T: ?Sized> core::marker::Unpin for Weak<T> {}
+
+impl<T> Arc<T> {
+    /// The value, when this was the last strong reference; every other caller of a final pair gets `None`.
+    pub fn into_inner(this: Self) -> Option<T> {
+        let this = ManuallyDrop::new(this);
+        if this.inner().strong.fetch_sub(1, Ordering::Release) != 1 { return None; }
+        let _ = this.inner().strong.load(Ordering::Acquire);
+        let value = unsafe { ptr::read(&(*this.ptr.as_ptr()).value) };
+        let _weak = Weak { ptr: this.ptr };
+        Some(value)
+    }
+}

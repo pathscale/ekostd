@@ -170,3 +170,7 @@ impl<T: ?Sized> crate::ops::Drop for RefMut<'_, T> {
 impl<T: crate::default::Default> crate::default::Default for RefCell<T> {
     fn default() -> RefCell<T> { RefCell::new(T::default()) }
 }
+
+impl<T: crate::default::Default> crate::default::Default for Cell<T> {
+    fn default() -> Cell<T> { Cell::new(T::default()) }
+}

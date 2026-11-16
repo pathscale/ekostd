@@ -48,7 +48,7 @@ const impl<T: PointeeSized> Clone for &T {
 unsafe impl<T: PointeeSized> TrivialClone for &T {}
 impl<T: PointeeSized> !Clone for &mut T {}
 
-impl<T: Copy, const N: usize> Clone for [T; N] {
-    fn clone(&self) -> Self { *self }
+impl<T: Clone, const N: usize> Clone for [T; N] {
+    fn clone(&self) -> Self { crate::array::from_fn(|i| self[i].clone()) }
 }
 unsafe impl<T: Copy + TrivialClone, const N: usize> TrivialClone for [T; N] {}

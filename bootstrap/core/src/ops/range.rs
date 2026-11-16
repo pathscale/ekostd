@@ -211,3 +211,7 @@ impl<Idx: crate::cmp::PartialOrd> Range<Idx> {
 impl<Idx: crate::cmp::PartialOrd> RangeInclusive<Idx> {
     pub fn contains(&self, item: &Idx) -> bool { *item >= self.start && *item <= self.end }
 }
+
+impl<Idx: crate::default::Default> crate::default::Default for Range<Idx> {
+    fn default() -> Self { Range { start: Idx::default(), end: Idx::default() } }
+}

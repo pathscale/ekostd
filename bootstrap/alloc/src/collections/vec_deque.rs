@@ -45,3 +45,9 @@ impl<T> FromIterator<T> for VecDeque<T> { fn from_iter<I:IntoIterator<Item=T>>(i
 impl<T> Extend<T> for VecDeque<T> { fn extend<I:IntoIterator<Item=T>>(&mut self,it:I) { self.items.extend(it); } }
 impl<T> From<Vec<T>> for VecDeque<T> { fn from(items: Vec<T>) -> Self { Self { items } } }
 impl<T, const N: usize> From<[T; N]> for VecDeque<T> { fn from(items: [T; N]) -> Self { Self { items: Vec::from_iter(items) } } }
+
+impl<T> VecDeque<T> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), crate::collections::TryReserveError> {
+        self.items.try_reserve(additional)
+    }
+}

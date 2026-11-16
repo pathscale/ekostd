@@ -177,3 +177,13 @@ impl<'a, K: Ord, V> VacantEntry<'a, K, V> {
     pub fn key(&self) -> &K { &self.key }
     pub fn insert(self, value: V) -> &'a mut V { self.map.insert_at(self.index, (self.key, value)); &mut self.map.entries[self.index].1 }
 }
+
+impl<K: core::hash::Hash, V: core::hash::Hash> core::hash::Hash for BTreeMap<K, V> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        state.write_usize(self.len());
+        for (k, v) in self.iter() { k.hash(state); v.hash(state); }
+    }
+}
+impl<K: Ord, V, const N: usize> From<[(K, V); N]> for BTreeMap<K, V> {
+    fn from(entries: [(K, V); N]) -> Self { let mut map = BTreeMap::new(); for (k, v) in entries { map.insert(k, v); } map }
+}

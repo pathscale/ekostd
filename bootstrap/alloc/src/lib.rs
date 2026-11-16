@@ -9,6 +9,7 @@ pub mod alloc;
 pub mod borrow;
 pub mod boxed;
 pub mod collections;
+pub mod ffi;
 pub mod fmt;
 pub mod rc;
 pub mod slice;

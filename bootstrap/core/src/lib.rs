@@ -18,6 +18,7 @@ pub mod macros;
 
 pub mod alloc;
 pub mod arch;
+pub mod ascii;
 pub mod array;
 pub mod any;
 pub mod borrow;
@@ -253,7 +254,7 @@ pub mod future {
         P::Target: Future,
     {
         type Output = <<P as crate::ops::Deref>::Target as Future>::Output;
-        fn poll(mut self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<Self::Output> {
+        fn poll(self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<Self::Output> {
             // SAFETY: the pinned pointer is only used to project to its pinned target.
             let this: &mut crate::pin::Pin<P> = unsafe { self.get_unchecked_mut() };
             <P::Target as Future>::poll(this.as_mut(), cx)
