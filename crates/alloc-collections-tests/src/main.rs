@@ -968,6 +968,136 @@ fn btrees_api(run: &mut Run) {
     run.check(a.iter().rev().copied().eq([2, 1]), "set Iter rev", 0);
 }
 
+fn vecs_api(run: &mut Run) {
+    // extend_from_within appends clones of a range of the vector's own elements.
+    let mut v: alloc::vec::Vec<i32> = alloc::vec::Vec::from([1, 2, 3]);
+    v.extend_from_within(..2);
+    run.check(v == [1, 2, 3, 1, 2], "vec extend_from_within", 0);
+    v.extend_from_within(1..=1);
+    run.check(v == [1, 2, 3, 1, 2, 2], "vec extend_from_within", 1);
+    let mut full: alloc::vec::Vec<alloc::vec::Vec<i32>> = alloc::vec::Vec::with_capacity(3);
+    full.push(alloc::vec::Vec::from([1]));
+    full.push(alloc::vec::Vec::from([2]));
+    full.push(alloc::vec::Vec::from([3]));
+    run.check(full.capacity() == 3, "vec extend_from_within realloc", 0);
+    full.extend_from_within(..);
+    run.check(
+        full.len() == 6 && full.iter().map(|x| x[0]).eq([1, 2, 3, 1, 2, 3].iter().copied()),
+        "vec extend_from_within realloc",
+        1,
+    );
+
+    // shrink_to keeps max(len, min_capacity) and never grows.
+    let mut s: alloc::vec::Vec<i32> = alloc::vec::Vec::with_capacity(10);
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    s.shrink_to(5);
+    run.check(s.capacity() == 5 && s == [1, 2, 3], "vec shrink_to", 0);
+    s.shrink_to(0);
+    run.check(s.capacity() == 3 && s == [1, 2, 3], "vec shrink_to", 1);
+    s.shrink_to(8);
+    run.check(s.capacity() == 3 && s == [1, 2, 3], "vec shrink_to", 2);
+
+    // spare_capacity_mut covers len..capacity; written slots become visible through set_len.
+    let mut sp: alloc::vec::Vec<i32> = alloc::vec::Vec::with_capacity(6);
+    sp.push(1);
+    let cap = sp.capacity();
+    let spare = sp.spare_capacity_mut();
+    let spare_len = spare.len();
+    spare[0].write(7);
+    spare[1].write(8);
+    run.check(spare_len == cap - 1, "vec spare_capacity_mut", 0);
+    unsafe { sp.set_len(3) };
+    run.check(sp == [1, 7, 8], "vec spare_capacity_mut", 1);
+
+    // extract_if over the whole vector and over a sub-range.
+    let mut e: alloc::vec::Vec<i32> = (1..11).collect();
+    let taken: alloc::vec::Vec<i32> = e.extract_if(.., |x| *x % 2 == 0).collect();
+    run.check(taken == [2, 4, 6, 8, 10] && e == [1, 3, 5, 7, 9], "vec extract_if", 0);
+    let mut r: alloc::vec::Vec<i32> = (0..8).collect();
+    let taken: alloc::vec::Vec<i32> = r.extract_if(2..6, |x| *x > 0).collect();
+    run.check(taken == [2, 3, 4, 5] && r == [0, 1, 6, 7], "vec extract_if range", 0);
+
+    // Dropped after one element: everything else stays, in order.
+    let mut early: alloc::vec::Vec<i32> = (1..7).collect();
+    {
+        let mut it = early.extract_if(.., |x| *x % 2 == 0);
+        let first = it.next();
+        run.check(first == Some(2), "vec extract_if early drop", 0);
+    }
+    run.check(early == [1, 3, 4, 5, 6], "vec extract_if early drop", 1);
+
+    // No element dropped twice or leaked.
+    struct Counted<'a>(u32, &'a core::cell::Cell<u32>);
+    impl Drop for Counted<'_> {
+        fn drop(&mut self) { self.1.set(self.1.get() + 1); }
+    }
+    let drops = core::cell::Cell::new(0u32);
+    let mut c: alloc::vec::Vec<Counted<'_>> = alloc::vec::Vec::new();
+    let mut i = 0u32;
+    while i < 8 {
+        c.push(Counted(i, &drops));
+        i += 1;
+    }
+    {
+        let mut it = c.extract_if(.., |x| x.0 % 3 == 0);
+        let a = it.next();
+        let b = it.next();
+        run.check(
+            a.as_ref().map(|x| x.0) == Some(0) && b.as_ref().map(|x| x.0) == Some(3) && drops.get() == 0,
+            "vec extract_if drops",
+            0,
+        );
+        drop(a);
+        drop(b);
+    }
+    run.check(
+        drops.get() == 2 && c.len() == 6 && c.iter().map(|x| x.0).eq([1u32, 2, 4, 5, 6, 7].iter().copied()),
+        "vec extract_if drops",
+        1,
+    );
+    drop(c);
+    run.check(drops.get() == 8, "vec extract_if drops", 2);
+
+    // pop_if takes the last element only when the predicate holds.
+    let mut p: alloc::vec::Vec<i32> = alloc::vec::Vec::from([1, 9]);
+    run.check(p.pop_if(|x| *x > 5) == Some(9) && p == [1], "vec pop_if", 0);
+    run.check(p.pop_if(|x| *x > 5).is_none() && p == [1], "vec pop_if", 1);
+    let mut none: alloc::vec::Vec<i32> = alloc::vec::Vec::new();
+    run.check(none.pop_if(|_| true).is_none(), "vec pop_if", 2);
+
+    // into_flattened reuses the allocation.
+    let flat = alloc::vec::Vec::from([[1, 2], [3, 4]]).into_flattened();
+    run.check(flat == [1, 2, 3, 4] && flat.capacity() == 4, "vec into_flattened", 0);
+
+    // IntoIter: clone of the remaining elements, as_mut_slice, Debug, Default.
+    let mut it = alloc::vec::Vec::from([1, 2, 3]).into_iter();
+    let first = it.next();
+    let copy: alloc::vec::Vec<i32> = it.clone().collect();
+    run.check(first == Some(1) && copy == [2, 3], "vec IntoIter clone", 0);
+    it.as_mut_slice()[0] = 9;
+    run.check(it.as_slice().iter().eq([9, 3].iter()), "vec IntoIter as_mut_slice", 0);
+    run.check(it.next() == Some(9) && it.next() == Some(3) && it.next().is_none(), "vec IntoIter as_mut_slice", 1);
+    let mut text = alloc::string::String::new();
+    let shown = core::fmt::Write::write_fmt(&mut text, format_args!("{:?}", alloc::vec::Vec::from([1, 2]).into_iter()));
+    run.check(shown.is_ok() && text.as_str() == "IntoIter([1, 2])", "vec IntoIter debug", 0);
+    let empty: alloc::vec::IntoIter<i32> = Default::default();
+    run.check(empty.len() == 0, "vec IntoIter default", 0);
+
+    // From<&mut [T]>, From<&[T; N]>, From<&mut [T; N]>.
+    let mut arr = [1, 2];
+    run.check(alloc::vec::Vec::<i32>::from(&mut arr[..]) == [1, 2], "vec from slices", 0);
+    run.check(alloc::vec::Vec::<i32>::from(&[1, 2]) == [1, 2], "vec from slices", 1);
+    run.check(alloc::vec::Vec::<i32>::from(&mut arr) == [1, 2], "vec from slices", 2);
+
+    // String::shrink_to.
+    let mut st = alloc::string::String::with_capacity(16);
+    st.push_str("ab");
+    st.shrink_to(4);
+    run.check(st.capacity() == 4 && st.as_str() == "ab", "string shrink_to", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -977,6 +1107,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    vecs_api(&mut run);
     btrees_api(&mut run);
     strings_api(&mut run);
     vecdeques(&mut run);
