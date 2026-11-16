@@ -558,6 +558,12 @@ pub fn repeat_n<T: Clone>(element: T, count: usize) -> RepeatN<T> {
     RepeatN { element, count }
 }
 
+impl<T, E> IntoIterator for Result<T, E> {
+    type Item = T;
+    type IntoIter = Once<T>;
+    fn into_iter(self) -> Once<T> { Once { inner: self.ok() } }
+}
+
 impl<T> IntoIterator for Option<T> {
     type Item = T;
     type IntoIter = Once<T>;

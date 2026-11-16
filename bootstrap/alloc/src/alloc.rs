@@ -1,4 +1,4 @@
-pub use core::alloc::{Layout, LayoutError};
+pub use core::alloc::{GlobalAlloc, Layout, LayoutError};
 
 // The `global_allocator` expansion defines these under the compiler's internal symbol mangling, so they are
 // declared the same way.

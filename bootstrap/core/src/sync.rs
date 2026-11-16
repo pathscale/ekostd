@@ -58,6 +58,7 @@ macro_rules! atomic_int { ($name:ident,$t:ty) => {
     #[repr(transparent)] pub struct $name(UnsafeCell<$t>); unsafe impl Sync for $name {}
     impl $name {
         pub const fn new(v:$t)->Self{Self(UnsafeCell::new(v))}
+        pub const fn as_ptr(&self)->*mut $t{self.0.get()}
         pub fn load(&self,o:Ordering)->$t{match o{Ordering::Relaxed=>load!(self.0.get(),$t,Relaxed),Ordering::Acquire=>load!(self.0.get(),$t,Acquire),Ordering::SeqCst=>load!(self.0.get(),$t,SeqCst),_=>panic!("invalid load ordering")}}
         pub fn store(&self,v:$t,o:Ordering){match o{Ordering::Relaxed=>store!(self.0.get(),v,$t,Relaxed),Ordering::Release=>store!(self.0.get(),v,$t,Release),Ordering::SeqCst=>store!(self.0.get(),v,$t,SeqCst),_=>panic!("invalid store ordering")}}
         pub fn swap(&self,v:$t,o:Ordering)->$t{match o{Ordering::Relaxed=>xchg!(self.0.get(),v,$t,Relaxed),Ordering::Release=>xchg!(self.0.get(),v,$t,Release),Ordering::Acquire=>xchg!(self.0.get(),v,$t,Acquire),Ordering::AcqRel=>xchg!(self.0.get(),v,$t,AcqRel),Ordering::SeqCst=>xchg!(self.0.get(),v,$t,SeqCst)}}

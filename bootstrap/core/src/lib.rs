@@ -48,6 +48,7 @@ pub mod slice;
 pub mod str;
 pub mod sync;
 pub mod time;
+mod unicode;
 
 pub mod task {
     #[lang = "Poll"]

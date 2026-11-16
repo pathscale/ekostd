@@ -77,3 +77,134 @@ impl char {
             '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}')
     }
 }
+
+/// The escape of one character as `char::escape_debug` writes it: at most `\u{10ffff}`, eleven characters.
+#[derive(Clone, Debug)]
+pub struct EscapeDebug { buf: [char; 11], pos: usize, len: usize }
+
+impl EscapeDebug {
+    fn one(c: char) -> Self { let mut buf = ['\0'; 11]; buf[0] = c; EscapeDebug { buf, pos: 0, len: 1 } }
+    fn backslash(c: char) -> Self { let mut buf = ['\0'; 11]; buf[0] = '\\'; buf[1] = c; EscapeDebug { buf, pos: 0, len: 2 } }
+    fn unicode(c: char) -> Self {
+        let mut buf = ['\0'; 11];
+        buf[0] = '\\'; buf[1] = 'u'; buf[2] = '{';
+        let value = c as u32;
+        let mut digits = 1;
+        while digits < 6 && (value >> (4 * digits)) != 0 { digits += 1; }
+        let mut len = 3;
+        let mut shift = digits;
+        while shift > 0 {
+            shift -= 1;
+            let d = (value >> (4 * shift)) & 0xf;
+            buf[len] = if d < 10 { (b'0' + d as u8) as char } else { (b'a' + d as u8 - 10) as char };
+            len += 1;
+        }
+        buf[len] = '}';
+        EscapeDebug { buf, pos: 0, len: len + 1 }
+    }
+}
+
+impl crate::iter::Iterator for EscapeDebug {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len { return None; }
+        let c = self.buf[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = self.len - self.pos; (n, Some(n)) }
+}
+impl crate::iter::ExactSizeIterator for EscapeDebug {}
+
+impl crate::fmt::Display for EscapeDebug {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut i = self.pos;
+        while i < self.len { f.write_char(self.buf[i])?; i += 1; }
+        Ok(())
+    }
+}
+
+impl char {
+    /// `Co`: the set never changes, so it is written out as Rust does.
+    const fn is_private_use(self) -> bool {
+        matches!(self, '\u{E000}'..='\u{F8FF}' | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}')
+    }
+
+    fn is_assigned(self) -> bool {
+        match self {
+            '\0'..='\u{377}' => true,
+            '\u{378}'..='\u{3FFFD}' => !crate::unicode::cn_planes_0_3::lookup(self),
+            '\u{E0001}' | '\u{E0020}'..='\u{E007F}' | '\u{E0100}'..='\u{E01EF}'
+            | '\u{F0000}'..='\u{FFFFD}' | '\u{100000}'..='\u{10FFFD}' => true,
+            _ => false,
+        }
+    }
+
+    /// The Rust algorithm (`char::escape_debug_ext` with every quote escaped), over the Rust tables.
+    pub fn escape_debug(self) -> EscapeDebug {
+        match self {
+            '"' => EscapeDebug::backslash('"'),
+            '\'' => EscapeDebug::backslash('\''),
+            '\\' => EscapeDebug::backslash('\\'),
+            '\n' => EscapeDebug::backslash('n'),
+            '\t' => EscapeDebug::backslash('t'),
+            '\r' => EscapeDebug::backslash('r'),
+            '\0' => EscapeDebug::backslash('0'),
+            // ASCII fast path, plus the two halfwidth katakana marks, which are grapheme extenders that
+            // are not escaped.
+            '\x20'..='\x7E' | '\u{FF9E}' | '\u{FF9F}' => EscapeDebug::one(self),
+            _ if self.is_control()
+                || self.is_private_use()
+                || self.is_whitespace()
+                || (self > '\u{02FF}' && crate::unicode::grapheme_extend::lookup(self))
+                || (self > '\u{AC}' && crate::unicode::default_ignorable_code_point::lookup(self))
+                || (self > '\u{AC}' && crate::unicode::cf::lookup(self))
+                || !self.is_assigned() => EscapeDebug::unicode(self),
+            _ => EscapeDebug::one(self),
+        }
+    }
+}
+
+/// The uppercase mapping of one character: one, two or three characters.
+#[derive(Clone, Debug)]
+pub struct ToUppercase { chars: [char; 3], pos: usize, len: usize }
+
+impl crate::iter::Iterator for ToUppercase {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len { return None; }
+        let c = self.chars[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = self.len - self.pos; (n, Some(n)) }
+}
+impl crate::iter::ExactSizeIterator for ToUppercase {}
+
+impl crate::fmt::Display for ToUppercase {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut i = self.pos;
+        while i < self.len { f.write_char(self.chars[i])?; i += 1; }
+        Ok(())
+    }
+}
+
+impl char {
+    /// The Rust table (`unicode_data::conversions::to_upper`), including the multi-character mappings.
+    pub fn to_uppercase(self) -> ToUppercase {
+        let [a, b, c] = crate::unicode::conversions::to_upper(self);
+        let len = if b == '\0' { 1 } else if c == '\0' { 2 } else { 3 };
+        ToUppercase { chars: [a, b, c], pos: 0, len }
+    }
+
+    /// Whether the character is a digit in the given radix (2 to 36); panics for another radix, as `to_digit`.
+    pub const fn is_digit(self, radix: u32) -> bool {
+        match self.to_digit(radix) { Some(_) => true, None => false }
+    }
+}
+
+impl char {
+    pub const fn to_ascii_uppercase(&self) -> char {
+        if *self >= 'a' && *self <= 'z' { ((*self as u8) - 32) as char } else { *self }
+    }
+}

@@ -310,6 +310,16 @@ impl str {
         rest
     }
 
+    /// What is left after removing every match from the start.
+    pub fn trim_start_matches<P: Pattern>(&self, mut pat: P) -> &str {
+        let mut rest = self;
+        while let Some(len) = pat.prefix_len(rest) {
+            if len == 0 { break; }
+            rest = &rest[len..];
+        }
+        rest
+    }
+
     /// What is left after removing every match from the end.
     pub fn trim_end_matches<P: Pattern>(&self, mut pat: P) -> &str {
         let mut rest = self;

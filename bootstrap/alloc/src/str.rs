@@ -5,6 +5,16 @@ pub fn into_boxed_str(s: crate::string::String) -> crate::boxed::Box<str> {
 }
 
 impl str {
+    /// A copy with every character replaced by its uppercase mapping (Unicode `Changes_When_Uppercased`, no context).
+    #[rustc_allow_incoherent_impl]
+    pub fn to_uppercase(&self) -> crate::string::String {
+        let mut out = crate::string::String::with_capacity(self.len());
+        for c in self.chars() {
+            out.extend(c.to_uppercase());
+        }
+        out
+    }
+
     /// A copy with the ASCII capitals made lower case; other characters are unchanged.
     #[rustc_allow_incoherent_impl]
     pub fn to_ascii_lowercase(&self) -> crate::string::String {

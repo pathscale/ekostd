@@ -80,6 +80,11 @@ impl<T> Cell<T> {
     }
 }
 
+impl<T: ?Sized> Cell<T> {
+    #[inline]
+    pub const fn as_ptr(&self) -> *mut T { self.value.get() }
+}
+
 impl<T: Copy> Cell<T> {
     #[inline]
     pub fn get(&self) -> T {

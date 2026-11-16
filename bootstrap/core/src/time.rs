@@ -39,6 +39,55 @@ impl Duration {
         Self { secs: total_secs, nanos: total_nanos }
     }
     pub const fn from_secs(secs: u64) -> Self { Self { secs, nanos: 0 } }
+    /// Rust's algorithm (`try_from_secs!` for `f64`): exact, rounding to the nearest nanosecond, ties to even.
+    /// Panics for a negative, too large or non-finite value, with Rust's messages.
+    pub fn from_secs_f64(secs: f64) -> Self {
+        const MIN_EXP: i16 = 1 - (1i16 << 11) / 2;
+        const MANT_MASK: u64 = (1 << 52) - 1;
+        const EXP_MASK: u64 = (1 << 11) - 1;
+        const NANOS_PER_SEC: u32 = 1_000_000_000;
+        if secs < 0.0 { panic!("cannot convert float seconds to Duration: value is negative"); }
+        let bits = secs.to_bits();
+        let mant = (bits & MANT_MASK) | (MANT_MASK + 1);
+        let exp = ((bits >> 52) & EXP_MASK) as i16 + MIN_EXP;
+        let (secs, nanos) = if exp < -31 {
+            (0u64, 0u32)
+        } else if exp < 0 {
+            let t = (mant as u128) << (44 + exp);
+            let nanos_offset = 52 + 44;
+            let nanos_tmp = (NANOS_PER_SEC as u128) * t;
+            let nanos = (nanos_tmp >> nanos_offset) as u32;
+            let rem_mask = (1u128 << nanos_offset) - 1;
+            let rem_msb_mask = 1u128 << (nanos_offset - 1);
+            let rem = nanos_tmp & rem_mask;
+            let is_tie = rem == rem_msb_mask;
+            let is_even = (nanos & 1) == 0;
+            let rem_msb = nanos_tmp & rem_msb_mask == 0;
+            let add_ns = !(rem_msb || (is_even && is_tie));
+            let nanos = nanos + add_ns as u32;
+            if nanos != NANOS_PER_SEC { (0, nanos) } else { (1, 0) }
+        } else if exp < 52 {
+            let secs = mant >> (52 - exp);
+            let t = ((mant << exp) & MANT_MASK) as u128;
+            let nanos_offset = 52;
+            let nanos_tmp = (NANOS_PER_SEC as u128) * t;
+            let nanos = (nanos_tmp >> nanos_offset) as u32;
+            let rem_mask = (1u128 << nanos_offset) - 1;
+            let rem_msb_mask = 1u128 << (nanos_offset - 1);
+            let rem = nanos_tmp & rem_mask;
+            let is_tie = rem == rem_msb_mask;
+            let is_even = (nanos & 1) == 0;
+            let rem_msb = nanos_tmp & rem_msb_mask == 0;
+            let add_ns = !(rem_msb || (is_even && is_tie));
+            let nanos = nanos + add_ns as u32;
+            if nanos != NANOS_PER_SEC { (secs, nanos) } else { (secs + 1, 0) }
+        } else if exp < 64 {
+            (mant << (exp - 52), 0)
+        } else {
+            panic!("cannot convert float seconds to Duration: value is either too big or NaN");
+        };
+        Duration::new(secs, nanos)
+    }
     pub const fn from_millis(millis: u64) -> Self {
         Self { secs: millis / 1_000, nanos: ((millis % 1_000) * 1_000_000) as u32 }
     }

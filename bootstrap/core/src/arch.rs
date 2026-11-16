@@ -245,11 +245,37 @@ pub mod aarch64 {
             src.0[2 * k].wrapping_add(src.0[2 * k + 1])
         })
     }
-    pub unsafe fn vextq_u8(a: uint8x16_t, b: uint8x16_t, n: i32) -> uint8x16_t {
+    /// `N` is the lane of `a` the result starts at, 0 to 15, as the instruction's immediate.
+    pub unsafe fn vextq_u8<const N: i32>(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
         lanes!(16, uint8x16_t, |i| {
-            let k = (n as usize) + i;
+            let k = (N as usize) + i;
             if k < 16 { a.0[k] } else { b.0[k - 16] }
         })
+    }
+    pub unsafe fn vsubq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| a.0[i].wrapping_sub(b.0[i]))
+    }
+    pub unsafe fn vcleq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| if a.0[i] <= b.0[i] { 0xff } else { 0 })
+    }
+    /// `a & !b`.
+    pub unsafe fn vbicq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| a.0[i] & !b.0[i])
+    }
+    /// The 64-bit polynomial lane and its 128-bit product, as in `core::arch::aarch64`.
+    pub type p64 = u64;
+    pub type p128 = u128;
+    pub type poly64_t = u64;
+    pub type poly128_t = u128;
+    /// Carry-less (GF(2)) multiplication of two 64-bit polynomials.
+    pub fn vmull_p64(a: p64, b: p64) -> p128 {
+        let mut product: u128 = 0;
+        let mut bit = 0;
+        while bit < 64 {
+            if (b >> bit) & 1 != 0 { product ^= (a as u128) << bit; }
+            bit += 1;
+        }
+        product
     }
 
     // f32 NEON operations

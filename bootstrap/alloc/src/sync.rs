@@ -148,6 +148,12 @@ impl<T: ?Sized> Arc<T> {
         Self::as_ptr(&*this)
     }
 
+    /// Adds one strong reference to the allocation `ptr` came from (`Arc::into_raw`).
+    pub unsafe fn increment_strong_count(ptr: *const T) {
+        let arc = ManuallyDrop::new(unsafe { Self::from_raw(ptr) });
+        let _extra = ManuallyDrop::new(Self::clone(&arc));
+    }
+
     pub unsafe fn from_raw(ptr: *const T) -> Self {
         let offset = unsafe { data_offset_for_ptr(ptr) };
         let byte_ptr = (ptr as *const u8).wrapping_sub(offset);

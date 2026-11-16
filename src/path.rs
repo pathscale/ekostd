@@ -477,44 +477,6 @@ impl fmt::Debug for Display<'_> {
     }
 }
 
-// `serde` is behind a feature so the wrapper does not force it on a crate that has no serialiser.
-// `rustc_errors`'s `--error-format=json` emits an artifact path, and a JSON consumer wants text,
-// so this serialises lossily rather than as a byte array - which is what `std::path::Path`'s own
-// `Serialize` does, and what the existing output already looked like.
-#[cfg(feature = "serde")]
-impl serde::Serialize for Path {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.to_string_lossy())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl serde::Serialize for PathBuf {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.as_path().serialize(s)
-    }
-}
-
-// The other direction, from the text `Serialize` writes. `std::path::PathBuf` has it too.
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for PathBuf {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<PathBuf, D::Error> {
-        // A visitor rather than `String::deserialize`: that impl needs serde's `alloc` feature,
-        // which this wrapper does not turn on.
-        struct Text;
-        impl<'de> serde::de::Visitor<'de> for Text {
-            type Value = PathBuf;
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a path as text")
-            }
-            fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<PathBuf, E> {
-                Ok(PathBuf::from(text))
-            }
-        }
-        d.deserialize_str(Text)
-    }
-}
-
 /// The prefix did not match. Carries nothing, because there is nothing else to say.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct StripPrefixError;
