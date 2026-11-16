@@ -525,6 +525,62 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "[a\\'b\\\"\\n]", "[{}]", "a'b\"\n".escape_debug());
         check!(r, "[\\u{301}x\u{301}]", "[{}]", "\u{301}x\u{301}".escape_debug());
     }
+    { // lw4-b: str API rsplit_terminator, split_at_checked/split_at_mut, from_utf8_mut, make_ascii_*, floor/ceil_char_boundary, encode_utf16
+        fn join<'a, I: Iterator<Item = &'a str>>(it: I) -> Buf {
+            let mut b = Buf::new();
+            let mut first = true;
+            for piece in it {
+                if !first { let _ = b.write_str("|"); }
+                first = false;
+                let _ = b.write_str(piece);
+            }
+            b
+        }
+        let j = join("A.B.".rsplit_terminator('.'));
+        check!(r, "B|A", "{}", j.as_str());
+        let j = join("A..B..".rsplit_terminator("."));
+        check!(r, "|B||A", "{}", j.as_str());
+        let j = join("x".rsplit_terminator(','));
+        check!(r, "x", "{}", j.as_str());
+        check!(r, "0", "{}", "".rsplit_terminator('.').count());
+        check!(r, "None", "{:?}", "héllo".split_at_checked(2));
+        check!(r, "Some((\"hé\", \"llo\"))", "{:?}", "héllo".split_at_checked(3));
+        check!(r, "None", "{:?}", "héllo".split_at_checked(9));
+        let mut a = *b"Hello";
+        match core::str::from_utf8_mut(&mut a) {
+            Ok(s) => { s.make_ascii_lowercase(); check!(r, "hello", "{}", s); }
+            Err(_) => check!(r, "hello", "{}", "<invalid UTF-8>"),
+        }
+        let mut e = [b'h', 0xc3, 0xa9, b'l', b'l', b'o'];
+        match core::str::from_utf8_mut(&mut e) {
+            Ok(s) => { s.make_ascii_uppercase(); check!(r, "HéLLO", "{}", s); }
+            Err(_) => check!(r, "HéLLO", "{}", "<invalid UTF-8>"),
+        }
+        let mut c = *b"hello";
+        match core::str::from_utf8_mut(&mut c) {
+            Ok(s) => {
+                let (left, _) = s.split_at_mut(2);
+                left.make_ascii_uppercase();
+                check!(r, "HEllo", "{}", s);
+            }
+            Err(_) => check!(r, "HEllo", "{}", "<invalid UTF-8>"),
+        }
+        check!(r, "true", "{}", core::str::from_utf8_mut(&mut [0xffu8]).is_err());
+        check!(r, "1", "{}", "héllo".floor_char_boundary(2));
+        check!(r, "3", "{}", "héllo".ceil_char_boundary(2));
+        check!(r, "6", "{}", "héllo".floor_char_boundary(99));
+        check!(r, "6", "{}", "héllo".ceil_char_boundary(99));
+        check!(r, "0", "{}", "héllo".ceil_char_boundary(0));
+        let mut h = Buf::new();
+        let mut first = true;
+        for u in "a\u{1D11E}".encode_utf16() {
+            if !first { let _ = h.write_str(" "); }
+            first = false;
+            let _ = write!(h, "{:x}", u);
+        }
+        check!(r, "61 d834 dd1e", "{}", h.as_str());
+        check!(r, "3", "{}", "a\u{1D11E}".encode_utf16().count());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
