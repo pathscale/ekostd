@@ -208,6 +208,18 @@ scalar_bit_assign_ops!(bool, u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, 
 scalar_shift_ops!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
 scalar_neg_ops!(i8, i16, i32, i64, i128, isize, f32, f64);
 
+/// Negation of a reference to a signed integer or a float: reads the value and negates it.
+macro_rules! scalar_ref_neg_ops {
+    ($($ty:ty),* $(,)?) => { $(
+        impl Neg for &$ty {
+            type Output = $ty;
+            #[inline]
+            fn neg(self) -> $ty { Neg::neg(*self) }
+        }
+    )* };
+}
+scalar_ref_neg_ops!(i8, i16, i32, i64, i128, isize, f32, f64);
+
 /// Shifts take any integer type on the right, as in Rust: `x << 3u8`, `x >> n` with `n: usize`.
 macro_rules! mixed_shift_ops {
     ($lhs:ty: $($rhs:ty)*) => {$(
