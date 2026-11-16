@@ -1,0 +1,34 @@
+# Unit tests for the bootstrap core's formatting (`bootstrap/core/src/fmt.rs`): every formatting option against the
+# string Rust's own `core` produces, written in `src/main.rs` as literals.
+#
+# A test harness links std, so this is a `no_main` program on the empty sysroot, built like every stage0 unit:
+# core and compiler_builtins are the ekostd bootstrap crates, panic=abort, linked by the toolchain's rust-lld
+# (`.cargo/config.toml` here). Run it from this directory:
+#
+#   cargo run --release > core-fmt-tests.log 2>&1
+#
+# It prints one line per failed case and a count, and exits 0 only when every case passed.
+[workspace]
+
+[package]
+name = "core-fmt-tests"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "core-fmt-tests"
+path = "src/main.rs"
+test = false
+doctest = false
+
+[dependencies]
+core = { package = "eko-core", path = "../../bootstrap/core" }
+compiler_builtins = { package = "eko-compiler-builtins", path = "../../bootstrap/compiler_builtins" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

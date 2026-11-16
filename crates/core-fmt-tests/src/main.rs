@@ -1,0 +1,284 @@
+//! Unit tests for `core::fmt` of the ekostd bootstrap core: every formatting option against the string Rust's own
+//! `core` produces, written here as a literal.
+//!
+//! A test harness links std, so this is a plain `no_main` program built on the empty sysroot: it formats each case
+//! into a fixed buffer, compares, prints one line per failure and a count, and exits 0 only when every case passed.
+#![no_std]
+#![no_main]
+
+use core::fmt::{self, Debug, Formatter, Write};
+
+unsafe extern "C" {
+    fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+    fn abort() -> !;
+}
+
+fn out(text: &str) {
+    let mut done = 0;
+    while done < text.len() {
+        let n = unsafe { write(1, text.as_ptr().add(done), text.len() - done) };
+        if n <= 0 { return; }
+        done += n as usize;
+    }
+}
+
+#[panic_handler]
+fn panic(_: &core::panic::PanicInfo<'_>) -> ! {
+    out("core-fmt-tests: panicked\n");
+    unsafe { abort() }
+}
+
+/// Formatting target with a fixed capacity; running out of room is a formatting error, not a truncation.
+struct Buf { bytes: [u8; 512], len: usize }
+impl Buf {
+    fn new() -> Self { Buf { bytes: [0; 512], len: 0 } }
+    fn as_str(&self) -> &str {
+        match core::str::from_utf8(&self.bytes[..self.len]) { Ok(s) => s, Err(_) => "<invalid UTF-8>" }
+    }
+}
+impl Write for Buf {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let b = s.as_bytes();
+        if b.len() > self.bytes.len() - self.len { return Err(fmt::Error); }
+        let mut i = 0;
+        while i < b.len() { self.bytes[self.len + i] = b[i]; i += 1; }
+        self.len += b.len();
+        Ok(())
+    }
+}
+
+struct Run { passed: u32, failed: u32 }
+impl Run {
+    fn check(&mut self, line: u32, want: &str, args: fmt::Arguments<'_>) {
+        let mut buf = Buf::new();
+        let result = buf.write_fmt(args);
+        if result.is_ok() && buf.as_str() == want {
+            self.passed += 1;
+            return;
+        }
+        self.failed += 1;
+        let mut msg = Buf::new();
+        let _ = write!(msg, "FAIL line {}: want {:?} got {:?}{}\n", line, want, buf.as_str(),
+            if result.is_err() { " (fmt::Error)" } else { "" });
+        out(msg.as_str());
+    }
+}
+
+macro_rules! check {
+    ($run:expr, $want:expr, $($arg:tt)+) => { $run.check(line!(), $want, format_args!($($arg)+)) };
+}
+
+#[derive(Debug)]
+struct Point { x: i32, y: i32 }
+#[derive(Debug)]
+struct Unit;
+#[derive(Debug)]
+struct Pair(i32, &'static str);
+
+/// Builder output other than what derive produces: maps, sets and the non-exhaustive forms.
+enum Built { Map, MapNested, Set, SetRest, ListRest, ListRestEmpty, StructRest, StructRestEmpty, TupleRest, TupleRestEmpty, MapRest }
+impl Debug for Built {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Built::Map => f.debug_map().entry(&1, &"a").entry(&2, &"b").finish(),
+            Built::MapNested => f.debug_map().entry(&"k", &[1, 2]).finish(),
+            Built::Set => f.debug_set().entry(&1).entry(&2).finish(),
+            Built::SetRest => f.debug_set().entry(&1).finish_non_exhaustive(),
+            Built::ListRest => f.debug_list().entry(&1).entry(&2).finish_non_exhaustive(),
+            Built::ListRestEmpty => f.debug_list().finish_non_exhaustive(),
+            Built::StructRest => f.debug_struct("S").field("a", &1).finish_non_exhaustive(),
+            Built::StructRestEmpty => f.debug_struct("S").finish_non_exhaustive(),
+            Built::TupleRest => f.debug_tuple("T").field(&1).finish_non_exhaustive(),
+            Built::TupleRestEmpty => f.debug_tuple("T").finish_non_exhaustive(),
+            Built::MapRest => f.debug_map().entry(&1, &2).finish_non_exhaustive(),
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
+    let mut r = Run { passed: 0, failed: 0 };
+
+    // Width and default alignment: numbers right, text left.
+    check!(r, "   42|", "{:5}|", 42);
+    check!(r, "ab   |", "{:5}|", "ab");
+    check!(r, "c    |", "{:5}|", 'c');
+    check!(r, "true  |", "{:6}|", true);
+    check!(r, "12345", "{:2}", 12345);
+    check!(r, "abcdef", "{:3}", "abcdef");
+    check!(r, "日本   |", "{:5}|", "日本");
+    // Alignment.
+    check!(r, "42   |", "{:<5}|", 42);
+    check!(r, " 42  |", "{:^5}|", 42);
+    check!(r, "   ab|", "{:>5}|", "ab");
+    check!(r, "  ab  |", "{:^6}|", "ab");
+    check!(r, "  ab   |", "{:^7}|", "ab");
+    check!(r, "    a|", "{:>5}|", 'a');
+    // Fill.
+    check!(r, "***mid***", "{:*^9}", "mid");
+    check!(r, "x-----", "{:-<6}", "x");
+    check!(r, "###7", "{:#>4}", 7);
+    check!(r, "éé1éé", "{:é^5}", 1);
+    check!(r, "__-3", "{:_>4}", -3);
+    // Width and precision from arguments.
+    check!(r, "   7", "{:1$}", 7, 4);
+    check!(r, "7   |", "{:<w$}|", 7, w = 4);
+    check!(r, "1.23", "{:.*}", 2, 1.23456);
+    check!(r, "3.1", "{:.p$}", 3.14159, p = 1);
+    check!(r, "  1.2", "{:w$.p$}", 1.23, w = 5, p = 1);
+    // Sign.
+    check!(r, "+5", "{:+}", 5);
+    check!(r, "-5", "{:+}", -5);
+    check!(r, "+0", "{:+}", 0);
+    check!(r, "   +5", "{:+5}", 5);
+    check!(r, "+1.50", "{:+.2}", 1.5);
+    check!(r, "+1.5", "{:+}", 1.5);
+    check!(r, "-9223372036854775808", "{}", i64::MIN);
+    check!(r, "340282366920938463463374607431768211455", "{}", u128::MAX);
+    check!(r, "-128", "{}", i8::MIN);
+    // Sign-aware zero padding: after the sign and prefix, alignment and fill ignored.
+    check!(r, "00042", "{:05}", 42);
+    check!(r, "-0042", "{:05}", -42);
+    check!(r, "+0042", "{:+05}", 42);
+    check!(r, "00042", "{:<05}", 42);
+    check!(r, "0x00ff", "{:#06x}", 255);
+    check!(r, "0b00000101", "{:#010b}", 5);
+    check!(r, "-001.500", "{:08.3}", -1.5);
+    check!(r, "-001.5", "{:06}", -1.5);
+    check!(r, "ab   ", "{:05}", "ab");
+    // Radix and the `#` prefix.
+    check!(r, "ff", "{:x}", 255);
+    check!(r, "FF", "{:X}", 255);
+    check!(r, "0xff", "{:#x}", 255);
+    check!(r, "0xFF", "{:#X}", 255);
+    check!(r, "101", "{:b}", 5);
+    check!(r, "0b101", "{:#b}", 5);
+    check!(r, "10", "{:o}", 8);
+    check!(r, "0o10", "{:#o}", 8);
+    check!(r, "ff", "{:x}", -1i8);
+    check!(r, "ffffffff", "{:x}", -1i32);
+    check!(r, "BEE", "{:X}", 3054);
+    check!(r, "        ff|", "{:10x}|", 255);
+    check!(r, "0xff    |", "{:<#8x}|", 255);
+    check!(r, "  0xff  |", "{:^#8x}|", 255);
+    // Debug with hex flags.
+    check!(r, "ff", "{:x?}", 255);
+    check!(r, "FF", "{:X?}", 255);
+    check!(r, "0xff", "{:#x?}", 255);
+    check!(r, "[a, ff]", "{:x?}", [10, 255]);
+    check!(r, "   42", "{:5?}", 42);
+    check!(r, "+1", "{:+?}", 1);
+    // Precision: text truncated by characters, then padded.
+    check!(r, "he", "{:.2}", "hello");
+    check!(r, "he   |", "{:5.2}|", "hello");
+    check!(r, "    a", "{:>5.1}", "abc");
+    check!(r, "日", "{:.1}", "日本");
+    check!(r, "hi", "{:.5}", "hi");
+    // Precision: floats, exact decimal value rounded half to even.
+    check!(r, "3.14", "{:.2}", 3.14159);
+    check!(r, "1.000", "{:.3}", 1.0);
+    check!(r, "2", "{:.0}", 2.5);
+    check!(r, "4", "{:.0}", 3.5);
+    check!(r, "0.2", "{:.1}", 0.25);
+    check!(r, "0.1000000000000000055511151231257827", "{:.34}", 0.1);
+    check!(r, "   3.142", "{:8.3}", 3.14159);
+    check!(r, "3.142   |", "{:<8.3}|", 3.14159);
+    check!(r, "-0.00", "{:.2}", -0.0);
+    check!(r, "1.50", "{:.2}", 1.5f32);
+    // Exponent forms.
+    check!(r, "1.2345e3", "{:e}", 1234.5);
+    check!(r, "1.23e3", "{:.2e}", 1234.5);
+    check!(r, "1.2E-4", "{:E}", 0.00012);
+    check!(r, "    1.23e3", "{:10.2e}", 1234.5);
+    check!(r, "1e0", "{:e}", 1.0);
+    check!(r, "1.000e2", "{:.3e}", 100.0);
+    // Floats without precision.
+    check!(r, "1.5", "{}", 1.5);
+    check!(r, "-2.25", "{}", -2.25);
+    check!(r, "100", "{}", 100.0);
+    check!(r, "1.0", "{:?}", 1.0);
+    check!(r, "-0", "{}", -0.0);
+    check!(r, "-0.0", "{:?}", -0.0);
+    check!(r, "  1.5", "{:5}", 1.5);
+    check!(r, "1.5   |", "{:<6}|", 1.5);
+    check!(r, "  inf", "{:5}", f64::INFINITY);
+    check!(r, "-inf", "{}", f64::NEG_INFINITY);
+    check!(r, "NaN", "{}", f64::NAN);
+    check!(r, "NaN", "{:+}", f64::NAN);
+    check!(r, "+inf", "{:+}", f64::INFINITY);
+    // Pointers: always 0x lower hex; `#` zero-extends to the pointer width.
+    let p = 0x1000 as *const u8;
+    check!(r, "0x1000", "{:p}", p);
+    check!(r, "0x0000000000001000", "{:#p}", p);
+    check!(r, "    0x1000", "{:10p}", p);
+    check!(r, "0x1000    |", "{:<10p}|", p);
+    check!(r, "0x00001000", "{:010p}", p);
+    check!(r, "0x1000", "{:?}", p);
+    // Debug of text: quoted and escaped, width does not apply.
+    check!(r, "\"a\\\"b\\n\"", "{:?}", "a\"b\n");
+    check!(r, "'\\''", "{:?}", '\'');
+    check!(r, "'\"'", "{:?}", '"');
+    check!(r, "\"tab\\t\"", "{:?}", "tab\t");
+    check!(r, "()", "{:?}", ());
+    // Debug of composites.
+    check!(r, "Some(1)", "{:?}", Some(1));
+    check!(r, "None", "{:?}", None::<i32>);
+    check!(r, "Ok(3)", "{:?}", Ok::<i32, ()>(3));
+    check!(r, "Err(\"e\")", "{:?}", Err::<(), &str>("e"));
+    check!(r, "(1,)", "{:?}", (1,));
+    check!(r, "(1, \"a\")", "{:?}", (1, "a"));
+    check!(r, "(1, 2, 3)", "{:?}", (1, 2, 3));
+    check!(r, "[1, 2]", "{:?}", [1, 2]);
+    check!(r, "[]", "{:?}", [0i32; 0]);
+    check!(r, "Point { x: 1, y: -2 }", "{:?}", Point { x: 1, y: -2 });
+    check!(r, "Unit", "{:?}", Unit);
+    check!(r, "Pair(1, \"a\")", "{:?}", Pair(1, "a"));
+    check!(r, "Some(  1)", "{:3?}", Some(1));
+    check!(r, "{1: \"a\", 2: \"b\"}", "{:?}", Built::Map);
+    check!(r, "{\"k\": [1, 2]}", "{:?}", Built::MapNested);
+    check!(r, "{1, 2}", "{:?}", Built::Set);
+    check!(r, "{1, ..}", "{:?}", Built::SetRest);
+    check!(r, "[1, 2, ..]", "{:?}", Built::ListRest);
+    check!(r, "[..]", "{:?}", Built::ListRestEmpty);
+    check!(r, "S { a: 1, .. }", "{:?}", Built::StructRest);
+    check!(r, "S { .. }", "{:?}", Built::StructRestEmpty);
+    check!(r, "T(1, ..)", "{:?}", Built::TupleRest);
+    check!(r, "T(..)", "{:?}", Built::TupleRestEmpty);
+    check!(r, "{1: 2, ..}", "{:?}", Built::MapRest);
+    // Pretty Debug (`{:#?}`): one field per line, indented four spaces per level, trailing commas.
+    check!(r, "Some(\n    1,\n)", "{:#?}", Some(1));
+    check!(r, "None", "{:#?}", None::<i32>);
+    check!(r, "Ok(\n    3,\n)", "{:#?}", Ok::<i32, ()>(3));
+    check!(r, "(\n    1,\n)", "{:#?}", (1,));
+    check!(r, "(\n    1,\n    \"a\",\n)", "{:#?}", (1, "a"));
+    check!(r, "[\n    1,\n    2,\n]", "{:#?}", [1, 2]);
+    check!(r, "[]", "{:#?}", [0i32; 0]);
+    check!(r, "Point {\n    x: 1,\n    y: -2,\n}", "{:#?}", Point { x: 1, y: -2 });
+    check!(r, "Unit", "{:#?}", Unit);
+    check!(r, "Pair(\n    1,\n    \"a\",\n)", "{:#?}", Pair(1, "a"));
+    check!(r, "Some(\n    [\n        1,\n        2,\n    ],\n)", "{:#?}", Some([1, 2]));
+    check!(r, "Some(\n    Point {\n        x: 1,\n        y: 2,\n    },\n)", "{:#?}", Some(Point { x: 1, y: 2 }));
+    check!(r, "Some(\n        1,\n)", "{:#5?}", Some(1));
+    check!(r, "Some(\n    0xff,\n)", "{:#x?}", Some(255));
+    check!(r, "Some(\n    \"a\\nb\",\n)", "{:#?}", Some("a\nb"));
+    check!(r, "{\n    1: \"a\",\n    2: \"b\",\n}", "{:#?}", Built::Map);
+    check!(r, "{\n    \"k\": [\n        1,\n        2,\n    ],\n}", "{:#?}", Built::MapNested);
+    check!(r, "{\n    1,\n    2,\n}", "{:#?}", Built::Set);
+    check!(r, "{\n    1,\n    ..\n}", "{:#?}", Built::SetRest);
+    check!(r, "[\n    1,\n    2,\n    ..\n]", "{:#?}", Built::ListRest);
+    check!(r, "[..]", "{:#?}", Built::ListRestEmpty);
+    check!(r, "S {\n    a: 1,\n    ..\n}", "{:#?}", Built::StructRest);
+    check!(r, "S { .. }", "{:#?}", Built::StructRestEmpty);
+    check!(r, "T(\n    1,\n    ..\n)", "{:#?}", Built::TupleRest);
+    check!(r, "T(..)", "{:#?}", Built::TupleRestEmpty);
+    check!(r, "{\n    1: 2,\n    ..\n}", "{:#?}", Built::MapRest);
+    // Arguments: positional and named reuse, escaped braces.
+    check!(r, "b a b", "{1} {0} {1}", "a", "b");
+    check!(r, "{x}", "{{x}}");
+    check!(r, "v=3 v=3", "v={v} v={v}", v = 3);
+
+    let mut summary = Buf::new();
+    let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
+    out(summary.as_str());
+    if r.failed == 0 { 0 } else { 1 }
+}
