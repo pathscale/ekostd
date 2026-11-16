@@ -1,3 +1,5 @@
+//@ mode: run
+//@ exit: 0
 //! Unit tests for the collections of the ekostd bootstrap `alloc` (`bootstrap/alloc/src/collections`): the B-tree
 //! `BTreeMap` and the `BTreeSet` over it, against a model that is one sorted `Vec` of pairs (binary search, insert,
 //! remove: correct by inspection), through long pseudo-random operation sequences that grow trees several levels

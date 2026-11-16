@@ -1,3 +1,5 @@
+//@ mode: run
+//@ exit: 0
 //! Unit tests for `core::fmt` of the ekostd bootstrap core: every formatting option against the string Rust's own
 //! `core` produces, written here as a literal.
 //!
