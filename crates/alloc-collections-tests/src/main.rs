@@ -803,6 +803,84 @@ fn vecdeques(run: &mut Run) {
     run.check(drops.get() == 100, "vecdeque drops", 0);
 }
 
+fn strings_api(run: &mut Run) {
+    fn shown_debug<T: core::fmt::Debug>(value: &T) -> alloc::string::String {
+        let mut text = alloc::string::String::new();
+        let _ = core::fmt::Write::write_fmt(&mut text, format_args!("{:?}", value));
+        text
+    }
+    fn shown<T: core::fmt::Display>(value: &T) -> alloc::string::String {
+        let mut text = alloc::string::String::new();
+        let _ = core::fmt::Write::write_fmt(&mut text, format_args!("{}", value));
+        text
+    }
+
+    let mut s = alloc::string::String::from("a,b;c");
+    s.retain(|c| c.is_alphabetic());
+    run.check(s == "abc", "string retain", 0);
+    let mut s = alloc::string::String::from("h\u{e9}llo");
+    let right = s.split_off(3);
+    run.check(s == "h\u{e9}" && right == "llo", "string split_off", 0);
+    let mut s = alloc::string::String::from("ab");
+    let right = s.split_off(2);
+    run.check(right.is_empty() && s == "ab", "string split_off at len", 0);
+
+    let mut s = alloc::string::String::from("hello");
+    unsafe { s.as_mut_str().as_bytes_mut()[0] = b'H'; }
+    run.check(s == "Hello", "string as_mut_str", 0);
+    let mut s = alloc::string::String::from("abc");
+    let r: &mut str = &mut s;
+    run.check(r.len() == 3, "string deref_mut", 0);
+
+    let mut s = alloc::string::String::new();
+    s.extend(["x", "y"]);
+    s.extend([alloc::string::String::from("z")]);
+    s.extend(['q'].iter());
+    s.extend([alloc::borrow::Cow::Borrowed("w")]);
+    run.check(s == "xyzqw", "string extend str/String/&char/Cow", 0);
+
+    run.check(alloc::string::String::from('c') == "c", "string from char", 0);
+    run.check(alloc::string::String::from(alloc::boxed::Box::<str>::from("bx")) == "bx", "string from Box<str>", 0);
+    run.check(alloc::string::String::from(alloc::borrow::Cow::Borrowed("cw")) == "cw", "string from Cow", 0);
+    let parsed = match "x".parse::<alloc::string::String>() {
+        Ok(text) => text == "x",
+        Err(_) => false,
+    };
+    run.check(parsed, "string from_str", 0);
+
+    match alloc::string::String::from_utf8(alloc::vec![0xff]) {
+        Ok(_) => run.check(false, "from_utf8 error", 0),
+        Err(error) => {
+            run.check(
+                shown_debug(&error) == "FromUtf8Error { bytes: [255], error: Utf8Error { valid_up_to: 0, error_len: Some(1) } }",
+                "from_utf8 error debug",
+                0,
+            );
+            run.check(shown(&error) == shown(&error.utf8_error()), "from_utf8 error display", 0);
+        }
+    }
+
+    let decoded = match alloc::string::String::from_utf16(&[0xD834, 0xDD1E, 0x61]) {
+        Ok(text) => text == "\u{1D11E}a",
+        Err(_) => false,
+    };
+    run.check(decoded, "string from_utf16", 0);
+    match alloc::string::String::from_utf16(&[0xD800]) {
+        Ok(_) => run.check(false, "from_utf16 lone surrogate", 0),
+        Err(error) => run.check(shown(&error) == "invalid utf-16: lone surrogate found", "from_utf16 lone surrogate", 0),
+    }
+    run.check(alloc::string::String::from_utf16_lossy(&[0x61, 0xD800, 0x62]) == "a\u{FFFD}b", "string from_utf16_lossy", 0);
+
+    let leaked: &mut str = alloc::string::String::from("k").leak();
+    run.check(&*leaked == "k" && leaked.len() == 1, "string leak", 0);
+    run.check(alloc::string::String::from("a") == alloc::borrow::Cow::Borrowed("a"), "string eq Cow", 0);
+
+    let mut s = alloc::string::String::with_capacity(64);
+    s.push_str("ab");
+    s.shrink_to_fit();
+    run.check(s.capacity() == 2 && s == "ab", "string shrink_to_fit", 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -812,6 +890,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    strings_api(&mut run);
     vecdeques(&mut run);
     arc_layouts(&mut run);
     heaps(&mut run);
