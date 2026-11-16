@@ -8,6 +8,7 @@ use crate::result::Result::{self, Err, Ok};
 use crate::slice::{self, SliceIndex};
 
 pub mod pattern;
+mod dec2flt;
 use self::pattern::Pattern;
 
 pub struct Utf8Error {
@@ -693,16 +694,13 @@ pub use crate::num::ParseFloatError;
 impl FromStr for f32 {
     type Err = ParseFloatError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match crate::num::parse_f64(s) {
-            Ok(v) => Ok(v as f32),
-            Err(e) => Err(e),
-        }
+        dec2flt::parse_f32(s)
     }
 }
 impl FromStr for f64 {
     type Err = ParseFloatError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        crate::num::parse_f64(s)
+        dec2flt::parse_f64(s)
     }
 }
 
