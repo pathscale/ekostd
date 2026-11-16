@@ -295,6 +295,14 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     check!(r, "b a b", "{1} {0} {1}", "a", "b");
     check!(r, "{x}", "{{x}}");
     check!(r, "v=3 v=3", "v={v} v={v}", v = 3);
+    check!(r, "'\\u{80}'", "{:?}", '\u{80}');
+    check!(r, "\"\\u{200b}\"", "{:?}", "\u{200b}");
+    check!(r, "\"\\u{301}\"", "{:?}", "\u{301}");
+    check!(r, "'\"'", "{:?}", '"');
+    check!(r, "\"'\"", "{:?}", "'");
+    check!(r, "'\\''", "{:?}", '\'');
+    check!(r, "\"\\u{7f}\"", "{:?}", "\u{7f}");
+    check!(r, "\"é\"", "{:?}", "é");
 
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);

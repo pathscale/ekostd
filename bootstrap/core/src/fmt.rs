@@ -454,21 +454,6 @@ fn digits(mut value: u128, radix: u128, upper: bool, bytes: &mut [u8; 128]) -> &
     let s = unsafe { crate::slice::from_raw_parts(bytes.as_ptr().add(start), 128 - start) };
     unsafe { crate::str::from_utf8_unchecked(s) }
 }
-fn escaped(c: char, quote: char, f: &mut Formatter<'_>) -> Result {
-    match c {
-        '\n' => f.write_str("\\n"), '\r' => f.write_str("\\r"),
-        '\t' => f.write_str("\\t"), '\0' => f.write_str("\\0"),
-        '\\' => f.write_str("\\\\"),
-        _ => {
-            if c == quote { attempt!(f.write_char('\\')); return f.write_char(c); }
-            if (c as u32) < 32 || (c as u32) == 127 {
-                attempt!(f.write_str("\\u{"));
-                attempt!(number(c as u128, 16, false, f));
-                f.write_str("}")
-            } else { f.write_char(c) }
-        }
-    }
-}
 impl Display for bool {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(if *self { "true" } else { "false" }) }
 }
@@ -482,7 +467,9 @@ impl Display for char {
 }
 impl Debug for char {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        attempt!(f.write_char('\'')); attempt!(escaped(*self, '\'', f)); f.write_char('\'')
+        attempt!(f.write_char('\''));
+        attempt!(Display::fmt(&self.escape_debug_ext(true, false), f));
+        f.write_char('\'')
     }
 }
 impl Display for str { fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(self) } }
@@ -500,7 +487,7 @@ impl Debug for str {
             let mut n = 0;
             while n < count { code = (code << 6) | (bytes[i] & 63) as u32; i += 1; n += 1; }
             let c = unsafe { crate::intrinsics::transmute::<u32, char>(code) };
-            attempt!(escaped(c, '"', f));
+            attempt!(Display::fmt(&c.escape_debug_ext(false, true), f));
         }
         f.write_char('"')
     }

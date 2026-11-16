@@ -141,10 +141,14 @@ impl char {
     }
 
     /// The Rust algorithm (`char::escape_debug_ext` with every quote escaped), over the Rust tables.
-    pub fn escape_debug(self) -> EscapeDebug {
+    pub fn escape_debug(self) -> EscapeDebug { self.escape_debug_ext(true, true) }
+
+    /// The Rust algorithm (`char::escape_debug_ext`): each quote is escaped only when its flag is set,
+    /// as `Debug for char` (single quote) and `Debug for str` (double quote) need.
+    pub(crate) fn escape_debug_ext(self, escape_single_quote: bool, escape_double_quote: bool) -> EscapeDebug {
         match self {
-            '"' => EscapeDebug::backslash('"'),
-            '\'' => EscapeDebug::backslash('\''),
+            '"' => if escape_double_quote { EscapeDebug::backslash('"') } else { EscapeDebug::one(self) },
+            '\'' => if escape_single_quote { EscapeDebug::backslash('\'') } else { EscapeDebug::one(self) },
             '\\' => EscapeDebug::backslash('\\'),
             '\n' => EscapeDebug::backslash('n'),
             '\t' => EscapeDebug::backslash('t'),
