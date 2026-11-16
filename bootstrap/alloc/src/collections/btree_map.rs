@@ -51,6 +51,14 @@ impl<K, V> BTreeMap<K, V> {
     pub fn keys(&self) -> Keys<'_, K, V> { self.entries.iter().map(map_key::<K, V>) }
     pub fn values(&self) -> Values<'_, K, V> { self.entries.iter().map(map_val::<K, V>) }
     pub fn values_mut(&mut self) -> ValuesMut<'_, K, V> { self.entries.iter_mut().map(map_val_mut::<K, V>) }
+    pub fn into_keys(self) -> core::iter::Map<crate::vec::IntoIter<(K, V)>, fn((K, V)) -> K> {
+        fn key<K, V>((k, _): (K, V)) -> K { k }
+        self.entries.into_iter().map(key::<K, V>)
+    }
+    pub fn into_values(self) -> core::iter::Map<crate::vec::IntoIter<(K, V)>, fn((K, V)) -> V> {
+        fn value<K, V>((_, v): (K, V)) -> V { v }
+        self.entries.into_iter().map(value::<K, V>)
+    }
     pub fn first_key_value(&self) -> Option<(&K, &V)> { self.entries.first().map(|(k, v)| (k, v)) }
     pub fn last_key_value(&self) -> Option<(&K, &V)> { self.entries.last().map(|(k, v)| (k, v)) }
     pub fn pop_first(&mut self) -> Option<(K, V)> { if self.is_empty() { None } else { Some(self.remove_at(0)) } }
@@ -98,6 +106,33 @@ impl<K: Ord, V> BTreeMap<K, V> {
             Ok(index) => Entry::Occupied(OccupiedEntry { map: self, index }),
             Err(index) => Entry::Vacant(VacantEntry { map: self, key, index }),
         }
+    }
+    fn range_bounds<T: ?Sized + Ord, R: core::ops::RangeBounds<T>>(&self, range: &R) -> (usize, usize) where K: Borrow<T> {
+        use core::ops::Bound::{Excluded, Included, Unbounded};
+        match (range.start_bound(), range.end_bound()) {
+            (Excluded(s), Excluded(e)) if s == e => panic!("range start and end are equal and excluded in BTreeMap"),
+            (Included(s) | Excluded(s), Included(e) | Excluded(e)) if s > e => panic!("range start is greater than range end in BTreeMap"),
+            _ => {}
+        }
+        let lo = match range.start_bound() {
+            Unbounded => 0,
+            Included(s) => self.entries.partition_point(|(k, _)| k.borrow() < s),
+            Excluded(s) => self.entries.partition_point(|(k, _)| k.borrow() <= s),
+        };
+        let hi = match range.end_bound() {
+            Unbounded => self.entries.len(),
+            Included(e) => self.entries.partition_point(|(k, _)| k.borrow() <= e),
+            Excluded(e) => self.entries.partition_point(|(k, _)| k.borrow() < e),
+        };
+        (lo, if hi < lo { lo } else { hi })
+    }
+    pub fn range<T: ?Sized + Ord, R: core::ops::RangeBounds<T>>(&self, range: R) -> Iter<'_, K, V> where K: Borrow<T> {
+        let (lo, hi) = self.range_bounds(&range);
+        self.entries[lo..hi].iter().map(map_iter::<K, V>)
+    }
+    pub fn range_mut<T: ?Sized + Ord, R: core::ops::RangeBounds<T>>(&mut self, range: R) -> IterMut<'_, K, V> where K: Borrow<T> {
+        let (lo, hi) = self.range_bounds(&range);
+        self.entries[lo..hi].iter_mut().map(map_iter_mut::<K, V>)
     }
     pub fn append(&mut self, other: &mut Self) { while let Some((k, v)) = other.pop_first() { self.insert(k, v); } }
 }

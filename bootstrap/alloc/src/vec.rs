@@ -468,3 +468,16 @@ impl<T, const N: usize> TryFrom<Vec<T>> for [T; N] {
         Ok(unsafe { ptr::read(vec.as_ptr() as *const [T; N]) })
     }
 }
+
+impl<T> Vec<T> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), crate::collections::TryReserveError> {
+        match self.length.checked_add(additional) {
+            Some(required) if mem::size_of::<T>() == 0 || Layout::array::<T>(required).is_ok() => {
+                self.reserve(additional);
+                Ok(())
+            }
+            _ => Err(crate::collections::TryReserveError::capacity_overflow()),
+        }
+    }
+}
+impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for &[T] { fn eq(&self, other: &Vec<U>) -> bool { **self == other[..] } }

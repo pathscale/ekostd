@@ -357,3 +357,7 @@ impl From<String> for Arc<str> {
         Self::from(value.as_str())
     }
 }
+
+impl<T> From<crate::boxed::Box<[T]>> for Arc<[T]> {
+    fn from(boxed: crate::boxed::Box<[T]>) -> Arc<[T]> { Arc::from(crate::boxed::Box::into_vec(boxed)) }
+}

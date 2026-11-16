@@ -73,6 +73,9 @@ impl<'a> Formatter<'a> {
         attempt!(value2.fmt(self));
         self.write_str(")")
     }
+    pub fn debug_tuple_field3_finish<'b>(&'b mut self, name: &str, value1: &dyn Debug, value2: &dyn Debug, value3: &dyn Debug) -> Result {
+        self.debug_tuple_fields_finish(name, &[value1, value2, value3])
+    }
     pub fn debug_tuple_fields_finish<'b>(&'b mut self, name: &str, values: &[&dyn Debug]) -> Result {
         attempt!(self.write_str(name));
         attempt!(self.write_str("("));
@@ -953,3 +956,17 @@ impl<T: ?Sized + Debug> Debug for crate::cell::RefCell<T> {
 impl<T: ?Sized + Debug> Debug for crate::cell::Ref<'_, T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result { Debug::fmt(&**self, f) }
 }
+
+macro_rules! tuple_debug {
+    ($(($($T:ident $i:tt),+))*) => {$(
+        impl<$($T: Debug),+> Debug for ($($T,)+) {
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let mut tuple = f.debug_tuple("");
+                $(tuple.field(&self.$i);)+
+                tuple.finish()
+            }
+        }
+    )*};
+}
+tuple_debug!((A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));

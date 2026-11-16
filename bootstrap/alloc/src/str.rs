@@ -30,3 +30,16 @@ impl str {
         out
     }
 }
+
+impl str {
+    /// A copy with the ASCII lower-case letters made capitals; other characters are unchanged.
+    #[rustc_allow_incoherent_impl]
+    pub fn to_ascii_uppercase(&self) -> crate::string::String {
+        let mut bytes = self.as_bytes().to_vec();
+        for byte in bytes.iter_mut() {
+            *byte = byte.to_ascii_uppercase();
+        }
+        // SAFETY: Only ASCII bytes changed, each to another ASCII byte.
+        unsafe { crate::string::String::from_utf8_unchecked(bytes) }
+    }
+}

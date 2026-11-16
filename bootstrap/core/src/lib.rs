@@ -49,11 +49,21 @@ pub mod sync;
 pub mod time;
 
 pub mod task {
+    #[lang = "Poll"]
+    #[derive(Copy, Clone)]
     pub enum Poll<T> {
         #[lang = "Ready"]
         Ready(T),
         #[lang = "Pending"]
         Pending,
+    }
+
+    impl<T> Poll<T> {
+        pub fn map<U, F: crate::ops::FnOnce(T) -> U>(self, f: F) -> Poll<U> {
+            match self { Poll::Ready(t) => Poll::Ready(f(t)), Poll::Pending => Poll::Pending }
+        }
+        pub const fn is_ready(&self) -> bool { matches!(*self, Poll::Ready(_)) }
+        pub const fn is_pending(&self) -> bool { !self.is_ready() }
     }
 
     #[derive(Copy, Clone)]
@@ -234,6 +244,19 @@ pub mod future {
         type Output;
         #[lang = "poll"]
         fn poll(self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<Self::Output>;
+    }
+
+    impl<P> Future for crate::pin::Pin<P>
+    where
+        P: crate::ops::DerefMut,
+        P::Target: Future,
+    {
+        type Output = <<P as crate::ops::Deref>::Target as Future>::Output;
+        fn poll(mut self: crate::pin::Pin<&mut Self>, cx: &mut crate::task::Context<'_>) -> crate::task::Poll<Self::Output> {
+            // SAFETY: the pinned pointer is only used to project to its pinned target.
+            let this: &mut crate::pin::Pin<P> = unsafe { self.get_unchecked_mut() };
+            <P::Target as Future>::poll(this.as_mut(), cx)
+        }
     }
 
     /// A future that is immediately ready with a value.

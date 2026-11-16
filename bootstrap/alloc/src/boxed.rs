@@ -201,3 +201,6 @@ impl<T> Box<[core::mem::MaybeUninit<T>]> {
         unsafe { Box::from_raw(raw as *mut [T]) }
     }
 }
+
+impl<T: Default> Default for Box<T> { fn default() -> Self { Box::new(T::default()) } }
+impl<T> Default for Box<[T]> { fn default() -> Self { crate::vec::Vec::new().into_boxed_slice() } }

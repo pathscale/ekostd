@@ -1150,3 +1150,14 @@ macro_rules! wrapping_div_rem {
     )*};
 }
 wrapping_div_rem!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+macro_rules! checked_add_signed {
+    ($($t:ty, $s:ty);*) => {$(
+        impl $t {
+            pub const fn checked_add_signed(self, rhs: $s) -> Option<Self> {
+                if rhs >= 0 { self.checked_add(rhs as $t) } else { self.checked_sub(rhs.unsigned_abs()) }
+            }
+        }
+    )*};
+}
+checked_add_signed!(u8, i8; u16, i16; u32, i32; u64, i64; u128, i128; usize, isize);

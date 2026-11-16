@@ -249,6 +249,23 @@ impl str {
         SplitTerminator { inner: self.split(pat) }
     }
 
+    pub fn is_ascii(&self) -> bool { self.as_bytes().is_ascii() }
+
+    /// The byte index of the last match.
+    pub fn rfind<P: Pattern>(&self, mut pat: P) -> Option<usize> {
+        let mut i = self.len();
+        loop {
+            if self.is_char_boundary(i) && pat.prefix_len(&self[i..]).is_some() { return Some(i); }
+            if i == 0 { return None; }
+            i -= 1;
+        }
+    }
+
+    /// The matches, left to right and not overlapping, with the byte index each starts at.
+    pub fn match_indices<P: Pattern>(&self, pat: P) -> MatchIndices<'_, P> {
+        MatchIndices { haystack: self, pattern: pat, pos: 0, done: false }
+    }
+
     /// The pieces between runs of whitespace, with no empty pieces.
     pub fn split_whitespace(&self) -> SplitWhitespace<'_> {
         SplitWhitespace { rest: self }
@@ -914,5 +931,31 @@ impl<'a> crate::iter::Iterator for SplitWhitespace<'a> {
         };
         self.rest = &rest[end..];
         Some(&rest[..end])
+    }
+}
+
+pub struct MatchIndices<'a, P> {
+    haystack: &'a str,
+    pattern: P,
+    pos: usize,
+    done: bool,
+}
+impl<'a, P: Pattern> crate::iter::Iterator for MatchIndices<'a, P> {
+    type Item = (usize, &'a str);
+    fn next(&mut self) -> Option<(usize, &'a str)> {
+        if self.done { return None; }
+        match self.pattern.find_in(self.haystack, self.pos) {
+            None => { self.done = true; None }
+            Some((start, end)) => {
+                if end > start {
+                    self.pos = end;
+                } else if end >= self.haystack.len() {
+                    self.done = true;
+                } else {
+                    self.pos = end + self.haystack[end..].chars().next().map_or(1, |c| c.len_utf8());
+                }
+                Some((start, &self.haystack[start..end]))
+            }
+        }
     }
 }

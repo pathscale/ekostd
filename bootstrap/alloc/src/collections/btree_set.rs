@@ -15,6 +15,15 @@ impl<T: Ord> BTreeSet<T> {
     pub fn remove<Q: ?Sized + Ord>(&mut self, value: &Q) -> bool where T: core::borrow::Borrow<Q> { self.map.remove(value).is_some() }
     pub fn take<Q: ?Sized + Ord>(&mut self, value: &Q) -> Option<T> where T: core::borrow::Borrow<Q> { self.map.remove_entry(value).map(|(k, _)| k) }
     pub fn iter(&self) -> crate::collections::btree_map::Keys<'_, T, ()> { self.map.keys() }
+    pub fn is_disjoint(&self, other: &Self) -> bool { self.iter().all(|value| !other.contains(value)) }
+    /// The values in both sets, in ascending order.
+    pub fn intersection<'a>(&'a self, other: &'a Self) -> crate::vec::IntoIter<&'a T> {
+        let mut common = crate::vec::Vec::new();
+        for value in self.iter() {
+            if other.contains(value) { common.push(value); }
+        }
+        common.into_iter()
+    }
     pub fn first(&self) -> Option<&T> { self.map.first_key_value().map(|(k, _)| k) }
     pub fn last(&self) -> Option<&T> { self.map.last_key_value().map(|(k, _)| k) }
     pub fn pop_first(&mut self) -> Option<T> { self.map.pop_first().map(|(k, _)| k) }

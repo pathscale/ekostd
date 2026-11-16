@@ -89,6 +89,23 @@ pub trait Iterator {
         match best { Some((_, x)) => Some(x), None => None }
     }
     /// The item whose key is smallest; the first of several equal ones.
+    fn min_by<F: FnMut(&Self::Item, &Self::Item) -> crate::cmp::Ordering>(mut self, mut compare: F) -> Option<Self::Item> where Self: Sized {
+        let mut best = self.next()?;
+        while let Some(item) = self.next() {
+            if compare(&best, &item) == crate::cmp::Ordering::Greater { best = item; }
+        }
+        Some(best)
+    }
+    fn unzip<A, B, FromA, FromB>(self) -> (FromA, FromB)
+    where FromA: Default + Extend<A>, FromB: Default + Extend<B>, Self: Sized + Iterator<Item = (A, B)> {
+        let mut a = FromA::default();
+        let mut b = FromB::default();
+        for (x, y) in self {
+            a.extend(Some(x));
+            b.extend(Some(y));
+        }
+        (a, b)
+    }
     fn min_by_key<K: crate::cmp::Ord, F: FnMut(&Self::Item) -> K>(mut self, mut f: F) -> Option<Self::Item> where Self: Sized {
         let mut best: Option<(K, Self::Item)> = None;
         while let Some(x) = self.next() {

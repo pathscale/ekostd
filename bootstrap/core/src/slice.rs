@@ -1245,3 +1245,27 @@ impl [u8] {
         true
     }
 }
+
+impl<T> [T] {
+    pub fn chunk_by<F: crate::ops::FnMut(&T, &T) -> bool>(&self, pred: F) -> ChunkBy<'_, T, F> {
+        ChunkBy { slice: self, predicate: pred }
+    }
+}
+/// The runs of a slice whose neighbours satisfy a predicate.
+pub struct ChunkBy<'a, T, P> {
+    slice: &'a [T],
+    predicate: P,
+}
+impl<'a, T, P: crate::ops::FnMut(&T, &T) -> bool> Iterator for ChunkBy<'a, T, P> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<&'a [T]> {
+        if self.slice.is_empty() { return None; }
+        let mut len = 1;
+        while len < self.slice.len() && (self.predicate)(&self.slice[len - 1], &self.slice[len]) {
+            len += 1;
+        }
+        let (head, tail) = self.slice.split_at(len);
+        self.slice = tail;
+        Some(head)
+    }
+}

@@ -372,3 +372,38 @@ tuple_cmp!(eq (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
 tuple_cmp!(ord (A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
     (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
+
+impl<T: PartialOrd> PartialOrd for Option<T> {
+    fn partial_cmp(&self, other: &Option<T>) -> Option<Ordering> {
+        match (self, other) {
+            (Some(a), Some(b)) => a.partial_cmp(b),
+            (Some(_), None) => Some(Greater),
+            (None, Some(_)) => Some(Less),
+            (None, None) => Some(Equal),
+        }
+    }
+}
+impl<T: Ord> Ord for Option<T> {
+    fn cmp(&self, other: &Option<T>) -> Ordering {
+        match (self, other) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => Greater,
+            (None, Some(_)) => Less,
+            (None, None) => Equal,
+        }
+    }
+}
+impl Ordering {
+    pub const fn then(self, other: Ordering) -> Ordering {
+        match self { Equal => other, _ => self }
+    }
+    pub fn then_with<F: crate::ops::FnOnce() -> Ordering>(self, f: F) -> Ordering {
+        match self { Equal => f(), _ => self }
+    }
+}
+impl<A: PointeeSized + PartialEq<B>, B: PointeeSized> PartialEq<&B> for &mut A {
+    fn eq(&self, other: &&B) -> bool { PartialEq::eq(&**self, &**other) }
+}
+impl<A: PointeeSized + PartialEq<B>, B: PointeeSized> PartialEq<&mut B> for &A {
+    fn eq(&self, other: &&mut B) -> bool { PartialEq::eq(&**self, &**other) }
+}
