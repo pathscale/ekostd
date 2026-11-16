@@ -4,12 +4,62 @@ pub const fn from_u32(i: u32) -> Option<char> {
     char::from_u32(i)
 }
 
+/// The highest valid code point.
+pub const MAX: char = char::MAX;
+
+/// U+FFFD, the character a decoder puts in place of invalid input.
+pub const REPLACEMENT_CHARACTER: char = char::REPLACEMENT_CHARACTER;
+
+/// The digit `num` in the given radix, lowercase letters from 10 on; panics for a radix outside 2 to 36.
+pub const fn from_digit(num: u32, radix: u32) -> Option<char> {
+    char::from_digit(num, radix)
+}
+
 pub const unsafe fn from_u32_unchecked(i: u32) -> char {
     unsafe { char::from_u32_unchecked(i) }
 }
 
 impl char {
     pub const MAX: char = '\u{10ffff}';
+
+    /// The lowest valid code point.
+    pub const MIN: char = '\0';
+
+    /// U+FFFD, the character a decoder puts in place of invalid input.
+    pub const REPLACEMENT_CHARACTER: char = '\u{FFFD}';
+
+    /// The most UTF-16 code units a character takes.
+    pub const MAX_LEN_UTF16: usize = 2;
+
+    /// The digit `num` in the given radix, lowercase letters from 10 on; `None` when `num >= radix`.
+    /// Panics for a radix outside 2 to 36.
+    pub const fn from_digit(num: u32, radix: u32) -> Option<char> {
+        if radix < 2 || radix > 36 { panic!("from_digit: radix is too high (maximum 36)"); }
+        if num < radix {
+            let num = num as u8;
+            if num < 10 { Some((b'0' + num) as char) } else { Some((b'a' + num - 10) as char) }
+        } else { None }
+    }
+
+    /// 1, or 2 (a surrogate pair) above U+FFFF.
+    pub const fn len_utf16(self) -> usize {
+        if (self as u32) <= 0xffff { 1 } else { 2 }
+    }
+
+    /// Writes the character as UTF-16 and returns the written part; panics when `dst` is too short.
+    pub fn encode_utf16(self, dst: &mut [u16]) -> &mut [u16] {
+        let code = self as u32;
+        if code <= 0xffff {
+            dst[0] = code as u16;
+            &mut dst[..1]
+        } else {
+            let _ = dst[1];
+            let rest = code - 0x1_0000;
+            dst[0] = 0xd800 | ((rest >> 10) as u16);
+            dst[1] = 0xdc00 | ((rest & 0x3ff) as u16);
+            &mut dst[..2]
+        }
+    }
 
     /// The most bytes a character takes in UTF-8.
     pub const MAX_LEN_UTF8: usize = 4;
@@ -87,22 +137,28 @@ impl EscapeDebug {
     fn one(c: char) -> Self { let mut buf = ['\0'; 11]; buf[0] = c; EscapeDebug { buf, pos: 0, len: 1 } }
     fn backslash(c: char) -> Self { let mut buf = ['\0'; 11]; buf[0] = '\\'; buf[1] = c; EscapeDebug { buf, pos: 0, len: 2 } }
     fn unicode(c: char) -> Self {
-        let mut buf = ['\0'; 11];
-        buf[0] = '\\'; buf[1] = 'u'; buf[2] = '{';
-        let value = c as u32;
-        let mut digits = 1;
-        while digits < 6 && (value >> (4 * digits)) != 0 { digits += 1; }
-        let mut len = 3;
-        let mut shift = digits;
-        while shift > 0 {
-            shift -= 1;
-            let d = (value >> (4 * shift)) & 0xf;
-            buf[len] = if d < 10 { (b'0' + d as u8) as char } else { (b'a' + d as u8 - 10) as char };
-            len += 1;
-        }
-        buf[len] = '}';
-        EscapeDebug { buf, pos: 0, len: len + 1 }
+        let (buf, len) = unicode_escape(c);
+        EscapeDebug { buf, pos: 0, len }
     }
+}
+
+/// `\u{` + the lowercase hex digits of `c` without leading zeros + `}`, and how many characters that is.
+fn unicode_escape(c: char) -> ([char; 11], usize) {
+    let mut buf = ['\0'; 11];
+    buf[0] = '\\'; buf[1] = 'u'; buf[2] = '{';
+    let value = c as u32;
+    let mut digits = 1;
+    while digits < 6 && (value >> (4 * digits)) != 0 { digits += 1; }
+    let mut len = 3;
+    let mut shift = digits;
+    while shift > 0 {
+        shift -= 1;
+        let d = (value >> (4 * shift)) & 0xf;
+        buf[len] = if d < 10 { (b'0' + d as u8) as char } else { (b'a' + d as u8 - 10) as char };
+        len += 1;
+    }
+    buf[len] = '}';
+    (buf, len + 1)
 }
 
 impl crate::iter::Iterator for EscapeDebug {
@@ -122,6 +178,84 @@ impl crate::fmt::Display for EscapeDebug {
         let mut i = self.pos;
         while i < self.len { f.write_char(self.buf[i])?; i += 1; }
         Ok(())
+    }
+}
+
+/// The escape of one character as `char::escape_unicode` writes it: always `\u{...}`.
+#[derive(Clone, Debug)]
+pub struct EscapeUnicode { buf: [char; 11], pos: usize, len: usize }
+
+impl crate::iter::Iterator for EscapeUnicode {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len { return None; }
+        let c = self.buf[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = self.len - self.pos; (n, Some(n)) }
+}
+impl crate::iter::ExactSizeIterator for EscapeUnicode {}
+impl crate::iter::FusedIterator for EscapeUnicode {}
+
+impl crate::fmt::Display for EscapeUnicode {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut i = self.pos;
+        while i < self.len { f.write_char(self.buf[i])?; i += 1; }
+        Ok(())
+    }
+}
+
+/// The escape of one character as `char::escape_default` writes it: the character itself,
+/// a backslash pair, or `\u{...}`.
+#[derive(Clone, Debug)]
+pub struct EscapeDefault { buf: [char; 11], pos: usize, len: usize }
+
+impl crate::iter::Iterator for EscapeDefault {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.pos == self.len { return None; }
+        let c = self.buf[self.pos];
+        self.pos += 1;
+        Some(c)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = self.len - self.pos; (n, Some(n)) }
+}
+impl crate::iter::ExactSizeIterator for EscapeDefault {}
+impl crate::iter::FusedIterator for EscapeDefault {}
+
+impl crate::fmt::Display for EscapeDefault {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut i = self.pos;
+        while i < self.len { f.write_char(self.buf[i])?; i += 1; }
+        Ok(())
+    }
+}
+
+impl char {
+    /// Always `\u{` + the lowercase hex digits without leading zeros + `}`.
+    pub fn escape_unicode(self) -> EscapeUnicode {
+        let (buf, len) = unicode_escape(self);
+        EscapeUnicode { buf, pos: 0, len }
+    }
+
+    /// Tab, carriage return, line feed, both quotes and backslash as a backslash pair, U+0020 to U+007E
+    /// as themselves, everything else as `escape_unicode`.
+    pub fn escape_default(self) -> EscapeDefault {
+        let mut buf = ['\0'; 11];
+        let len = match self {
+            '\t' => { buf[0] = '\\'; buf[1] = 't'; 2 }
+            '\r' => { buf[0] = '\\'; buf[1] = 'r'; 2 }
+            '\n' => { buf[0] = '\\'; buf[1] = 'n'; 2 }
+            '\\' | '\'' | '"' => { buf[0] = '\\'; buf[1] = self; 2 }
+            '\x20'..='\x7e' => { buf[0] = self; 1 }
+            _ => {
+                let (unicode, len) = unicode_escape(self);
+                buf = unicode;
+                len
+            }
+        };
+        EscapeDefault { buf, pos: 0, len }
     }
 }
 
@@ -147,6 +281,13 @@ impl char {
     /// The Rust algorithm (`char::escape_debug_ext`): each quote is escaped only when its flag is set,
     /// as `Debug for char` (single quote) and `Debug for str` (double quote) need.
     pub(crate) fn escape_debug_ext(self, escape_single_quote: bool, escape_double_quote: bool) -> EscapeDebug {
+        self.escape_debug_args(true, escape_single_quote, escape_double_quote)
+    }
+
+    /// The Rust algorithm with all three of Rust's switches: grapheme extenders are escaped only when
+    /// `escape_grapheme_extended` is set, which `str::escape_debug` clears after the first character.
+    pub(crate) fn escape_debug_args(self, escape_grapheme_extended: bool, escape_single_quote: bool,
+        escape_double_quote: bool) -> EscapeDebug {
         match self {
             '"' => if escape_double_quote { EscapeDebug::backslash('"') } else { EscapeDebug::one(self) },
             '\'' => if escape_single_quote { EscapeDebug::backslash('\'') } else { EscapeDebug::one(self) },
@@ -161,7 +302,7 @@ impl char {
             _ if self.is_control()
                 || self.is_private_use()
                 || self.is_whitespace()
-                || (self > '\u{02FF}' && crate::unicode::grapheme_extend::lookup(self))
+                || (escape_grapheme_extended && self > '\u{02FF}' && crate::unicode::grapheme_extend::lookup(self))
                 || (self > '\u{AC}' && crate::unicode::default_ignorable_code_point::lookup(self))
                 || (self > '\u{AC}' && crate::unicode::cf::lookup(self))
                 || !self.is_assigned() => EscapeDebug::unicode(self),
@@ -299,6 +440,28 @@ impl char {
     }
     pub const fn is_ascii_hexdigit(&self) -> bool {
         matches!(*self, '0'..='9' | 'A'..='F' | 'a'..='f')
+    }
+    pub const fn is_ascii_lowercase(&self) -> bool {
+        matches!(*self, 'a'..='z')
+    }
+    /// `!` to `~`: the visible ASCII characters, space excluded.
+    pub const fn is_ascii_graphic(&self) -> bool {
+        matches!(*self, '!'..='~')
+    }
+    /// U+0000 to U+001F and U+007F only.
+    pub const fn is_ascii_control(&self) -> bool {
+        matches!(*self, '\0'..='\x1F' | '\x7F')
+    }
+    pub const fn is_ascii_octdigit(&self) -> bool {
+        matches!(*self, '0'..='7')
+    }
+    /// `a` to `z` become `A` to `Z`; every other character is left as it is.
+    pub const fn make_ascii_uppercase(&mut self) {
+        *self = self.to_ascii_uppercase();
+    }
+    /// `A` to `Z` become `a` to `z`; every other character is left as it is.
+    pub const fn make_ascii_lowercase(&mut self) {
+        *self = self.to_ascii_lowercase();
     }
 }
 

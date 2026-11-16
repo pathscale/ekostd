@@ -280,6 +280,17 @@ impl str {
         EscapeDefault { chars: self.chars(), buf: ['\0'; 10], pos: 0, len: 0 }
     }
 
+    /// Rust's: the first character as `char::escape_debug`, every later one the same except that
+    /// grapheme extenders are kept as they are; both quotes are escaped.
+    pub fn escape_debug(&self) -> EscapeDebug<'_> {
+        EscapeDebug { chars: self.chars(), first: true, current: None }
+    }
+
+    /// Each character as `char::escape_unicode`, one after the other.
+    pub fn escape_unicode(&self) -> EscapeUnicode<'_> {
+        EscapeUnicode { chars: self.chars(), current: None }
+    }
+
     pub fn is_ascii(&self) -> bool { self.as_bytes().is_ascii() }
 
     /// The byte index of the last match.
@@ -1184,6 +1195,65 @@ impl<'a, P: Pattern> crate::iter::Iterator for SplitN<'a, P> {
             }
             _ => { self.count -= 1; self.inner.next() }
         }
+    }
+}
+
+/// The characters of a string escaped as `str::escape_debug` does.
+#[derive(Clone)]
+pub struct EscapeDebug<'a> { chars: Chars<'a>, first: bool, current: Option<crate::char::EscapeDebug> }
+impl<'a> crate::iter::Iterator for EscapeDebug<'a> {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        loop {
+            if let Some(current) = &mut self.current {
+                if let Some(c) = crate::iter::Iterator::next(current) { return Some(c); }
+            }
+            let c = self.chars.next()?;
+            self.current = Some(c.escape_debug_args(self.first, true, true));
+            self.first = false;
+        }
+    }
+}
+impl crate::iter::FusedIterator for EscapeDebug<'_> {}
+impl crate::fmt::Display for EscapeDebug<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut it = self.clone();
+        while let Some(c) = crate::iter::Iterator::next(&mut it) { f.write_char(c)?; }
+        Ok(())
+    }
+}
+impl crate::fmt::Debug for EscapeDebug<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("EscapeDebug { .. }")
+    }
+}
+
+/// The characters of a string each escaped as `char::escape_unicode` does.
+#[derive(Clone)]
+pub struct EscapeUnicode<'a> { chars: Chars<'a>, current: Option<crate::char::EscapeUnicode> }
+impl<'a> crate::iter::Iterator for EscapeUnicode<'a> {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        loop {
+            if let Some(current) = &mut self.current {
+                if let Some(c) = crate::iter::Iterator::next(current) { return Some(c); }
+            }
+            let c = self.chars.next()?;
+            self.current = Some(c.escape_unicode());
+        }
+    }
+}
+impl crate::iter::FusedIterator for EscapeUnicode<'_> {}
+impl crate::fmt::Display for EscapeUnicode<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        let mut it = self.clone();
+        while let Some(c) = crate::iter::Iterator::next(&mut it) { f.write_char(c)?; }
+        Ok(())
+    }
+}
+impl crate::fmt::Debug for EscapeUnicode<'_> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("EscapeUnicode { .. }")
     }
 }
 
