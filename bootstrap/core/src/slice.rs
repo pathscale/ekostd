@@ -933,8 +933,8 @@ impl<T> [T] {
     }
 }
 
-impl<T: PartialEq> PartialEq for [T] {
-    fn eq(&self, other: &[T]) -> bool {
+impl<T: PartialEq<U>, U> PartialEq<[U]> for [T] {
+    fn eq(&self, other: &[U]) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -1204,4 +1204,33 @@ impl<T> crate::clone::Clone for ChunksExact<'_, T> {
 }
 impl<T: crate::fmt::Debug> crate::fmt::Debug for ChunksExact<'_, T> {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Debug::fmt(self.rest, f) }
+}
+
+impl<T> [T] {
+    #[track_caller]
+    pub fn clone_from_slice(&mut self, src: &[T])
+    where
+        T: crate::clone::Clone,
+    {
+        if self.len() != src.len() { panic!("destination and source slices have different lengths"); }
+        let mut i = 0;
+        while i < self.len() {
+            self[i].clone_from(&src[i]);
+            i += 1;
+        }
+    }
+
+    #[track_caller]
+    pub fn swap_with_slice(&mut self, other: &mut [T]) {
+        if self.len() != other.len() { panic!("destination and source slices have different lengths"); }
+        // SAFETY: two distinct `&mut` slices cannot overlap, and both have `len` elements.
+        unsafe { ptr::swap_nonoverlapping(self.as_mut_ptr(), other.as_mut_ptr(), self.len()) }
+    }
+
+    pub const fn split_first_chunk<const N: usize>(&self) -> Option<(&[T; N], &[T])> {
+        if self.len() < N { return None; }
+        let (first, tail) = self.split_at(N);
+        // SAFETY: `first` has exactly `N` elements.
+        Some((unsafe { &*(first.as_ptr() as *const [T; N]) }, tail))
+    }
 }

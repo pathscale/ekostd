@@ -120,6 +120,33 @@ macro_rules! atomic_fetch_max {
 }
 atomic_fetch_max!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64);
 
+impl<T> atomic::AtomicPtr<T> {
+    /// Exclusive access needs no atomic operation.
+    pub fn get_mut(&mut self) -> &mut *mut T {
+        // `repr(transparent)` over a cell of `*mut T`: same address, same layout.
+        unsafe { &mut *(self as *mut Self as *mut *mut T) }
+    }
+}
+
+macro_rules! atomic_fetch_min {
+    ($($name:path, $t:ty);*) => {$(
+        impl $name {
+            /// Stores the smaller of the current value and `value`; returns the previous value.
+            pub fn fetch_min(&self, value: $t, order: atomic::Ordering) -> $t {
+                let mut current = self.load(atomic::Ordering::Relaxed);
+                loop {
+                    let next = if current > value { value } else { current };
+                    match self.compare_exchange(current, next, order, atomic::Ordering::Relaxed) {
+                        Ok(previous) => return previous,
+                        Err(actual) => current = actual,
+                    }
+                }
+            }
+        }
+    )*};
+}
+atomic_fetch_min!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64);
+
 macro_rules! atomic_value_traits {
     ($($name:path, $t:ty, $zero:expr);*) => {$(
         impl $name {

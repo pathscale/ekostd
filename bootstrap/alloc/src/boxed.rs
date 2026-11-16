@@ -166,3 +166,10 @@ impl From<&str> for Box<str> {
 impl<T: ?Sized> core::borrow::Borrow<T> for Box<T> {
     fn borrow(&self) -> &T { &**self }
 }
+
+impl<Args: core::marker::Tuple, F: FnOnce<Args> + ?Sized> FnOnce<Args> for Box<F> {
+    type Output = <F as FnOnce<Args>>::Output;
+    extern "rust-call" fn call_once(self, args: Args) -> Self::Output {
+        <F as FnOnce<Args>>::call_once(*self, args)
+    }
+}

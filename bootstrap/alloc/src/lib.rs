@@ -1,5 +1,6 @@
 #![no_std]
 #![feature(lang_items, rustc_attrs, fundamental, dropck_eyepatch)]
+#![feature(unboxed_closures, unsized_fn_params)]
 
 #[macro_use]
 extern crate core;

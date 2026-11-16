@@ -222,7 +222,7 @@ impl<T> Vec<T> {
         }
     }
 
-    pub fn into_boxed_slice(mut self) -> crate::boxed::Box<[T]> {
+    pub fn shrink_to_fit(&mut self) {
         if self.capacity != self.length && mem::size_of::<T>() != 0 {
             if self.length == 0 {
                 unsafe {
@@ -241,6 +241,10 @@ impl<T> Vec<T> {
                 self.capacity = self.length;
             }
         }
+    }
+
+    pub fn into_boxed_slice(mut self) -> crate::boxed::Box<[T]> {
+        self.shrink_to_fit();
         let this = mem::ManuallyDrop::new(self);
         let slice_ptr = ptr::slice_from_raw_parts_mut(this.pointer.as_ptr(), this.length);
         unsafe { crate::boxed::Box::from_raw(slice_ptr) }
@@ -314,6 +318,12 @@ impl<'a,T> IntoIterator for &'a Vec<T> { type Item=&'a T; type IntoIter=core::sl
 impl<'a,T> IntoIterator for &'a mut Vec<T> { type Item=&'a mut T; type IntoIter=core::slice::IterMut<'a,T>; fn into_iter(self)->Self::IntoIter { self.as_mut_slice().iter_mut() } }
 
 pub struct IntoIter<T> { vec: Vec<T>, front: usize, back: usize }
+impl<T> IntoIter<T> {
+    /// The elements not yet yielded.
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { slice::from_raw_parts(self.vec.pointer.as_ptr().add(self.front), self.back - self.front) }
+    }
+}
 impl<T> Iterator for IntoIter<T> {
     type Item=T;
     fn next(&mut self)->Option<T> { if self.front==self.back{return None} let i=self.front; self.front+=1; Some(unsafe{self.vec.pointer.as_ptr().add(i).read()}) }

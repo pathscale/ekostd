@@ -260,6 +260,10 @@ impl str {
         Chars { rest: self }
     }
 
+    pub fn char_indices(&self) -> CharIndices<'_> {
+        CharIndices { front_offset: 0, iter: Chars { rest: self } }
+    }
+
     /// The lines, without their `\n` or `\r\n` endings.
     pub fn lines(&self) -> Lines<'_> {
         Lines { inner: self.split_inclusive('\n') }
@@ -301,8 +305,8 @@ impl str {
     }
 
     #[inline(always)]
-    pub fn bytes(&self) -> slice::Iter<'_, u8> {
-        self.as_bytes().iter()
+    pub fn bytes(&self) -> crate::iter::Copied<slice::Iter<'_, u8>> {
+        self.as_bytes().iter().copied()
     }
 }
 
@@ -825,6 +829,29 @@ impl crate::fmt::Display for Utf8Error {
         match self.error_len {
             Some(_) => crate::write!(f, "invalid utf-8 sequence starting at index {}", self.valid_up_to),
             None => crate::write!(f, "incomplete utf-8 byte sequence from index {}", self.valid_up_to),
+        }
+    }
+}
+
+/// The characters of a string slice with the byte offset each starts at.
+pub struct CharIndices<'a> {
+    front_offset: usize,
+    iter: Chars<'a>,
+}
+impl Clone for CharIndices<'_> {
+    fn clone(&self) -> Self { CharIndices { front_offset: self.front_offset, iter: self.iter.clone() } }
+}
+impl crate::iter::Iterator for CharIndices<'_> {
+    type Item = (usize, char);
+    fn next(&mut self) -> Option<(usize, char)> {
+        let before = self.iter.as_str().len();
+        match self.iter.next() {
+            None => None,
+            Some(ch) => {
+                let index = self.front_offset;
+                self.front_offset += before - self.iter.as_str().len();
+                Some((index, ch))
+            }
         }
     }
 }

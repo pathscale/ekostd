@@ -293,3 +293,26 @@ impl crate::fmt::Debug for Infallible {
 impl crate::fmt::Display for Infallible {
     fn fmt(&self, _f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { match *self {} }
 }
+
+impl<'a, T, const N: usize> TryFrom<&'a [T]> for &'a [T; N] {
+    type Error = TryFromSliceError;
+    fn try_from(slice: &'a [T]) -> crate::result::Result<&'a [T; N], TryFromSliceError> {
+        if slice.len() == N {
+            // SAFETY: the length was checked.
+            crate::result::Result::Ok(unsafe { &*(slice.as_ptr() as *const [T; N]) })
+        } else {
+            crate::result::Result::Err(TryFromSliceError(()))
+        }
+    }
+}
+impl<'a, T, const N: usize> TryFrom<&'a mut [T]> for &'a mut [T; N] {
+    type Error = TryFromSliceError;
+    fn try_from(slice: &'a mut [T]) -> crate::result::Result<&'a mut [T; N], TryFromSliceError> {
+        if slice.len() == N {
+            // SAFETY: the length was checked.
+            crate::result::Result::Ok(unsafe { &mut *(slice.as_mut_ptr() as *mut [T; N]) })
+        } else {
+            crate::result::Result::Err(TryFromSliceError(()))
+        }
+    }
+}

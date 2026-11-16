@@ -27,8 +27,23 @@ pub trait Write {
 impl<W: Write + ?Sized> Write for &mut W {
     fn write_str(&mut self, s: &str) -> Result { (**self).write_str(s) }
 }
-pub struct Formatter<'a> { writer: &'a mut dyn Write }
+/// Placeholder options, encoded as in rustc's format_args lowering: the low 21 bits of `flags` are the fill
+/// character, the rest are the flag bits below.
+struct Options { flags: u32, width: u16, precision: u16 }
+impl Copy for Options {}
+impl Clone for Options { fn clone(&self) -> Self { *self } }
+mod flags {
+    pub const ALTERNATE: u32 = 1 << 23;
+    pub const WIDTH: u32 = 1 << 27;
+    pub const PRECISION: u32 = 1 << 28;
+    pub const ALIGN_UNKNOWN: u32 = 3 << 29;
+    /// The flag value of a placeholder without options.
+    pub const DEFAULT: u32 = ' ' as u32 | ALIGN_UNKNOWN;
+}
+pub struct Formatter<'a> { writer: &'a mut dyn Write, options: Options }
 impl<'a> Formatter<'a> {
+    /// Whether the `#` flag was given.
+    pub fn alternate(&self) -> bool { self.options.flags & flags::ALTERNATE != 0 }
     pub fn write_str(&mut self, s: &str) -> Result { self.writer.write_str(s) }
     pub fn write_char(&mut self, c: char) -> Result { self.writer.write_char(c) }
     pub fn write_fmt(&mut self, args: Arguments<'_>) -> Result { write(self.writer, args) }
@@ -277,6 +292,9 @@ pub mod rt {
         pub const fn new_upper_exp<T: UpperExp>(v: &'a T) -> Self { Self { kind: Kind::UpperExp(v) } }
         pub const fn new_pointer<T: Pointer>(v: &'a T) -> Self { Self { kind: Kind::Pointer(v) } }
         pub const fn from_usize(v: &'a usize) -> Self { Self { kind: Kind::Count(*v) } }
+        pub(super) fn as_u16(&self) -> Option<u16> {
+            match &self.kind { Kind::Count(n) => Some(*n as u16), _ => None }
+        }
         pub(super) fn format(&self, f: &mut Formatter<'_>) -> Result {
             match &self.kind {
                 Kind::Display(v) => Display::fmt(*v, f), Kind::Debug(v) => Debug::fmt(*v, f),
@@ -337,17 +355,40 @@ pub fn write(output: &mut dyn Write, args: Arguments<'_>) -> Result {
             attempt!(output.write_str(unsafe { crate::str::from_utf8_unchecked(piece) }));
             offset += len;
         } else {
-            // Bootstrap supports default placeholders and explicit argument indices.
-            // Reject unsupported options rather than silently formatting them incorrectly.
-            if tag < 192 || tag & 0x37 != 0 { return Err(Error); }
+            // The encoding is rustc's: 0xC0 | bit 0 flags (u32), bit 1 width (u16), bit 2 precision (u16),
+            // bit 3 explicit argument index (u16), bit 4/5 width/precision taken from a count argument.
+            if tag < 192 { return Err(Error); }
+            let mut options = Options { flags: flags::DEFAULT, width: 0, precision: 0 };
+            let need = (if tag & 1 != 0 { 4 } else { 0 }) + (if tag & 2 != 0 { 2 } else { 0 })
+                + (if tag & 4 != 0 { 2 } else { 0 }) + (if tag & 8 != 0 { 2 } else { 0 });
+            if bytes.len() - offset < need { return Err(Error); }
+            if tag & 1 != 0 {
+                options.flags = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+                offset += 4;
+            }
+            if tag & 2 != 0 { options.width = bytes[offset] as u16 | ((bytes[offset + 1] as u16) << 8); offset += 2; }
+            if tag & 4 != 0 { options.precision = bytes[offset] as u16 | ((bytes[offset + 1] as u16) << 8); offset += 2; }
             let index = if tag & 8 != 0 {
-                if bytes.len() - offset < 2 { return Err(Error); }
                 let index = bytes[offset] as usize | ((bytes[offset + 1] as usize) << 8);
                 offset += 2;
                 index
             } else { let index = next; next += 1; index };
+            if tag & 16 != 0 {
+                let Some(count) = args.args.get(options.width as usize) else { return Err(Error) };
+                let Some(width) = count.as_u16() else { return Err(Error) };
+                options.width = width;
+            }
+            if tag & 32 != 0 {
+                let Some(count) = args.args.get(options.precision as usize) else { return Err(Error) };
+                let Some(precision) = count.as_u16() else { return Err(Error) };
+                options.precision = precision;
+            }
             if index >= args.args.len() { return Err(Error); }
-            attempt!(args.args[index].format(&mut Formatter { writer: output }));
+            // Width, fill, alignment, sign, zero-padding and `x?` are not implemented by the formatting
+            // traits here: reject them rather than silently formatting incorrectly. `#` and precision are
+            // carried to the impl, which may honour them.
+            if options.flags & !(flags::ALTERNATE | flags::PRECISION) != flags::DEFAULT { return Err(Error); }
+            attempt!(args.args[index].format(&mut Formatter { writer: output, options }));
         }
     }
     Err(Error)
@@ -884,3 +925,10 @@ macro_rules! fnptr_fmt_impls {
     };
 }
 fnptr_fmt_impls!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+impl<T: ?Sized> Debug for crate::cell::UnsafeCell<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.debug_struct("UnsafeCell").finish_non_exhaustive() }
+}
+impl<T> Debug for crate::mem::MaybeUninit<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result { f.pad(crate::any::type_name::<Self>()) }
+}

@@ -19,6 +19,18 @@ impl char {
 
     pub const unsafe fn from_u32_unchecked(i: u32) -> char { unsafe { crate::intrinsics::transmute(i) } }
 
+    pub const fn to_digit(self, radix: u32) -> Option<u32> {
+        // If not a digit, a number greater than radix will be created.
+        let mut digit = (self as u32).wrapping_sub('0' as u32);
+        if radix > 10 {
+            if radix > 36 { panic!("to_digit: invalid radix -- radix must be in the range 2 to 36 inclusive"); }
+            if digit < 10 { return Some(digit); }
+            // Force the 6th bit to be set to ensure ascii is lower case.
+            digit = (self as u32 | 0b10_0000).wrapping_sub('a' as u32).saturating_add(10);
+        }
+        if digit < radix { Some(digit) } else { None }
+    }
+
     pub const fn len_utf8(self) -> usize {
         let n = self as u32;
         if n <= 0x7f { 1 } else if n <= 0x7ff { 2 } else if n <= 0xffff { 3 } else { 4 }

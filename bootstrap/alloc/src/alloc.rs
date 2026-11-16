@@ -72,3 +72,6 @@ pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 
 pub fn handle_alloc_error(_layout: Layout) -> ! {
     core::intrinsics::abort()
 }
+
+#[deprecated(note = "renamed to `LayoutError`")]
+pub type LayoutErr = LayoutError;

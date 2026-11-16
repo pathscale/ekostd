@@ -203,3 +203,16 @@ impl<T, E> Result<Option<T>, E> {
         }
     }
 }
+
+impl<T, E> Result<T, E> {
+    #[track_caller]
+    pub fn unwrap_err(self) -> E
+    where
+        T: crate::fmt::Debug,
+    {
+        match self {
+            Ok(_) => crate::panic::panic_nounwind("called `Result::unwrap_err()` on an `Ok` value"),
+            Err(error) => error,
+        }
+    }
+}

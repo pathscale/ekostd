@@ -196,6 +196,33 @@ pub mod task {
 }
 
 pub mod future {
+    /// The resume argument of an async body: a pointer to the `Context` it is polled with.
+    #[lang = "ResumeTy"]
+    pub struct ResumeTy(crate::ptr::NonNull<crate::task::Context<'static>>);
+    impl crate::marker::Copy for ResumeTy {}
+    impl crate::clone::Clone for ResumeTy { fn clone(&self) -> Self { *self } }
+    unsafe impl crate::marker::Send for ResumeTy {}
+    unsafe impl crate::marker::Sync for ResumeTy {}
+
+    /// SAFETY: the caller must guarantee that `cx.0` is a valid pointer that fulfils the requirements of a
+    /// mutable reference.
+    #[lang = "get_context"]
+    pub unsafe fn get_context<'a, 'b>(cx: ResumeTy) -> &'a mut crate::task::Context<'b> {
+        unsafe { &mut *cx.0.as_ptr().cast() }
+    }
+
+    pub trait IntoFuture {
+        type Output;
+        type IntoFuture: Future<Output = Self::Output>;
+        #[lang = "into_future"]
+        fn into_future(self) -> Self::IntoFuture;
+    }
+    impl<F: Future> IntoFuture for F {
+        type Output = F::Output;
+        type IntoFuture = F;
+        fn into_future(self) -> F { self }
+    }
+
     #[lang = "future_trait"]
     pub trait Future {
         type Output;

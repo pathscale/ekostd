@@ -365,19 +365,37 @@ bytes!(i8, u8, 1); bytes!(i16, u16, 2); bytes!(i32, u32, 4); bytes!(i64, u64, 8)
 bytes!(usize, usize, crate::mem::size_of::<usize>());
 bytes!(isize, usize, crate::mem::size_of::<isize>());
 
+/// The primitive types that have a non-zero counterpart.
+pub const trait ZeroablePrimitive: crate::marker::Sized + crate::marker::Copy {
+    fn is_zero(self) -> bool;
+}
+macro_rules! zeroable { ($($t:ty),*) => {$(
+    const impl ZeroablePrimitive for $t { fn is_zero(self) -> bool { self == 0 } }
+)*}; }
+zeroable!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+const impl ZeroablePrimitive for char { fn is_zero(self) -> bool { self as u32 == 0 } }
+
+/// A value that is not zero.
+#[repr(transparent)]
+pub struct NonZero<T: ZeroablePrimitive>(T);
+impl<T: ZeroablePrimitive> NonZero<T> {
+    pub const fn new(n: T) -> Option<Self> where T: [const] ZeroablePrimitive { if n.is_zero() { None } else { Some(Self(n)) } }
+    pub const unsafe fn new_unchecked(n: T) -> Self { Self(n) }
+    pub const fn get(self) -> T { self.0 }
+}
+
 macro_rules! nonzero {
     ($name:ident, $t:ty) => {
-        #[repr(transparent)]
-        pub struct $name($t);
         impl $name {
-            pub const fn new(n: $t) -> Option<Self> { if n == 0 { None } else { Some(Self(n)) } }
-            pub const unsafe fn new_unchecked(n: $t) -> Self { Self(n) }
-            pub const fn get(self) -> $t { self.0 }
             pub const fn leading_zeros(self) -> u32 { self.0.leading_zeros() }
             pub const fn trailing_zeros(self) -> u32 { self.0.trailing_zeros() }
         }
     };
 }
+pub type NonZeroU8 = NonZero<u8>; pub type NonZeroU16 = NonZero<u16>; pub type NonZeroU32 = NonZero<u32>;
+pub type NonZeroU64 = NonZero<u64>; pub type NonZeroU128 = NonZero<u128>; pub type NonZeroUsize = NonZero<usize>;
+pub type NonZeroI8 = NonZero<i8>; pub type NonZeroI16 = NonZero<i16>; pub type NonZeroI32 = NonZero<i32>;
+pub type NonZeroI64 = NonZero<i64>; pub type NonZeroI128 = NonZero<i128>; pub type NonZeroIsize = NonZero<isize>;
 nonzero!(NonZeroU8, u8); nonzero!(NonZeroU16, u16); nonzero!(NonZeroU32, u32);
 nonzero!(NonZeroU64, u64); nonzero!(NonZeroU128, u128); nonzero!(NonZeroUsize, usize);
 nonzero!(NonZeroI8, i8); nonzero!(NonZeroI16, i16); nonzero!(NonZeroI32, i32);
@@ -785,7 +803,7 @@ macro_rules! nonzero_signed_bounds {
 nonzero_signed_bounds!(NonZeroI8, i8; NonZeroI16, i16; NonZeroI32, i32; NonZeroI64, i64; NonZeroI128, i128; NonZeroIsize, isize);
 
 macro_rules! nonzero_traits {
-    ($($name:ident, $t:ty);*) => {$(
+    ($($name:ty, $t:ty);*) => {$(
         impl crate::marker::Copy for $name {}
         impl crate::clone::Clone for $name { fn clone(&self) -> Self { *self } }
         impl crate::cmp::PartialEq for $name { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
@@ -1088,3 +1106,23 @@ macro_rules! wrapping_impl {
     )*};
 }
 wrapping_impl!(u8 u16 u32 u64 u128 usize i8 i16 i32 i64 i128 isize);
+
+impl crate::marker::Copy for NonZero<char> {}
+impl crate::clone::Clone for NonZero<char> { fn clone(&self) -> Self { *self } }
+impl crate::cmp::PartialEq for NonZero<char> { fn eq(&self, other: &Self) -> bool { self.0 == other.0 } }
+impl crate::cmp::Eq for NonZero<char> {}
+impl crate::cmp::PartialOrd for NonZero<char> {
+    fn partial_cmp(&self, other: &Self) -> Option<crate::cmp::Ordering> { self.0.partial_cmp(&other.0) }
+}
+impl crate::cmp::Ord for NonZero<char> {
+    fn cmp(&self, other: &Self) -> crate::cmp::Ordering { self.0.cmp(&other.0) }
+}
+impl crate::hash::Hash for NonZero<char> {
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { self.0.hash(state) }
+}
+impl crate::fmt::Debug for NonZero<char> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Debug::fmt(&self.0, f) }
+}
+impl crate::fmt::Display for NonZero<char> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { crate::fmt::Display::fmt(&self.0, f) }
+}

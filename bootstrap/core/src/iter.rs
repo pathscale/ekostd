@@ -117,6 +117,7 @@ pub trait Iterator {
     fn flatten(self) -> Flatten<Self> where Self: Sized, Self::Item: IntoIterator {
         Flatten { iter: self, front: None }
     }
+    fn fuse(self) -> Fuse<Self> where Self: Sized { Fuse { iter: Some(self) } }
     fn peekable(self) -> Peekable<Self> where Self: Sized { Peekable { iter: self, peeked: None } }
     fn take_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> TakeWhile<Self, P> where Self: Sized {
         TakeWhile { iter: self, predicate, done: false }
@@ -788,3 +789,49 @@ impl<A, V: FromIterator<A>> FromIterator<Option<A>> for Option<V> {
 impl<I: Clone, U: IntoIterator, F: Clone> Clone for FlatMap<I, U, F> where U::IntoIter: Clone {
     fn clone(&self) -> Self { Self { iter: self.iter.clone(), f: self.f.clone(), front: self.front.clone() } }
 }
+
+/// An iterator that yields `None` forever once the underlying one has yielded `None` once.
+pub struct Fuse<I> { iter: Option<I> }
+impl<I: Clone> Clone for Fuse<I> { fn clone(&self) -> Self { Self { iter: self.iter.clone() } } }
+impl<I: Iterator> Iterator for Fuse<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        match &mut self.iter {
+            Some(iter) => {
+                let item = iter.next();
+                if item.is_none() { self.iter = None; }
+                item
+            }
+            None => None,
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.iter { Some(iter) => iter.size_hint(), None => (0, Some(0)) }
+    }
+}
+impl<I: DoubleEndedIterator> DoubleEndedIterator for Fuse<I> {
+    fn next_back(&mut self) -> Option<I::Item> {
+        match &mut self.iter {
+            Some(iter) => {
+                let item = iter.next_back();
+                if item.is_none() { self.iter = None; }
+                item
+            }
+            None => None,
+        }
+    }
+}
+impl<I: ExactSizeIterator> ExactSizeIterator for Fuse<I> {}
+
+/// An iterator that repeats one element forever.
+pub struct Repeat<A> { element: A }
+impl<A: Clone> Clone for Repeat<A> { fn clone(&self) -> Self { Self { element: self.element.clone() } } }
+impl<A: Clone> Iterator for Repeat<A> {
+    type Item = A;
+    fn next(&mut self) -> Option<A> { Some(self.element.clone()) }
+    fn size_hint(&self) -> (usize, Option<usize>) { (usize::MAX, None) }
+}
+impl<A: Clone> DoubleEndedIterator for Repeat<A> {
+    fn next_back(&mut self) -> Option<A> { Some(self.element.clone()) }
+}
+pub fn repeat<T: Clone>(elt: T) -> Repeat<T> { Repeat { element: elt } }
