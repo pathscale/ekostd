@@ -819,6 +819,182 @@ pub(crate) fn decode(bytes: &[u8], at: usize) -> (char, usize) {
     (unsafe { char::from_u32_unchecked(value) }, len)
 }
 
+/// As `from_utf8`, for a mutable slice: the same checks, then the bytes as a mutable `str`.
+pub const fn from_utf8_mut(v: &mut [u8]) -> Result<&mut str, Utf8Error> {
+    match from_utf8(v) {
+        Ok(_) => {}
+        Err(e) => return Err(e),
+    }
+    unsafe { Ok(from_utf8_unchecked_mut(v)) }
+}
+
+impl str {
+    /// As the free function `from_utf8_mut`.
+    pub const fn from_utf8_mut(v: &mut [u8]) -> Result<&mut str, Utf8Error> {
+        from_utf8_mut(v)
+    }
+
+    /// The pieces of `split_terminator`, last piece first.
+    pub fn rsplit_terminator<P: Pattern>(&self, pat: P) -> RSplitTerminator<'_, P> {
+        RSplitTerminator { inner: self.rsplit(pat), started: false }
+    }
+
+    /// As `split_at`, but `None` when `mid` is past the end or not on a char boundary.
+    pub fn split_at_checked(&self, mid: usize) -> Option<(&str, &str)> {
+        if !self.is_char_boundary(mid) {
+            return None;
+        }
+        let (a, b) = self.as_bytes().split_at(mid);
+        unsafe { Some((from_utf8_unchecked(a), from_utf8_unchecked(b))) }
+    }
+
+    /// The two mutable halves before and after byte `mid`, which must be a char boundary.
+    pub fn split_at_mut(&mut self, mid: usize) -> (&mut str, &mut str) {
+        if !self.is_char_boundary(mid) {
+            intrinsics::abort();
+        }
+        let (a, b) = unsafe { self.as_bytes_mut() }.split_at_mut(mid);
+        unsafe { (from_utf8_unchecked_mut(a), from_utf8_unchecked_mut(b)) }
+    }
+
+    /// As `split_at_mut`, but `None` when `mid` is past the end or not on a char boundary.
+    pub fn split_at_mut_checked(&mut self, mid: usize) -> Option<(&mut str, &mut str)> {
+        if !self.is_char_boundary(mid) {
+            return None;
+        }
+        let (a, b) = unsafe { self.as_bytes_mut() }.split_at_mut(mid);
+        unsafe { Some((from_utf8_unchecked_mut(a), from_utf8_unchecked_mut(b))) }
+    }
+
+    /// Turns `a`..`z` into `A`..`Z` in place; every other byte stays, so the text stays UTF-8.
+    pub fn make_ascii_uppercase(&mut self) {
+        let bytes = unsafe { self.as_bytes_mut() };
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] >= b'a' && bytes[i] <= b'z' {
+                bytes[i] -= 32;
+            }
+            i += 1;
+        }
+    }
+
+    /// Turns `A`..`Z` into `a`..`z` in place; every other byte stays, so the text stays UTF-8.
+    pub fn make_ascii_lowercase(&mut self) {
+        let bytes = unsafe { self.as_bytes_mut() };
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] >= b'A' && bytes[i] <= b'Z' {
+                bytes[i] += 32;
+            }
+            i += 1;
+        }
+    }
+
+    /// The largest char boundary at or before `index`; the length when `index` is at or past the end.
+    pub fn floor_char_boundary(&self, index: usize) -> usize {
+        if index >= self.len() {
+            return self.len();
+        }
+        let mut i = index;
+        while !self.is_char_boundary(i) {
+            i -= 1;
+        }
+        i
+    }
+
+    /// The smallest char boundary at or after `index`; the length when `index` is past the end.
+    pub fn ceil_char_boundary(&self, index: usize) -> usize {
+        if index > self.len() {
+            return self.len();
+        }
+        let mut i = index;
+        while !self.is_char_boundary(i) {
+            i += 1;
+        }
+        i
+    }
+
+    /// The text as UTF-16 code units; chars above U+FFFF come out as a surrogate pair.
+    pub fn encode_utf16(&self) -> EncodeUtf16<'_> {
+        EncodeUtf16 { chars: self.chars(), extra: 0 }
+    }
+}
+
+/// The pieces of `split_terminator` from the right: as `rsplit`, without the empty piece
+/// after a match at the very end.
+pub struct RSplitTerminator<'a, P> {
+    inner: RSplit<'a, P>,
+    started: bool,
+}
+impl<'a, P: Pattern + Clone> Clone for RSplitTerminator<'a, P> {
+    fn clone(&self) -> Self {
+        RSplitTerminator {
+            inner: RSplit {
+                haystack: self.inner.haystack,
+                end: self.inner.end,
+                pattern: self.inner.pattern.clone(),
+                done: self.inner.done,
+            },
+            started: self.started,
+        }
+    }
+}
+impl<'a, P: Pattern> crate::iter::Iterator for RSplitTerminator<'a, P> {
+    type Item = &'a str;
+    fn next(&mut self) -> Option<&'a str> {
+        if !self.started {
+            self.started = true;
+            // The first piece from the right is empty only when the text ends with a match or is empty.
+            match self.inner.next() {
+                Some(piece) if piece.is_empty() => {}
+                other => return other,
+            }
+        }
+        self.inner.next()
+    }
+}
+
+/// UTF-16 code units of a `str`; `extra` holds the low surrogate still to come, or 0.
+pub struct EncodeUtf16<'a> {
+    chars: Chars<'a>,
+    extra: u16,
+}
+impl Clone for EncodeUtf16<'_> {
+    fn clone(&self) -> Self { EncodeUtf16 { chars: self.chars.clone(), extra: self.extra } }
+}
+impl crate::iter::Iterator for EncodeUtf16<'_> {
+    type Item = u16;
+    fn next(&mut self) -> Option<u16> {
+        if self.extra != 0 {
+            let low = self.extra;
+            self.extra = 0;
+            return Some(low);
+        }
+        match self.chars.next() {
+            None => None,
+            Some(c) => {
+                let code = c as u32;
+                if code < 0x10000 {
+                    Some(code as u16)
+                } else {
+                    let v = code - 0x10000;
+                    self.extra = 0xDC00 | (v & 0x3FF) as u16;
+                    Some(0xD800 | (v >> 10) as u16)
+                }
+            }
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.chars.as_str().len();
+        if self.extra == 0 {
+            ((len + 2) / 3, Some(len))
+        } else {
+            ((len + 2) / 3 + 1, Some(len + 1))
+        }
+    }
+}
+impl crate::iter::FusedIterator for EncodeUtf16<'_> {}
+
 pub struct Chars<'a> {
     rest: &'a str,
 }
