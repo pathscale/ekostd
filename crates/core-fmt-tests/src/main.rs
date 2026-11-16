@@ -581,6 +581,45 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "61 d834 dd1e", "{}", h.as_str());
         check!(r, "3", "{}", "a\u{1D11E}".encode_utf16().count());
     }
+    { // lw4-c: slice split family, is_sorted*, fill_with, first_chunk/last_chunk/split_last_chunk
+        fn join<'a, I: Iterator<Item = &'a [i32]>>(pieces: I) -> Buf {
+            let mut b = Buf::new();
+            let mut first = true;
+            for piece in pieces {
+                if !first { let _ = b.write_str(" "); }
+                first = false;
+                let _ = write!(b, "{:?}", piece);
+            }
+            b
+        }
+        check!(r, "true", "{}", [1, 2, 3].is_sorted());
+        check!(r, "false", "{}", [1, 3, 2].is_sorted());
+        check!(r, "true", "{}", [0u8; 0].is_sorted());
+        check!(r, "true", "{}", [3, 2, 1].is_sorted_by(|a, b| a >= b));
+        check!(r, "false", "{}", ["ccc", "a", "bb"].is_sorted_by_key(|s| s.len()));
+        let v = [10, 0, 20, 0, 30];
+        check!(r, "[30] [20] [10]", "{}", join(v.rsplit(|x| *x == 0)).as_str());
+        check!(r, "[10] [20, 0, 30]", "{}", join(v.splitn(2, |x| *x == 0)).as_str());
+        check!(r, "[30] [10, 0, 20]", "{}", join(v.rsplitn(2, |x| *x == 0)).as_str());
+        check!(r, "0", "{}", v.splitn(0, |x| *x == 0).count());
+        check!(r, "[10, 0] [20, 0] [30]", "{}", join(v.split_inclusive(|x| *x == 0)).as_str());
+        check!(r, "[0] [0]", "{}", join([0, 0].split_inclusive(|x| *x == 0)).as_str());
+        check!(r, "[30] [20, 0] [10, 0]", "{}", join(v.split_inclusive(|x| *x == 0).rev()).as_str());
+        let mut w = v;
+        for piece in w.split_mut(|x| *x == 0) {
+            if let Some(first) = piece.first_mut() { *first += 1; }
+        }
+        check!(r, "[11, 0, 21, 0, 31]", "{:?}", w);
+        let mut counter = 0;
+        let mut filled = [0; 4];
+        filled.fill_with(|| { counter += 1; counter });
+        check!(r, "[1, 2, 3, 4]", "{:?}", filled);
+        let a = [1, 2, 3];
+        check!(r, "Some([1, 2])", "{:?}", a.first_chunk::<2>());
+        check!(r, "Some([2, 3])", "{:?}", a.last_chunk::<2>());
+        check!(r, "None", "{:?}", a.first_chunk::<4>());
+        check!(r, "Some(([1, 2], [3]))", "{:?}", a.split_last_chunk::<1>());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
