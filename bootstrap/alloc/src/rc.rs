@@ -216,5 +216,82 @@ impl<T: Default> Default for Rc<T> { fn default() -> Self { Self::new(T::default
 impl<T> Default for Weak<T> { fn default() -> Self { Self::new() } }
 impl<T> From<T> for Rc<T> { fn from(value: T) -> Self { Self::new(value) } }
 
+/// One allocation for the counts and `len` values of `T`, both counts at 1 and the values not yet written.
+/// Its layout is the one `layout_for_inner` computes for the returned pointer, so the `Weak` drop frees it exactly.
+unsafe fn allocate_slice_rc<T>(len: usize) -> *mut RcInner<[T]> {
+    let header = header_layout();
+    let val_align = mem::align_of::<T>();
+    let pad = header.padding_needed_for(val_align);
+    let data_offset = header.size().checked_add(pad).unwrap();
+    let slice_size = mem::size_of::<T>().checked_mul(len).unwrap();
+    let total_size = data_offset.checked_add(slice_size).unwrap();
+    let total_align = if header.align() > val_align { header.align() } else { val_align };
+    let total_size = total_size.checked_add(total_align - 1).unwrap() & !(total_align - 1);
+    let layout = Layout::from_size_align(total_size, total_align).unwrap();
+    let raw = unsafe { alloc::alloc(layout) };
+    if raw.is_null() { alloc::handle_alloc_error(layout) }
+    let inner_ptr = ptr::slice_from_raw_parts_mut(raw.cast::<T>(), len) as *mut RcInner<[T]>;
+    unsafe {
+        (&raw mut (*inner_ptr).strong).write(Cell::new(1));
+        (&raw mut (*inner_ptr).weak).write(Cell::new(1));
+    }
+    inner_ptr
+}
+
+/// A new allocation holding a clone of each element.
+impl<T: Clone> From<&[T]> for Rc<[T]> {
+    fn from(values: &[T]) -> Self {
+        let inner_ptr = unsafe { allocate_slice_rc::<T>(values.len()) };
+        let data_ptr = unsafe { (&raw mut (*inner_ptr).value).cast::<T>() };
+        for (i, item) in values.iter().enumerate() {
+            unsafe { data_ptr.add(i).write(item.clone()) };
+        }
+        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
+    }
+}
+
+/// The elements moved into a new allocation; the Vec is left empty and frees only its own buffer.
+impl<T> From<crate::vec::Vec<T>> for Rc<[T]> {
+    fn from(mut values: crate::vec::Vec<T>) -> Self {
+        let len = values.len();
+        let inner_ptr = unsafe { allocate_slice_rc::<T>(len) };
+        let data_ptr = unsafe { (&raw mut (*inner_ptr).value).cast::<T>() };
+        unsafe {
+            ptr::copy_nonoverlapping(values.as_ptr(), data_ptr, len);
+            values.set_len(0);
+        }
+        Self { ptr: unsafe { NonNull::new_unchecked(inner_ptr) } }
+    }
+}
+
+impl<T> From<Box<[T]>> for Rc<[T]> {
+    fn from(boxed: Box<[T]>) -> Self { Rc::from(Box::into_vec(boxed)) }
+}
+
+/// The bytes copied into a new allocation, read back as a `str` (they came from one, so they are UTF-8).
+impl From<&str> for Rc<str> {
+    fn from(value: &str) -> Self {
+        let bytes: Rc<[u8]> = Rc::from(value.as_bytes());
+        let raw = Rc::into_raw(bytes) as *const str;
+        unsafe { Rc::from_raw(raw) }
+    }
+}
+
+impl From<crate::string::String> for Rc<str> {
+    fn from(value: crate::string::String) -> Self { Self::from(value.as_str()) }
+}
+
+impl From<Box<str>> for Rc<str> {
+    fn from(boxed: Box<str>) -> Self { Self::from(&*boxed) }
+}
+
+/// The items collected in order into a Vec, then moved into one allocation.
+impl<T> core::iter::FromIterator<T> for Rc<[T]> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let items: crate::vec::Vec<T> = iter.into_iter().collect();
+        Rc::from(items)
+    }
+}
+
 impl<T: ?Sized> core::marker::Unpin for Rc<T> {}
 impl<T: ?Sized> core::marker::Unpin for Weak<T> {}
