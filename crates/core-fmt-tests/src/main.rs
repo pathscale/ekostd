@@ -392,6 +392,17 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "[x\t]", "[{}]", " \x0Cx\t".trim_ascii_start());
         check!(r, "[x]", "[{}]", "x \n".trim_ascii_end());
     }
+    { // lw2-d: char::is_ascii_whitespace is the WhatWG set, without vertical tab
+        check!(r, "false", "{}", '\x0B'.is_ascii_whitespace());
+        check!(r, "true", "{}", '\x0C'.is_ascii_whitespace());
+        check!(r, "true", "{}", ' '.is_ascii_whitespace());
+        check!(r, "true", "{}", '\t'.is_ascii_whitespace());
+        check!(r, "true", "{}", '\n'.is_ascii_whitespace());
+        check!(r, "true", "{}", '\r'.is_ascii_whitespace());
+        check!(r, "false", "{}", '\u{a0}'.is_ascii_whitespace());
+        check!(r, "false", "{}", 'a'.is_ascii_whitespace());
+        check!(r, "false", "{}", b'\x0B'.is_ascii_whitespace());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
