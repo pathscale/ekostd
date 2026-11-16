@@ -204,3 +204,9 @@ impl<T> Box<[core::mem::MaybeUninit<T>]> {
 
 impl<T: Default> Default for Box<T> { fn default() -> Self { Box::new(T::default()) } }
 impl<T> Default for Box<[T]> { fn default() -> Self { crate::vec::Vec::new().into_boxed_slice() } }
+
+impl<T> core::iter::FromIterator<T> for Box<[T]> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        iter.into_iter().collect::<crate::vec::Vec<T>>().into_boxed_slice()
+    }
+}

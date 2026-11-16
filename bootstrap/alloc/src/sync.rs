@@ -374,3 +374,18 @@ impl From<crate::boxed::Box<str>> for Arc<str> {
 impl<T> Default for Arc<[T]> {
     fn default() -> Arc<[T]> { Arc::from(Vec::new()) }
 }
+
+impl<T> Arc<T> {
+    /// The value, when this is the only strong reference; otherwise the reference back.
+    pub fn try_unwrap(this: Self) -> Result<T, Self> {
+        if this.inner().strong.compare_exchange(1, 0, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+            return Err(this);
+        }
+        let _ = this.inner().strong.load(Ordering::Acquire);
+        let this = ManuallyDrop::new(this);
+        let value = unsafe { ptr::read(&(*this.ptr.as_ptr()).value) };
+        // The implicit weak reference that the strong ones shared is released here.
+        let _weak = Weak { ptr: this.ptr };
+        Ok(value)
+    }
+}

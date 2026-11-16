@@ -147,14 +147,17 @@ pub mod aarch64 {
         })
     }
 
-    /// Each 16-bit lane shifted right by `N` and narrowed to its low 8 bits. Called as `vshrn_n_u16(a, n)`.
-    pub unsafe fn vshrn_n_u16(a: uint16x8_t, n: i32) -> uint8x8_t {
-        lanes!(8, uint8x8_t, |i| (a.0[i] >> (n as u16)) as u8)
+    /// Each 16-bit lane shifted right by `N` and narrowed to its low 8 bits. Called as `vshrn_n_u16::<N>(a)` or `vshrn_n_u16(a, N)`.
+    #[rustc_legacy_const_generics(1)]
+    pub unsafe fn vshrn_n_u16<const N: i32>(a: uint16x8_t) -> uint8x8_t {
+        lanes!(8, uint8x8_t, |i| (a.0[i] >> (N as u16)) as u8)
     }
-    /// Called as `vget_lane_u64(v, 0)`.
-    pub unsafe fn vget_lane_u64(v: uint64x1_t, lane: i32) -> u64 { v.0[lane as usize] }
-    /// Called as `vgetq_lane_u64(v, lane)`.
-    pub unsafe fn vgetq_lane_u64(v: uint64x2_t, lane: i32) -> u64 { v.0[lane as usize] }
+    /// Called as `vget_lane_u64::<LANE>(v)` or `vget_lane_u64(v, LANE)`.
+    #[rustc_legacy_const_generics(1)]
+    pub unsafe fn vget_lane_u64<const LANE: i32>(v: uint64x1_t) -> u64 { v.0[LANE as usize] }
+    /// Called as `vgetq_lane_u64::<LANE>(v)` or `vgetq_lane_u64(v, LANE)`.
+    #[rustc_legacy_const_generics(1)]
+    pub unsafe fn vgetq_lane_u64<const LANE: i32>(v: uint64x2_t) -> u64 { v.0[LANE as usize] }
 
     pub fn vaddl_u8(a: uint8x8_t, b: uint8x8_t) -> uint16x8_t {
         lanes!(8, uint16x8_t, |i| (a.0[i] as u16) + (b.0[i] as u16))
@@ -214,8 +217,33 @@ pub mod aarch64 {
         }
         m
     }
-    pub unsafe fn vshrq_n_u8(a: uint8x16_t, n: i32) -> uint8x16_t {
-        lanes!(16, uint8x16_t, |i| a.0[i] >> (n as u32))
+    #[rustc_legacy_const_generics(1)]
+    pub unsafe fn vshrq_n_u8<const N: i32>(a: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| a.0[i] >> (N as u32))
+    }
+    /// Each lane is all ones where `a & b` is not zero there, zero elsewhere.
+    pub unsafe fn vtstq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| if a.0[i] & b.0[i] != 0 { 0xff } else { 0 })
+    }
+    pub unsafe fn vmvnq_u8(a: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| !a.0[i])
+    }
+    /// Table lookup that keeps the lane of `a` where the index is out of range.
+    pub unsafe fn vqtbx1q_u8(a: uint8x16_t, t: uint8x16_t, idx: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| {
+            let j = idx.0[i] as usize;
+            if j < 16 { t.0[j] } else { a.0[i] }
+        })
+    }
+    pub unsafe fn vcgeq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| if a.0[i] >= b.0[i] { 0xff } else { 0 })
+    }
+    /// Adds neighbouring lanes: the low half of the result from `a`, the high half from `b`.
+    pub unsafe fn vpaddq_u8(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        lanes!(16, uint8x16_t, |i| {
+            let (src, k) = if i < 8 { (&a, i) } else { (&b, i - 8) };
+            src.0[2 * k].wrapping_add(src.0[2 * k + 1])
+        })
     }
     pub unsafe fn vextq_u8(a: uint8x16_t, b: uint8x16_t, n: i32) -> uint8x16_t {
         lanes!(16, uint8x16_t, |i| {
