@@ -340,6 +340,25 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     check!(r, "\"\\u{7f}\"", "{:?}", "\u{7f}");
     check!(r, "\"é\"", "{:?}", "é");
 
+    { // lw2-a: exact length of integer ranges (Range and RangeInclusive size_hint / len)
+        check!(r, "(200, Some(200))", "{:?}", (-100i8..100).size_hint());
+        check!(r, "255", "{}", (i8::MIN..i8::MAX).len());
+        check!(r, "(0, Some(0))", "{:?}", (5u32..3).size_hint());
+        check!(r, "(18446744073709551615, Some(18446744073709551615))", "{:?}", (i64::MIN..i64::MAX).size_hint());
+        check!(r, "(18446744073709551615, None)", "{:?}", (0u128..u128::MAX).size_hint());
+        check!(r, "5", "{}", (1u8..=5).len());
+        check!(r, "(256, Some(256))", "{:?}", (0u8..=255).size_hint());
+        check!(r, "256", "{}", (-128i8..=127).len());
+        check!(r, "(0, Some(0))", "{:?}", (3i16..=2).size_hint());
+        check!(r, "(18446744073709551615, None)", "{:?}", (0u64..=u64::MAX).size_hint());
+        let mut done = 1u8..=2;
+        let _ = done.next();
+        let _ = done.next();
+        check!(r, "(0, Some(0))", "{:?}", done.size_hint());
+        let mut back = 1u8..=3;
+        let _ = back.next_back();
+        check!(r, "2", "{}", back.len());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
