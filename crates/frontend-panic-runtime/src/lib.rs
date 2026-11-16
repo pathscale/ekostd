@@ -128,17 +128,24 @@ mod diagnostics {
     // SIGQUIT frame dump. A daemon that stops making progress has no debugger attached, and the
     // only thing it can say about itself is where it is. `kill -QUIT <pid>` makes the thread that
     // receives the signal print its program counter, link register and the frame-pointer chain
-    // from the interrupted context (not the handler's own frames), then abort. The addresses are
-    // raw; with the `image slide` line they symbolize against `nm -n` of the same binary (or
-    // `atos -o <binary> -s <slide>`). The handler uses only `write`, which is async-signal-safe,
-    // and no allocation. It is installed before `main` runs, from a Mach-O initializer, so no
+    // from the interrupted context (not the handler's own frames), then the same for every other
+    // thread of the task, then abort. The kernel hands a process-directed signal to any thread
+    // that does not block it, usually the one parked in `accept`, so the interrupted thread alone
+    // rarely is the one doing the work; the others are suspended and read through Mach
+    // `thread_get_state`. The addresses are raw; with the `image slide` line they symbolize
+    // against `nm -n` of the same binary. The handler uses only `write` and the Mach thread calls,
+    // and no heap allocation (the thread list is a kernel-provided array, never freed: the
+    // process aborts). It is installed before `main` runs, from a Mach-O initializer, so no
     // caller has to remember to ask for it.
     #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
     mod quit {
-        use super::{_dyld_get_image_vmaddr_slide, walk, write_hex, write_str};
+        use super::{_dyld_get_image_vmaddr_slide, walk, write_hex, write_str, write_u32};
 
         const SIGQUIT: i32 = 3;
         const SA_SIGINFO: i32 = 0x40;
+        /// `ARM_THREAD_STATE64`: x0..x28, fp, lr, sp, pc, cpsr and pad; 272 bytes, 68 words.
+        const ARM_THREAD_STATE64: i32 = 6;
+        const ARM_THREAD_STATE64_COUNT: u32 = 68;
 
         /// Darwin `struct sigaction`: handler, mask, flags.
         #[repr(C)]
@@ -151,6 +158,11 @@ mod diagnostics {
         unsafe extern "C" {
             fn sigaction(sig: i32, act: *const SigAction, old: *mut SigAction) -> i32;
             fn abort() -> !;
+            static mach_task_self_: u32;
+            fn mach_thread_self() -> u32;
+            fn task_threads(task: u32, threads: *mut *mut u32, count: *mut u32) -> i32;
+            fn thread_suspend(thread: u32) -> i32;
+            fn thread_get_state(thread: u32, flavor: i32, state: *mut u64, count: *mut u32) -> i32;
         }
 
         extern "C" fn on_quit(_sig: i32, _info: *const u8, ucontext: *const u8) {
@@ -171,7 +183,39 @@ mod diagnostics {
                 write_hex(sp);
                 write_str("\n");
                 walk(fp as *const usize);
+                others();
                 abort()
+            }
+        }
+
+        /// Every thread but the interrupted one: suspended, then pc, lr and its frame chain.
+        unsafe fn others() {
+            unsafe {
+                let me = mach_thread_self();
+                let mut threads: *mut u32 = core::ptr::null_mut();
+                let mut count = 0u32;
+                if task_threads(mach_task_self_, &mut threads, &mut count) != 0 {
+                    return;
+                }
+                for index in 0..count {
+                    let thread = *threads.add(index as usize);
+                    if thread == me || thread_suspend(thread) != 0 {
+                        continue;
+                    }
+                    let mut state = [0u64; 34];
+                    let mut words = ARM_THREAD_STATE64_COUNT;
+                    if thread_get_state(thread, ARM_THREAD_STATE64, state.as_mut_ptr(), &mut words) != 0 {
+                        continue;
+                    }
+                    write_str("thread ");
+                    write_u32(index);
+                    write_str("\npc ");
+                    write_hex(state[32] as usize);
+                    write_str("\nlr ");
+                    write_hex(state[30] as usize);
+                    write_str("\n");
+                    walk(state[29] as *const usize);
+                }
             }
         }
 
