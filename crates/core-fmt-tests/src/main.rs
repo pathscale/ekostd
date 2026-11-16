@@ -856,6 +856,70 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "false", "{}", !&true);
         check!(r, "255", "{}", !&0u8);
     }
+    { // lw5-d: array API: each_ref/each_mut, by-value IntoIter traits, as_flattened, slice equality, tuple conversions
+        let a = [1, 2, 3];
+        let refs = a.each_ref();
+        check!(r, "6", "{}", *refs[0] + *refs[1] + *refs[2]);
+        let mut m = [1, 2, 3];
+        for x in m.each_mut() { *x += 1; }
+        check!(r, "[2, 3, 4]", "{:?}", m);
+        check!(r, "[2, 3, 4]", "{:?}", m.as_mut_slice());
+
+        let mut rev = Buf::new();
+        for x in [1, 2, 3].into_iter().rev() { let _ = write!(rev, "{} ", x); }
+        check!(r, "3 2 1 ", "{}", rev.as_str());
+
+        let mut it = [1, 2, 3].into_iter();
+        let _ = it.next();
+        check!(r, "2", "{}", it.len());
+        check!(r, "[2, 3]", "{:?}", it.as_slice());
+
+        let mut it = [1, 2, 3].into_iter();
+        let _ = it.next_back();
+        check!(r, "IntoIter([1, 2])", "{:?}", it);
+
+        let mut it = [1, 2, 3].into_iter();
+        let _ = it.next();
+        let mut copy = it.clone();
+        check!(r, "Some(2) Some(3) None", "{:?} {:?} {:?}", copy.next(), copy.next(), copy.next());
+        check!(r, "Some(2) Some(3) None", "{:?} {:?} {:?}", it.next(), it.next(), it.next());
+
+        check!(r, "None", "{:?}", core::array::IntoIter::<u8, 3>::empty().next());
+
+        check!(r, "[1, 2, 3, 4]", "{:?}", [[1, 2], [3, 4]][..].as_flattened());
+        let mut grid = [[1, 2], [3, 4]];
+        grid[..].as_flattened_mut()[2] = 9;
+        check!(r, "[[1, 2], [9, 4]]", "{:?}", grid);
+
+        check!(r, "true false true", "{} {} {}", [1, 2] == [1, 2][..], [1, 2][..] == [1, 3], [1, 2] == &[1, 2][..]);
+        let mut s = [1, 2, 3];
+        check!(r, "false true", "{} {}", [1, 2] == s[..], [1, 2, 3] == &mut s[..]);
+
+        let arr: [i32; 3] = core::convert::From::from((1, 2, 3));
+        let pair: (i32, i32) = core::convert::From::from([4, 5]);
+        check!(r, "[1, 2, 3] (4, 5)", "{:?} {:?}", arr, pair);
+
+        let mut v = [7, 8, 9];
+        let got: Result<[i32; 2], core::array::TryFromSliceError> = core::convert::TryFrom::try_from(&mut v[..2]);
+        check!(r, "Ok([7, 8])", "{:?}", got);
+        let bad: Result<[i32; 2], core::array::TryFromSliceError> = core::convert::TryFrom::try_from(&mut v[..]);
+        check!(r, "true", "{}", bad.is_err());
+
+        struct D<'a>(&'a core::cell::Cell<u32>);
+        impl core::ops::Drop for D<'_> {
+            fn drop(&mut self) { self.0.set(self.0.get() + 1); }
+        }
+        let drops = core::cell::Cell::new(0u32);
+        {
+            let mut it = [D(&drops), D(&drops), D(&drops), D(&drops)].into_iter();
+            {
+                let _first = it.next();
+                let _last = it.next_back();
+            }
+            check!(r, "2", "{}", drops.get());
+        }
+        check!(r, "4", "{}", drops.get());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
