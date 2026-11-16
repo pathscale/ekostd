@@ -44,6 +44,15 @@ unsafe fn data_offset_for_ptr<T: ?Sized>(ptr: *const T) -> usize {
     layout.size() + layout.padding_needed_for(val_align)
 }
 
+/// Rounds `size` up to a multiple of `align` (a power of two), as `Layout::pad_to_align` does.
+#[inline]
+fn pad_to_align(size: usize, align: usize) -> usize {
+    match size.checked_add(align - 1) {
+        Some(n) => n & !(align - 1),
+        None => panic!("ArcInner layout overflow"),
+    }
+}
+
 #[inline]
 unsafe fn layout_for_inner<T: ?Sized>(ptr: *const ArcInner<T>) -> Layout {
     let value_ptr = unsafe { &raw const (*ptr).value };
@@ -56,6 +65,7 @@ unsafe fn layout_for_inner<T: ?Sized>(ptr: *const ArcInner<T>) -> Layout {
         None => panic!("layout_for_inner overflow"),
     };
     let total_align = if header.align() > align { header.align() } else { align };
+    let total_size = pad_to_align(total_size, total_align);
     unsafe { Layout::from_size_align_unchecked(total_size, total_align) }
 }
 
@@ -322,6 +332,7 @@ unsafe fn allocate_slice_arc<T>(len: usize) -> *mut ArcInner<[T]> {
     let slice_size = mem::size_of::<T>().checked_mul(len).unwrap();
     let total_size = data_offset.checked_add(slice_size).unwrap();
     let total_align = if header.align() > val_align { header.align() } else { val_align };
+    let total_size = pad_to_align(total_size, total_align);
     let layout = Layout::from_size_align(total_size, total_align).unwrap();
     let raw = unsafe { alloc::alloc(layout) };
     let slice_ptr = ptr::slice_from_raw_parts_mut(raw.cast::<T>(), len);
