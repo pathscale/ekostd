@@ -910,6 +910,11 @@ impl<I: Iterator> Peekable<I> {
         if self.peeked.is_none() { self.peeked = Some(self.iter.next()); }
         match &self.peeked { Some(Some(x)) => Some(x), _ => None }
     }
+    /// Looks at the next item through a mutable reference, so it can be changed before it is taken.
+    pub fn peek_mut(&mut self) -> Option<&mut I::Item> {
+        if self.peeked.is_none() { self.peeked = Some(self.iter.next()); }
+        match &mut self.peeked { Some(Some(x)) => Some(x), _ => None }
+    }
     /// Takes the next item only when `accept` approves of it.
     pub fn next_if<F: crate::ops::FnOnce(&I::Item) -> bool>(&mut self, accept: F) -> Option<I::Item> {
         match self.next() {
@@ -917,13 +922,65 @@ impl<I: Iterator> Peekable<I> {
             other => { self.peeked = Some(other); None }
         }
     }
+    /// Takes the next item only when it equals `expected`.
+    pub fn next_if_eq<T: ?Sized>(&mut self, expected: &T) -> Option<I::Item>
+    where
+        I::Item: crate::cmp::PartialEq<T>,
+    {
+        self.next_if(|next| next == expected)
+    }
 }
 impl<I: Iterator> Iterator for Peekable<I> {
     type Item = I::Item;
     fn next(&mut self) -> Option<I::Item> {
         match self.peeked.take() { Some(x) => x, None => self.iter.next() }
     }
+    /// Counts a peeked item too; a peeked end means nothing is left.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let peek_len = match self.peeked {
+            Some(None) => return (0, Some(0)),
+            Some(Some(_)) => 1,
+            None => 0,
+        };
+        let (lo, hi) = self.iter.size_hint();
+        (lo.saturating_add(peek_len), hi.and_then(|h| h.checked_add(peek_len)))
+    }
+    fn count(self) -> usize {
+        match self.peeked {
+            Some(None) => 0,
+            Some(Some(_)) => 1 + self.iter.count(),
+            None => self.iter.count(),
+        }
+    }
+    fn last(self) -> Option<I::Item> {
+        let peek_opt = match self.peeked {
+            Some(None) => return None,
+            Some(v) => v,
+            None => None,
+        };
+        self.iter.last().or(peek_opt)
+    }
+    fn nth(&mut self, n: usize) -> Option<I::Item> {
+        match self.peeked.take() {
+            Some(None) => None,
+            Some(v @ Some(_)) if n == 0 => v,
+            Some(Some(_)) => self.iter.nth(n - 1),
+            None => self.iter.nth(n),
+        }
+    }
 }
+/// Takes from the back of the inner iterator; a peeked item is the last one handed out.
+impl<I: DoubleEndedIterator> DoubleEndedIterator for Peekable<I> {
+    fn next_back(&mut self) -> Option<I::Item> {
+        match self.peeked.as_mut() {
+            Some(v @ Some(_)) => self.iter.next_back().or_else(|| v.take()),
+            Some(None) => None,
+            None => self.iter.next_back(),
+        }
+    }
+}
+impl<I: ExactSizeIterator> ExactSizeIterator for Peekable<I> {}
+impl<I: FusedIterator> FusedIterator for Peekable<I> {}
 
 /// The leading items a predicate accepts.
 pub struct TakeWhile<I, P> { iter: I, predicate: P, done: bool }
