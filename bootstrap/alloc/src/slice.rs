@@ -28,6 +28,18 @@ impl<T> [T] {
     pub fn sort(&mut self) where T: Ord { self.sort_by(Ord::cmp); }
     #[rustc_allow_incoherent_impl]
     pub fn sort_unstable(&mut self) where T: Ord { self.sort_unstable_by(Ord::cmp); }
+    /// A new vector of this slice repeated `n` times; panics if the length overflows.
+    #[rustc_allow_incoherent_impl]
+    pub fn repeat(&self, n: usize) -> crate::vec::Vec<T> where T: Copy {
+        let capacity = self.len().checked_mul(n).expect("capacity overflow");
+        let mut out = crate::vec::Vec::with_capacity(capacity);
+        let mut i = 0;
+        while i < n {
+            out.extend_from_slice(self);
+            i += 1;
+        }
+        out
+    }
 }
 
 /// What `[V]::concat` joins into: a `String` for strings, a `Vec<T>` for slices.
@@ -60,17 +72,58 @@ impl<T> [T] {
     }
 }
 
-impl<S: core::borrow::Borrow<str>> [S] {
-    /// The strings one after another, with `separator` between each two.
-    #[rustc_allow_incoherent_impl]
-    pub fn join(&self, separator: &str) -> crate::string::String {
+/// What `[V]::join` builds: a `String` for strings with a `&str` separator, a `Vec<T>` for slices with a `&T` or
+/// `&[T]` separator.
+pub trait Join<Separator> {
+    type Output;
+    fn join(slice: &Self, sep: Separator) -> Self::Output;
+}
+impl<S: core::borrow::Borrow<str>> Join<&str> for [S] {
+    type Output = crate::string::String;
+    /// The strings one after another, with `sep` between each two.
+    fn join(slice: &Self, sep: &str) -> crate::string::String {
         let mut out = crate::string::String::new();
-        for (index, piece) in self.iter().enumerate() {
+        for (index, piece) in slice.iter().enumerate() {
             if index != 0 {
-                out.push_str(separator);
+                out.push_str(sep);
             }
             out.push_str(piece.borrow());
         }
         out
+    }
+}
+impl<T: Clone, V: core::borrow::Borrow<[T]>> Join<&T> for [V] {
+    type Output = crate::vec::Vec<T>;
+    /// The slices one after another, with a clone of `sep` between each two.
+    fn join(slice: &Self, sep: &T) -> crate::vec::Vec<T> {
+        let mut out = crate::vec::Vec::new();
+        for (index, piece) in slice.iter().enumerate() {
+            if index != 0 {
+                out.push(sep.clone());
+            }
+            out.extend_from_slice(piece.borrow());
+        }
+        out
+    }
+}
+impl<T: Clone, V: core::borrow::Borrow<[T]>> Join<&[T]> for [V] {
+    type Output = crate::vec::Vec<T>;
+    /// The slices one after another, with the elements of `sep` between each two.
+    fn join(slice: &Self, sep: &[T]) -> crate::vec::Vec<T> {
+        let mut out = crate::vec::Vec::new();
+        for (index, piece) in slice.iter().enumerate() {
+            if index != 0 {
+                out.extend_from_slice(sep);
+            }
+            out.extend_from_slice(piece.borrow());
+        }
+        out
+    }
+}
+impl<T> [T] {
+    /// The elements one after another, with `sep` between each two; an empty slice joins to an empty result.
+    #[rustc_allow_incoherent_impl]
+    pub fn join<Separator>(&self, sep: Separator) -> <[T] as Join<Separator>>::Output where [T]: Join<Separator> {
+        Join::join(self, sep)
     }
 }

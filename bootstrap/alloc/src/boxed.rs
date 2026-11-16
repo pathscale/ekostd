@@ -174,6 +174,35 @@ impl<Args: core::marker::Tuple, F: FnOnce<Args> + ?Sized> FnOnce<Args> for Box<F
     }
 }
 
+impl<T> Box<T> {
+    /// A box with room for one `T`, not yet initialized; a zero-sized `T` gets a dangling pointer and no allocation.
+    pub fn new_uninit() -> Box<core::mem::MaybeUninit<T>> {
+        let layout = Layout::new::<T>();
+        let raw = unsafe { alloc::alloc(layout).cast::<core::mem::MaybeUninit<T>>() };
+        // SAFETY: `raw` is non-null and fits `MaybeUninit<T>`, which needs no initialization.
+        unsafe { Box::from_raw(raw) }
+    }
+}
+
+impl<T> Box<core::mem::MaybeUninit<T>> {
+    /// Stores `value` in the box and returns it as an initialized `Box<T>`.
+    pub fn write(boxed: Self, value: T) -> Box<T> {
+        let raw = Box::into_raw(boxed).cast::<T>();
+        // SAFETY: `raw` came from a box of `MaybeUninit<T>`, which has the layout of `T`; it is now initialized.
+        unsafe {
+            raw.write(value);
+            Box::from_raw(raw)
+        }
+    }
+
+    /// # Safety
+    /// The value must be initialized.
+    pub unsafe fn assume_init(self) -> Box<T> {
+        let raw = Box::into_raw(self);
+        unsafe { Box::from_raw(raw.cast::<T>()) }
+    }
+}
+
 impl<T> Box<[T]> {
     /// A boxed slice of `len` uninitialized elements.
     pub fn new_uninit_slice(len: usize) -> Box<[core::mem::MaybeUninit<T>]> {

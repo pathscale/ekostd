@@ -85,6 +85,22 @@ impl str {
     }
 }
 
+impl str {
+    /// A new string with the first `count` matches of `pat` replaced by `to`, left to right.
+    #[rustc_allow_incoherent_impl]
+    pub fn replacen<P: core::str::pattern::Pattern>(&self, pat: P, to: &str, count: usize) -> crate::string::String {
+        let mut out = crate::string::String::new();
+        let mut last = 0;
+        for (start, matched) in self.match_indices(pat).take(count) {
+            out.push_str(&self[last..start]);
+            out.push_str(to);
+            last = start + matched.len();
+        }
+        out.push_str(&self[last..]);
+        out
+    }
+}
+
 fn map_uppercase_sigma(from: &str, i: usize) -> char {
     fn case_ignorable_then_cased<I: Iterator<Item = char>>(iter: I) -> bool {
         match iter.skip_while(|&c| c.is_case_ignorable()).next() {
