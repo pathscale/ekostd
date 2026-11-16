@@ -1148,6 +1148,76 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "4", "{}", [core::num::Wrapping(250u8), core::num::Wrapping(10)].iter().sum::<core::num::Wrapping<u8>>().0);
         check!(r, "0", "{}", [core::num::Wrapping(16u8), core::num::Wrapping(16)].into_iter().product::<core::num::Wrapping<u8>>().0);
     }
+    { // lw5-c: iter impls: StepBy from the back, adapter Debug, Clone and FusedIterator
+        let mut got = [0i32; 4];
+        let mut k = 0;
+        for x in (0..10).step_by(3).rev() { if k < 4 { got[k] = x; } k += 1; }
+        check!(r, "[9, 6, 3, 0] 4", "{:?} {}", got, k);
+        let mut s = (0..10).step_by(3);
+        let a = s.next();
+        let b = s.next_back();
+        let c = s.next();
+        let d = s.next_back();
+        let e = s.next();
+        let f = s.next_back();
+        check!(r, "Some(0) Some(9) Some(3) Some(6) None None", "{:?} {:?} {:?} {:?} {:?} {:?}", a, b, c, d, e, f);
+        check!(r, "Some(0)", "{:?}", (0..1).step_by(5).next_back());
+        check!(r, "None", "{:?}", (0..0).step_by(2).next_back());
+        check!(r, "Some(8)", "{:?}", (0..11).step_by(4).next_back());
+        let mut t = (0..11).step_by(4);
+        let t0 = t.next();
+        let t1 = t.next_back();
+        let t2 = t.next_back();
+        let t3 = t.next();
+        check!(r, "Some(0) Some(8) Some(4) None", "{:?} {:?} {:?} {:?}", t0, t1, t2, t3);
+        let mut sb = (0..10).step_by(3);
+        sb.next();
+        let mut sb2 = sb.clone();
+        check!(r, "Some(3) Some(9)", "{:?} {:?}", sb2.next(), sb2.next_back());
+
+        check!(r, "Repeat { element: 7 }", "{:?}", core::iter::repeat(7));
+        check!(r, "Empty", "{:?}", core::iter::empty::<u8>());
+        check!(r, "Map { iter: Repeat { element: 7 } }", "{:?}", core::iter::repeat(7).map(|x| x + 1));
+        check!(r, "Filter { iter: Repeat { element: 7 } }", "{:?}", core::iter::repeat(7).filter(|_| true));
+        check!(r, "Rev { iter: Repeat { element: 7 } }", "{:?}", core::iter::repeat(7).rev());
+        check!(r, "Take { iter: Repeat { element: 7 }, n: 2 }", "{:?}", core::iter::repeat(7).take(2));
+        check!(r, "Skip { iter: Repeat { element: 7 }, n: 1 }", "{:?}", core::iter::repeat(7).skip(1));
+        check!(r, "Enumerate { iter: Repeat { element: 7 }, count: 0 }", "{:?}", core::iter::repeat(7).enumerate());
+        check!(r, "Zip { a: Repeat { element: 7 }, b: Empty }", "{:?}", core::iter::repeat(7).zip(core::iter::empty::<u8>()));
+        check!(r, "Chain { a: Some(Empty), b: Some(Empty) }", "{:?}", core::iter::empty::<u8>().chain(core::iter::empty::<u8>()));
+        check!(r, "Copied { it: Repeat { element: 7 } }", "{:?}", core::iter::repeat(&7).copied());
+        check!(r, "Peekable { iter: Repeat { element: 7 }, peeked: None }", "{:?}", core::iter::repeat(7).peekable());
+        check!(r, "SkipWhile { iter: Repeat { element: 7 }, flag: false }", "{:?}", core::iter::repeat(7).skip_while(|_| false));
+        check!(r, "TakeWhile { iter: Repeat { element: 7 }, flag: false }", "{:?}", core::iter::repeat(7).take_while(|_| true));
+        check!(r, "MapWhile { iter: Repeat { element: 7 } }", "{:?}", core::iter::repeat(7).map_while(|x| Some(x)));
+        check!(r, "Successors { next: Some(1) }", "{:?}", core::iter::successors(Some(1u8), |_| None));
+
+        let mut p = (1..5).peekable();
+        let _ = p.peek();
+        let mut q = p.clone();
+        check!(r, "Some(1) Some(1)", "{:?} {:?}", q.next(), p.next());
+        let mut tw = (1..5).take_while(|&x| x < 4);
+        tw.next();
+        check!(r, "2 2", "{} {}", tw.clone().count(), tw.count());
+        let mut mw = (1..5).map_while(|x| if x < 4 { Some(x * 10) } else { None });
+        mw.next();
+        check!(r, "Some(20) Some(20)", "{:?} {:?}", mw.clone().next(), mw.next());
+        let mut fl = (0..2).map(|x| x..x + 2).flatten();
+        fl.next();
+        check!(r, "3 3", "{} {}", fl.clone().count(), fl.count());
+
+        fn fused<T: core::iter::FusedIterator>(_: &T) {}
+        fused(&(1..3).map(|x| x));
+        fused(&(1..3).rev());
+        fused(&(1..3).zip(1..2));
+        fused(&core::iter::repeat(1).fuse());
+        fused(&(1..3).enumerate());
+        fused(&(1..3).take(1));
+        fused(&(1..3).filter(|_| true));
+        fused(&(1..3).take_while(|_| true));
+        fused(&core::iter::successors(Some(1u8), |_| None));
+        check!(r, "fused", "{}", "fused");
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
