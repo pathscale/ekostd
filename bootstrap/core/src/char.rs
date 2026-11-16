@@ -69,8 +69,9 @@ impl char {
         (*self >= 'a' && *self <= 'z') || (*self >= 'A' && *self <= 'Z')
     }
     pub const fn is_ascii_alphanumeric(&self) -> bool { self.is_ascii_alphabetic() || self.is_ascii_digit() }
+    /// Space, tab, line feed, form feed or carriage return; vertical tab (U+000B) is not included.
     pub const fn is_ascii_whitespace(&self) -> bool {
-        *self == ' ' || (*self >= '\t' && *self <= '\r')
+        matches!(*self, ' ' | '\t' | '\n' | '\x0C' | '\r')
     }
     pub const fn is_whitespace(self) -> bool {
         matches!(self, '\u{9}'..='\u{d}' | '\u{20}' | '\u{85}' | '\u{a0}' | '\u{1680}' |
