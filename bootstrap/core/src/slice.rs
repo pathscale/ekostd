@@ -914,15 +914,44 @@ impl<T> [T] {
         Some(&mut head[0])
     }
 
+    /// Stable: insertion sort on runs of 16, then bottom-up in-place SymMerge of neighbouring runs.
     pub fn sort_by<F>(&mut self, mut compare: F)
     where
         F: crate::ops::FnMut(&T, &T) -> Ordering,
     {
+        const RUN: usize = 16;
         let len = self.len();
-        let mut i = 1;
-        while i < len {
+        if len < 2 {
+            return;
+        }
+        let mut start = 0;
+        while start < len {
+            let end = if len - start > RUN { start + RUN } else { len };
+            self.insertion_sort_range(start, end, &mut compare);
+            start = end;
+        }
+        let mut width = RUN;
+        while width < len {
+            let mut a = 0;
+            while a + width < len {
+                let m = a + width;
+                let b = if len - m > width { m + width } else { len };
+                self.sym_merge(a, m, b, &mut compare);
+                a = b;
+            }
+            width *= 2;
+        }
+    }
+
+    /// Sorts `self[lo..hi]`; swaps only on `Greater`, so equal elements keep their order.
+    fn insertion_sort_range<F>(&mut self, lo: usize, hi: usize, compare: &mut F)
+    where
+        F: crate::ops::FnMut(&T, &T) -> Ordering,
+    {
+        let mut i = lo + 1;
+        while i < hi {
             let mut j = i;
-            while j > 0 && compare(&self[j - 1], &self[j]) == Ordering::Greater {
+            while j > lo && compare(&self[j - 1], &self[j]) == Ordering::Greater {
                 self.swap(j - 1, j);
                 j -= 1;
             }
@@ -930,11 +959,102 @@ impl<T> [T] {
         }
     }
 
-    pub fn sort_unstable_by<F>(&mut self, compare: F)
+    /// Merges the sorted neighbours `self[a..m]` and `self[m..b]` in place, stably (Kim & Kutzner SymMerge).
+    fn sym_merge<F>(&mut self, a: usize, m: usize, b: usize, compare: &mut F)
     where
         F: crate::ops::FnMut(&T, &T) -> Ordering,
     {
-        self.sort_by(compare);
+        if m - a == 1 {
+            // The first element of [m, b) not less than self[a]; self[a] goes just before it.
+            let mut i = m;
+            let mut j = b;
+            while i < j {
+                let h = i + (j - i) / 2;
+                if compare(&self[h], &self[a]) == Ordering::Less { i = h + 1; } else { j = h; }
+            }
+            let mut k = a;
+            while k + 1 < i {
+                self.swap(k, k + 1);
+                k += 1;
+            }
+            return;
+        }
+        if b - m == 1 {
+            // The first element of [a, m) greater than self[m]; self[m] goes just before it.
+            let mut i = a;
+            let mut j = m;
+            while i < j {
+                let h = i + (j - i) / 2;
+                if compare(&self[m], &self[h]) != Ordering::Less { i = h + 1; } else { j = h; }
+            }
+            let mut k = m;
+            while k > i {
+                self.swap(k, k - 1);
+                k -= 1;
+            }
+            return;
+        }
+        let mid = a + (b - a) / 2;
+        let n = mid + m;
+        let (mut start, mut r) = if m > mid { (n - b, mid) } else { (a, m) };
+        let p = n - 1;
+        while start < r {
+            let c = start + (r - start) / 2;
+            if compare(&self[p - c], &self[c]) != Ordering::Less { start = c + 1; } else { r = c; }
+        }
+        let end = n - start;
+        if start < m && m < end {
+            self[start..end].rotate_left(m - start);
+        }
+        if a < start && start < mid {
+            self.sym_merge(a, start, mid, compare);
+        }
+        if mid < end && end < b {
+            self.sym_merge(mid, end, b, compare);
+        }
+    }
+
+    /// Heapsort: O(n log n) worst case, in place, not stable.
+    pub fn sort_unstable_by<F>(&mut self, mut compare: F)
+    where
+        F: crate::ops::FnMut(&T, &T) -> Ordering,
+    {
+        let len = self.len();
+        if len < 2 {
+            return;
+        }
+        let mut i = len / 2;
+        while i > 0 {
+            i -= 1;
+            self.sift_down(i, len, &mut compare);
+        }
+        let mut end = len - 1;
+        while end > 0 {
+            self.swap(0, end);
+            self.sift_down(0, end, &mut compare);
+            end -= 1;
+        }
+    }
+
+    /// Restores the max-heap property below `node` within `self[..end]`.
+    fn sift_down<F>(&mut self, mut node: usize, end: usize, compare: &mut F)
+    where
+        F: crate::ops::FnMut(&T, &T) -> Ordering,
+    {
+        loop {
+            let mut child = 2 * node + 1;
+            if child >= end {
+                break;
+            }
+            if child + 1 < end && compare(&self[child], &self[child + 1]) == Ordering::Less {
+                child += 1;
+            }
+            if compare(&self[node], &self[child]) != Ordering::Less {
+                break;
+            }
+            self.swap(node, child);
+            node = child;
+        }
     }
 }
 
