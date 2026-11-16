@@ -505,7 +505,82 @@ macro_rules! reference {
 reference!(Display); reference!(Debug); reference!(LowerHex); reference!(UpperHex);
 reference!(Binary); reference!(Octal); reference!(LowerExp); reference!(UpperExp);
 macro_rules! integer {
+    (@exp $t:ty, $u:ty, $signed:expr, $trait:ident, $e:expr) => {
+        impl $trait for $t {
+            /// As Rust: trailing zeros fold into the exponent; a precision rounds half to even or pads with zeros.
+            #[allow(unused_comparisons)]
+            fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+                let negative = $signed && *self < 0;
+                let magnitude = if negative { (!(*self as $u)).wrapping_add(1) } else { *self as $u };
+                let mut n = magnitude as u128;
+                let mut digits = [0u8; 40];
+                let mut start = digits.len();
+                loop {
+                    start -= 1;
+                    digits[start] = b'0' + (n % 10) as u8;
+                    n /= 10;
+                    if n == 0 { break; }
+                }
+                let d = &mut digits[start..];
+                let len = d.len();
+                let mut exp = len - 1;
+                let mut zeros = 0;
+                let kept = match f.precision() {
+                    None => {
+                        let mut k = len;
+                        while k > 1 && d[k - 1] == b'0' { k -= 1; }
+                        k
+                    }
+                    Some(p) if p + 1 < len => {
+                        let k = p + 1;
+                        let mut sticky = false;
+                        let mut i = k + 1;
+                        while i < len { if d[i] != b'0' { sticky = true; } i += 1; }
+                        let up = d[k] > b'5' || (d[k] == b'5' && (sticky || (d[k - 1] - b'0') % 2 == 1));
+                        if up {
+                            let mut carry = true;
+                            let mut i = k;
+                            while carry && i > 0 {
+                                i -= 1;
+                                if d[i] == b'9' { d[i] = b'0'; } else { d[i] += 1; carry = false; }
+                            }
+                            if carry { d[0] = b'1'; exp += 1; }
+                        }
+                        k
+                    }
+                    Some(p) => { zeros = p + 1 - len; len }
+                };
+                let mut body = [0u8; 41];
+                body[0] = d[0];
+                let mut body_len = 1;
+                if kept > 1 || zeros > 0 {
+                    body[1] = b'.';
+                    body_len = 2;
+                    let mut i = 1;
+                    while i < kept { body[body_len] = d[i]; body_len += 1; i += 1; }
+                }
+                let mut suffix = [$e, 0, 0];
+                let suffix_len = if exp >= 10 {
+                    suffix[1] = b'0' + (exp / 10) as u8;
+                    suffix[2] = b'0' + (exp % 10) as u8;
+                    3
+                } else {
+                    suffix[1] = b'0' + exp as u8;
+                    2
+                };
+                let sign = if negative { "-" } else if f.sign_plus() { "+" } else { "" };
+                f.pad_number(
+                    sign,
+                    unsafe { crate::str::from_utf8_unchecked(&body[..body_len]) },
+                    zeros,
+                    unsafe { crate::str::from_utf8_unchecked(&suffix[..suffix_len]) },
+                )
+            }
+        }
+    };
     ($t:ty, $u:ty, $signed:expr) => {
+        integer!(@exp $t, $u, $signed, LowerExp, b'e');
+        integer!(@exp $t, $u, $signed, UpperExp, b'E');
         impl Display for $t {
             #[allow(unused_comparisons)]
             fn fmt(&self, f: &mut Formatter<'_>) -> Result {
