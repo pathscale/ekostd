@@ -221,6 +221,13 @@ impl String {
     }
 }
 
+impl String {
+    /// Lowers the capacity to `max(len, min_capacity)` when that is below the current one.
+    pub fn shrink_to(&mut self, min_capacity: usize) {
+        self.vec.shrink_to(min_capacity)
+    }
+}
+
 /// The characters `String::drain` removed (taken out when it is called).
 pub struct Drain { removed: String, front: usize, back: usize }
 impl Iterator for Drain {

@@ -249,24 +249,7 @@ impl<T> Vec<T> {
     }
 
     pub fn shrink_to_fit(&mut self) {
-        if self.capacity != self.length && mem::size_of::<T>() != 0 {
-            if self.length == 0 {
-                unsafe {
-                    let layout = Layout::array::<T>(self.capacity).unwrap();
-                    alloc::dealloc(self.pointer.as_ptr().cast(), layout);
-                }
-                self.pointer = NonNull::dangling();
-                self.capacity = 0;
-            } else {
-                let old_layout = Layout::array::<T>(self.capacity).unwrap();
-                let new_layout = Layout::array::<T>(self.length).unwrap();
-                let pointer = unsafe {
-                    alloc::realloc(self.pointer.as_ptr().cast(), old_layout, new_layout.size()).cast::<T>()
-                };
-                self.pointer = unsafe { NonNull::new_unchecked(pointer) };
-                self.capacity = self.length;
-            }
-        }
+        self.shrink_to(self.length);
     }
 
     pub fn into_boxed_slice(mut self) -> crate::boxed::Box<[T]> {
@@ -553,3 +536,184 @@ impl<T> Vec<T> {
     }
 }
 impl<T: PartialEq<U>, U> PartialEq<Vec<U>> for [T] { fn eq(&self, other: &Vec<U>) -> bool { *self == other[..] } }
+
+/// The start and end of `range` inside a vector of `len` elements; panics when the range is inverted or past the end.
+fn range_within<R: core::ops::RangeBounds<usize>>(range: &R, len: usize) -> (usize, usize) {
+    let start = match range.start_bound() {
+        core::ops::Bound::Included(&n) => n,
+        core::ops::Bound::Excluded(&n) => n.checked_add(1).expect("range start overflow"),
+        core::ops::Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        core::ops::Bound::Included(&n) => n.checked_add(1).expect("range end overflow"),
+        core::ops::Bound::Excluded(&n) => n,
+        core::ops::Bound::Unbounded => len,
+    };
+    assert!(start <= end, "range start is after its end");
+    assert!(end <= len, "range end out of bounds");
+    (start, end)
+}
+
+impl<T> Vec<T> {
+    /// Appends clones of the elements in `src` to the end; panics when `src` is out of range.
+    pub fn extend_from_within<R: core::ops::RangeBounds<usize>>(&mut self, src: R) where T: Clone {
+        let (start, end) = range_within(&src, self.length);
+        // The source is read after `reserve`, which can move the buffer.
+        self.reserve(end - start);
+        for i in start..end {
+            unsafe {
+                let p = self.pointer.as_ptr();
+                let value = (*p.add(i)).clone();
+                p.add(self.length).write(value);
+            }
+            self.length += 1;
+        }
+    }
+
+    /// Lowers the capacity to `max(len, min_capacity)` when that is below the current one.
+    pub fn shrink_to(&mut self, min_capacity: usize) {
+        let target = core::cmp::max(self.length, min_capacity);
+        if target >= self.capacity || mem::size_of::<T>() == 0 {
+            return;
+        }
+        let old_layout = Layout::array::<T>(self.capacity).unwrap();
+        if target == 0 {
+            unsafe { alloc::dealloc(self.pointer.as_ptr().cast(), old_layout) };
+            self.pointer = NonNull::dangling();
+            self.capacity = 0;
+        } else {
+            let new_layout = Layout::array::<T>(target).unwrap();
+            let pointer = unsafe {
+                alloc::realloc(self.pointer.as_ptr().cast(), old_layout, new_layout.size()).cast::<T>()
+            };
+            self.pointer = unsafe { NonNull::new_unchecked(pointer) };
+            self.capacity = target;
+        }
+    }
+
+    /// The unused slots between the length and the capacity.
+    pub fn spare_capacity_mut(&mut self) -> &mut [mem::MaybeUninit<T>] {
+        unsafe {
+            slice::from_raw_parts_mut(
+                self.pointer.as_ptr().add(self.length).cast::<mem::MaybeUninit<T>>(),
+                self.capacity - self.length,
+            )
+        }
+    }
+
+    /// Removes and yields, in order, the elements in `range` for which `filter` returns true.
+    /// Elements not yielded stay in order; dropping the iterator early keeps the unvisited ones.
+    pub fn extract_if<F, R>(&mut self, range: R, filter: F) -> ExtractIf<'_, T, F>
+    where
+        F: FnMut(&mut T) -> bool,
+        R: core::ops::RangeBounds<usize>,
+    {
+        let old_len = self.length;
+        let (start, end) = range_within(&range, old_len);
+        // A leaked iterator then never exposes moved-out slots.
+        self.length = start;
+        ExtractIf { vec: self, idx: start, end, del: 0, old_len, filter }
+    }
+
+    /// Removes and returns the last element when `predicate` returns true for it.
+    pub fn pop_if(&mut self, predicate: impl FnOnce(&mut T) -> bool) -> Option<T> {
+        if self.length == 0 {
+            return None;
+        }
+        let last = unsafe { &mut *self.pointer.as_ptr().add(self.length - 1) };
+        if predicate(last) { self.pop() } else { None }
+    }
+}
+
+/// The elements `Vec::extract_if` removes, taken out one by one as the iterator advances.
+pub struct ExtractIf<'a, T, F> {
+    vec: &'a mut Vec<T>,
+    /// The next element to visit.
+    idx: usize,
+    /// The end of the range being filtered.
+    end: usize,
+    /// How many elements were taken out so far.
+    del: usize,
+    /// The vector's length before the call.
+    old_len: usize,
+    filter: F,
+}
+
+impl<T, F: FnMut(&mut T) -> bool> Iterator for ExtractIf<'_, T, F> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        while self.idx < self.end {
+            let i = self.idx;
+            let p = self.vec.pointer.as_ptr();
+            let take = (self.filter)(unsafe { &mut *p.add(i) });
+            self.idx += 1;
+            if take {
+                self.del += 1;
+                return Some(unsafe { p.add(i).read() });
+            }
+            if self.del > 0 {
+                unsafe { ptr::copy_nonoverlapping(p.add(i), p.add(i - self.del), 1) };
+            }
+        }
+        None
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.end - self.idx))
+    }
+}
+
+impl<T, F> Drop for ExtractIf<'_, T, F> {
+    fn drop(&mut self) {
+        unsafe {
+            let p = self.vec.pointer.as_ptr();
+            if self.del > 0 && self.idx < self.old_len {
+                ptr::copy(p.add(self.idx), p.add(self.idx - self.del), self.old_len - self.idx);
+            }
+        }
+        self.vec.length = self.old_len - self.del;
+    }
+}
+
+impl<T, const N: usize> Vec<[T; N]> {
+    /// The arrays' elements one after another, in the same allocation.
+    pub fn into_flattened(self) -> Vec<T> {
+        let this = mem::ManuallyDrop::new(self);
+        let length = this.length.checked_mul(N).expect("vec len overflow");
+        let capacity = if mem::size_of::<T>() == 0 { usize::MAX } else { this.capacity * N };
+        unsafe { Vec::from_raw_parts(this.pointer.as_ptr().cast::<T>(), length, capacity) }
+    }
+}
+
+impl<T> IntoIter<T> {
+    /// The elements not yet yielded, writable.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        unsafe { slice::from_raw_parts_mut(self.vec.pointer.as_ptr().add(self.front), self.back - self.front) }
+    }
+}
+impl<T: Clone> Clone for IntoIter<T> {
+    /// An iterator over clones of the elements not yet yielded.
+    fn clone(&self) -> Self {
+        let mut vec = Vec::with_capacity(self.back - self.front);
+        vec.extend_from_slice(self.as_slice());
+        vec.into_iter()
+    }
+}
+impl<T: core::fmt::Debug> core::fmt::Debug for IntoIter<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("IntoIter").field(&self.as_slice()).finish()
+    }
+}
+impl<T> core::iter::FusedIterator for IntoIter<T> {}
+impl<T> Default for IntoIter<T> {
+    fn default() -> Self { Vec::new().into_iter() }
+}
+
+impl<T: Clone> From<&mut [T]> for Vec<T> {
+    fn from(values: &mut [T]) -> Self { let mut v = Self::with_capacity(values.len()); v.extend_from_slice(values); v }
+}
+impl<T: Clone, const N: usize> From<&[T; N]> for Vec<T> {
+    fn from(values: &[T; N]) -> Self { let mut v = Self::with_capacity(N); v.extend_from_slice(values); v }
+}
+impl<T: Clone, const N: usize> From<&mut [T; N]> for Vec<T> {
+    fn from(values: &mut [T; N]) -> Self { let mut v = Self::with_capacity(N); v.extend_from_slice(values); v }
+}
