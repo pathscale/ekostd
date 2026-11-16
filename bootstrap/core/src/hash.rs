@@ -150,5 +150,80 @@ macro_rules! tuple_hash {
         }
     )*};
 }
-tuple_hash!((A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
-    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7));
+tuple_hash!((A 0) (A 0, B 1, C 2) (A 0, B 1, C 2, D 3) (A 0, B 1, C 2, D 3, E 4) (A 0, B 1, C 2, D 3, E 4, F 5)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6) (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10)
+    (A 0, B 1, C 2, D 3, E 4, F 5, G 6, H 7, I 8, J 9, K 10, L 11));
+
+/// Hashes the `i8` discriminant: -1 for `Less`, 0 for `Equal`, 1 for `Greater`.
+impl Hash for crate::cmp::Ordering {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let discr: i8 = match self {
+            crate::cmp::Ordering::Less => -1,
+            crate::cmp::Ordering::Equal => 0,
+            crate::cmp::Ordering::Greater => 1,
+        };
+        discr.hash(state);
+    }
+}
+
+/// Hashes the variant index as an `isize`, then the bound value if there is one.
+impl<T: Hash> Hash for crate::ops::Bound<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            crate::ops::Bound::Included(x) => { (0isize).hash(state); x.hash(state); }
+            crate::ops::Bound::Excluded(x) => { (1isize).hash(state); x.hash(state); }
+            crate::ops::Bound::Unbounded => (2isize).hash(state),
+        }
+    }
+}
+
+/// Hashes `start`, then `end`.
+impl<Idx: Hash> Hash for crate::ops::Range<Idx> {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.start.hash(state); self.end.hash(state); }
+}
+/// Hashes `start`.
+impl<Idx: Hash> Hash for crate::ops::RangeFrom<Idx> {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.start.hash(state); }
+}
+/// Hashes `end`.
+impl<Idx: Hash> Hash for crate::ops::RangeTo<Idx> {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.end.hash(state); }
+}
+/// Hashes `end`.
+impl<Idx: Hash> Hash for crate::ops::RangeToInclusive<Idx> {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.end.hash(state); }
+}
+/// A unit struct: hashes nothing.
+impl Hash for crate::ops::RangeFull {
+    fn hash<H: Hasher>(&self, _: &mut H) {}
+}
+
+/// Hashes the wrapped value.
+impl<T: Hash> Hash for crate::num::Wrapping<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.0.hash(state); }
+}
+/// Hashes the inner value.
+impl<T: ?Sized + Hash> Hash for crate::mem::ManuallyDrop<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) { (**self).hash(state); }
+}
+/// Hashes the value the pinned pointer points to.
+impl<Ptr: crate::ops::Deref> Hash for crate::pin::Pin<Ptr> where Ptr::Target: Hash {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Ptr::Target::hash(crate::ops::Deref::deref(&self.pointer), state);
+    }
+}
+/// A unit struct: hashes nothing.
+impl Hash for crate::fmt::Error {
+    fn hash<H: Hasher>(&self, _: &mut H) {}
+}
+/// Has no values, so there is nothing to hash.
+impl Hash for crate::convert::Infallible {
+    fn hash<H: Hasher>(&self, _: &mut H) { match *self {} }
+}
+/// Hashes the size, then the alignment, each as a `usize`.
+impl Hash for crate::alloc::Layout {
+    fn hash<H: Hasher>(&self, state: &mut H) { self.size().hash(state); self.align().hash(state); }
+}
