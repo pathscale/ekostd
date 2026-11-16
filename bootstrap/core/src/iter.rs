@@ -167,6 +167,14 @@ pub trait Iterator {
         Flatten { iter: self, front: None, back: None }
     }
     fn fuse(self) -> Fuse<Self> where Self: Sized { Fuse { iter: Some(self) } }
+    /// Repeats the items forever, starting again from a clone of the original when it runs out.
+    fn cycle(self) -> Cycle<Self> where Self: Sized + Clone { Cycle { orig: self.clone(), iter: self } }
+    /// Maps each item through `f` with a mutable state, and ends when `f` returns `None`.
+    fn scan<St, B, F: FnMut(&mut St, Self::Item) -> Option<B>>(self, initial_state: St, f: F) -> Scan<Self, St, F> where Self: Sized {
+        Scan { iter: self, state: initial_state, f }
+    }
+    /// Calls `f` with a reference to each item before yielding it.
+    fn inspect<F: FnMut(&Self::Item)>(self, f: F) -> Inspect<Self, F> where Self: Sized { Inspect { iter: self, f } }
     fn peekable(self) -> Peekable<Self> where Self: Sized { Peekable { iter: self, peeked: None } }
     fn skip_while<P: FnMut(&Self::Item) -> bool>(self, predicate: P) -> SkipWhile<Self, P> where Self: Sized {
         SkipWhile { iter: self, flag: false, predicate }
@@ -512,6 +520,108 @@ impl<T> DoubleEndedIterator for Once<T> { fn next_back(&mut self) -> Option<T> {
 impl<T> ExactSizeIterator for Once<T> {}
 impl<T> FusedIterator for Once<T> {}
 pub fn once<T>(value: T) -> Once<T> { Once { inner: Some(value) } }
+
+/// An iterator that yields the value of a closure once, calling the closure only when the value is pulled.
+pub struct OnceWith<F> { make: Option<F> }
+impl<F: Clone> Clone for OnceWith<F> { fn clone(&self) -> Self { Self { make: self.make.clone() } } }
+impl<A, F: crate::ops::FnOnce() -> A> Iterator for OnceWith<F> {
+    type Item = A;
+    fn next(&mut self) -> Option<A> {
+        let mut make = None;
+        crate::mem::swap(&mut self.make, &mut make);
+        match make { Some(f) => Some(f()), None => None }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let n = if self.make.is_some() { 1 } else { 0 }; (n, Some(n)) }
+}
+impl<A, F: crate::ops::FnOnce() -> A> DoubleEndedIterator for OnceWith<F> { fn next_back(&mut self) -> Option<A> { self.next() } }
+impl<A, F: crate::ops::FnOnce() -> A> ExactSizeIterator for OnceWith<F> {}
+impl<A, F: crate::ops::FnOnce() -> A> FusedIterator for OnceWith<F> {}
+impl<F> crate::fmt::Debug for OnceWith<F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        // The closure need not be Debug, so only whether it is still pending is shown.
+        if self.make.is_some() { f.write_str("OnceWith(Some(_))") } else { f.write_str("OnceWith(None)") }
+    }
+}
+/// An iterator that yields `f()` once; `f` runs on the first pull, not here.
+pub fn once_with<A, F: crate::ops::FnOnce() -> A>(make: F) -> OnceWith<F> { OnceWith { make: Some(make) } }
+
+/// Zips the items of `a` and `b` into pairs, ending with the shorter one.
+pub fn zip<A: IntoIterator, B: IntoIterator>(a: A, b: B) -> Zip<A::IntoIter, B::IntoIter> { a.into_iter().zip(b) }
+
+/// An iterator that repeats another one forever, restarting from a clone of the original.
+pub struct Cycle<I> { orig: I, iter: I }
+impl<I: Clone> Clone for Cycle<I> { fn clone(&self) -> Self { Self { orig: self.orig.clone(), iter: self.iter.clone() } } }
+impl<I: Clone + Iterator> Iterator for Cycle<I> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        match self.iter.next() {
+            // A fresh clone that is empty right away means the source is empty: stop instead of looping.
+            None => { self.iter = self.orig.clone(); self.iter.next() }
+            item => item,
+        }
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self.orig.size_hint() {
+            (0, Some(0)) => (0, Some(0)),
+            (0, _) => (0, None),
+            _ => (usize::MAX, None),
+        }
+    }
+}
+impl<I: Clone + Iterator> FusedIterator for Cycle<I> {}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Cycle<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Cycle").field("orig", &self.orig).field("iter", &self.iter).finish()
+    }
+}
+
+/// An iterator that maps items through `f` with a mutable state, ending when `f` returns `None`.
+pub struct Scan<I, St, F> { iter: I, state: St, f: F }
+impl<I: Clone, St: Clone, F: Clone> Clone for Scan<I, St, F> {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), state: self.state.clone(), f: self.f.clone() } }
+}
+impl<B, I: Iterator, St, F: FnMut(&mut St, I::Item) -> Option<B>> Iterator for Scan<I, St, F> {
+    type Item = B;
+    fn next(&mut self) -> Option<B> {
+        let item = self.iter.next()?;
+        (self.f)(&mut self.state, item)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { let (_, upper) = self.iter.size_hint(); (0, upper) }
+}
+impl<I: crate::fmt::Debug, St: crate::fmt::Debug, F> crate::fmt::Debug for Scan<I, St, F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Scan").field("iter", &self.iter).field("state", &self.state).finish()
+    }
+}
+
+/// An iterator that calls `f` with a reference to each item before yielding it.
+pub struct Inspect<I, F> { iter: I, f: F }
+impl<I: Clone, F: Clone> Clone for Inspect<I, F> { fn clone(&self) -> Self { Self { iter: self.iter.clone(), f: self.f.clone() } } }
+impl<I: Iterator, F: FnMut(&I::Item)> Iterator for Inspect<I, F> {
+    type Item = I::Item;
+    fn next(&mut self) -> Option<I::Item> {
+        let item = self.iter.next()?;
+        (self.f)(&item);
+        Some(item)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
+}
+impl<I: DoubleEndedIterator, F: FnMut(&I::Item)> DoubleEndedIterator for Inspect<I, F> {
+    fn next_back(&mut self) -> Option<I::Item> {
+        let item = self.iter.next_back()?;
+        (self.f)(&item);
+        Some(item)
+    }
+}
+impl<I: ExactSizeIterator, F: FnMut(&I::Item)> ExactSizeIterator for Inspect<I, F> {
+    fn len(&self) -> usize { self.iter.len() }
+}
+impl<I: FusedIterator, F: FnMut(&I::Item)> FusedIterator for Inspect<I, F> {}
+impl<I: crate::fmt::Debug, F> crate::fmt::Debug for Inspect<I, F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Inspect").field("iter", &self.iter).finish()
+    }
+}
 
 pub struct Empty<T>(PhantomData<fn() -> T>);
 impl<T> Copy for Empty<T> {}
