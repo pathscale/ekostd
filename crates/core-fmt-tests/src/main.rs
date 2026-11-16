@@ -1072,6 +1072,53 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "500ms", "{:?}", Duration::from_secs(1).abs_diff(Duration::from_millis(1500)));
         check!(r, "500ms", "{:?}", Duration::from_millis(1500).abs_diff(Duration::from_secs(1)));
     }
+    { // lw5-a: iter adapters Cycle, Scan, Inspect; iter::once_with, iter::zip
+        check!(r, "13", "{}", [1, 2, 3].iter().cycle().take(7).fold(0, |a, &x| a + x));
+        let mut c = [1, 2].iter().cycle();
+        check!(r, "Some(1)", "{:?}", c.next());
+        check!(r, "Some(2)", "{:?}", c.next());
+        check!(r, "Some(1)", "{:?}", c.next());
+        check!(r, "None", "{:?}", core::iter::empty::<u8>().cycle().next());
+        check!(r, "(18446744073709551615, None)", "{:?}", [1].iter().cycle().size_hint());
+        check!(r, "(0, Some(0))", "{:?}", core::iter::empty::<u8>().cycle().size_hint());
+
+        let mut sc = [1, 2, 3, 4].iter().scan(0, |s, &x| { *s += x; if *s > 6 { None } else { Some(*s) } });
+        check!(r, "(0, Some(4))", "{:?}", sc.size_hint());
+        check!(r, "Some(1)", "{:?}", sc.next());
+        check!(r, "Some(3)", "{:?}", sc.next());
+        check!(r, "Some(6)", "{:?}", sc.next());
+        check!(r, "None", "{:?}", sc.next());
+
+        let calls = core::cell::Cell::new(0);
+        check!(r, "3", "{}", [1, 2, 3].iter().inspect(|_| calls.set(calls.get() + 1)).count());
+        check!(r, "3", "{}", calls.get());
+        let seen = core::cell::Cell::new(0);
+        check!(r, "Some(3)", "{:?}", [1, 2, 3].iter().inspect(|&&x| seen.set(seen.get() * 10 + x)).rev().next());
+        check!(r, "3", "{}", seen.get());
+        check!(r, "2", "{}", [1, 2].iter().inspect(|_| {}).len());
+
+        let ran = core::cell::Cell::new(false);
+        let mut ow = core::iter::once_with(|| { ran.set(true); 5 });
+        check!(r, "false", "{}", ran.get());
+        check!(r, "(1, Some(1))", "{:?}", ow.size_hint());
+        check!(r, "Some(5)", "{:?}", ow.next());
+        check!(r, "true", "{}", ran.get());
+        check!(r, "None", "{:?}", ow.next());
+        check!(r, "(0, Some(0))", "{:?}", ow.size_hint());
+        check!(r, "Some(7)", "{:?}", core::iter::once_with(|| 7).next_back());
+
+        check!(r, "2", "{}", core::iter::zip([1, 2], [3, 4, 5]).count());
+        check!(r, "Some((2, 4))", "{:?}", core::iter::zip([1, 2], [3, 4, 5]).last());
+
+        let mut od = core::iter::once_with(|| 1);
+        check!(r, "OnceWith(Some(_))", "{:?}", od);
+        let _ = od.next();
+        check!(r, "OnceWith(None)", "{:?}", od);
+        check!(r, "Inspect { iter: OnceWith(Some(_)) }", "{:?}", core::iter::once_with(|| 1).inspect(|_| {}));
+        check!(r, "Scan { iter: OnceWith(Some(_)), state: 0 }", "{:?}", core::iter::once_with(|| 1).scan(0, |_, x| Some(x)));
+        check!(r, "Cycle { orig: OnceWith(Some(_)), iter: OnceWith(Some(_)) }", "{:?}", core::iter::once_with(|| 1).cycle());
+    }
+
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
