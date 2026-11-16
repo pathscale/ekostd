@@ -359,6 +359,27 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         let _ = back.next_back();
         check!(r, "2", "{}", back.len());
     }
+    { // lw2-b: range contains honours exhaustion, is_empty, inherent contains on every range
+        check!(r, "true", "{}", (1..=3).contains(&3));
+        let mut drained = 1..=3;
+        while drained.next().is_some() {}
+        check!(r, "false", "{}", drained.contains(&3));
+        check!(r, "false", "{}", drained.contains(&1));
+        check!(r, "true", "{}", drained.is_empty());
+        let mut single = 1..=1;
+        let _ = single.next();
+        check!(r, "false", "{}", single.contains(&1));
+        check!(r, "true", "{}", single.is_empty());
+        check!(r, "true", "{}", (3..=1).is_empty());
+        check!(r, "true", "{}", (1..1).is_empty());
+        check!(r, "false", "{}", (1..2).is_empty());
+        check!(r, "true", "{}", (0.0..1.0).contains(&0.5));
+        check!(r, "false", "{}", (0.0..1.0).contains(&f64::NAN));
+        check!(r, "true", "{}", (..5).contains(&4));
+        check!(r, "true", "{}", (..=5).contains(&5));
+        check!(r, "false", "{}", (5..).contains(&4));
+        check!(r, "false", "{}", (1..3).contains(&3));
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
