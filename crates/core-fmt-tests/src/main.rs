@@ -380,6 +380,18 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "false", "{}", (5..).contains(&4));
         check!(r, "false", "{}", (1..3).contains(&3));
     }
+    { // lw2-c: str::trim* strip Unicode White_Space, str::trim_ascii* strip ASCII whitespace only
+        check!(r, "[a b]", "[{}]", "\u{a0} a b\u{3000}".trim());
+        check!(r, "[x ]", "[{}]", "\x0B\x0Cx ".trim_start());
+        check!(r, "[x]", "[{}]", "x\u{85}\u{2028}".trim_end());
+        check!(r, "[]", "[{}]", " \t\n".trim());
+        check!(r, "[日本]", "[{}]", "日本 \u{2003}".trim_end());
+        check!(r, "[\u{200b}x]", "[{}]", "\u{200b}x".trim());
+        check!(r, "[y]", "[{}]", "\u{1680}\u{205f}y\u{202f}".trim());
+        check!(r, "[\u{a0}x]", "[{}]", "\u{a0}x ".trim_ascii());
+        check!(r, "[x\t]", "[{}]", " \x0Cx\t".trim_ascii_start());
+        check!(r, "[x]", "[{}]", "x \n".trim_ascii_end());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
