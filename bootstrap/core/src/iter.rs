@@ -590,25 +590,40 @@ impl<T> Option<T> {
 pub trait Step: Clone + Copy + crate::cmp::PartialOrd + Sized {
     fn forward_one(start: Self) -> Self;
     fn backward_one(end: Self) -> Self;
-    fn steps_between(start: &Self, end: &Self) -> usize;
+    /// Number of `forward_one` steps from `start` to `end`: `(n, Some(n))` when it fits in
+    /// usize, `(usize::MAX, None)` when it does not, `(0, Some(0))` when `start >= end`.
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>);
 }
 
 macro_rules! impl_step {
-    ($($ty:ty),* $(,)?) => { $(
+    ($($ty:ty => $u:ty),* $(,)?) => { $(
         impl Step for $ty {
             #[inline(always)]
             fn forward_one(start: Self) -> Self { start + 1 }
             #[inline(always)]
             fn backward_one(end: Self) -> Self { end - 1 }
+            /// The distance is taken in the unsigned type of the same width, where it cannot overflow.
             #[inline(always)]
-            fn steps_between(start: &Self, end: &Self) -> usize {
-                if *start < *end { (*end - *start) as usize } else { 0 }
+            fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
+                if *start < *end {
+                    let steps = (*end as $u).wrapping_sub(*start as $u);
+                    if steps <= usize::MAX as $u {
+                        (steps as usize, Some(steps as usize))
+                    } else {
+                        (usize::MAX, None)
+                    }
+                } else {
+                    (0, Some(0))
+                }
             }
         }
     )* };
 }
 
-impl_step!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+impl_step!(
+    u8 => u8, u16 => u16, u32 => u32, u64 => u64, u128 => u128, usize => usize,
+    i8 => u8, i16 => u16, i32 => u32, i64 => u64, i128 => u128, isize => usize,
+);
 
 impl<A: Step> Iterator for crate::ops::RangeFrom<A> {
     type Item = A;
@@ -633,8 +648,7 @@ impl<A: Step> Iterator for Range<A> {
         }
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = Step::steps_between(&self.start, &self.end);
-        (len, Some(len))
+        Step::steps_between(&self.start, &self.end)
     }
 }
 impl<A: Step> DoubleEndedIterator for Range<A> {
@@ -668,6 +682,18 @@ impl<A: Step> Iterator for RangeInclusive<A> {
             Some(v)
         }
     }
+    /// One more than the steps from `start` to `end`; nothing once exhausted or when `start > end`.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.exhausted || self.start > self.end {
+            return (0, Some(0));
+        }
+        let (lower, upper) = Step::steps_between(&self.start, &self.end);
+        let upper = match upper {
+            Some(n) => n.checked_add(1),
+            None => None,
+        };
+        (lower.saturating_add(1), upper)
+    }
 }
 impl<A: Step> DoubleEndedIterator for RangeInclusive<A> {
     #[inline]
@@ -687,6 +713,11 @@ impl<A: Step> DoubleEndedIterator for RangeInclusive<A> {
     }
 }
 impl<A: Step> FusedIterator for RangeInclusive<A> {}
+/// Only the types whose full inclusive range still fits in usize on every target, as in Rust.
+impl ExactSizeIterator for RangeInclusive<u8> {}
+impl ExactSizeIterator for RangeInclusive<i8> {}
+impl ExactSizeIterator for RangeInclusive<u16> {}
+impl ExactSizeIterator for RangeInclusive<i16> {}
 
 pub struct StepBy<I> { iter: I, step: usize, first: bool }
 impl<I: Iterator> Iterator for StepBy<I> {
