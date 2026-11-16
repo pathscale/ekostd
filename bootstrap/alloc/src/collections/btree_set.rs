@@ -31,7 +31,7 @@ impl<T: Ord> BTreeSet<T> {
         }
         common.into_iter()
     }
-    pub fn append(&mut self, other: &mut Self) { while let Some(v) = other.pop_first() { self.insert(v); } }
+    pub fn append(&mut self, other: &mut Self) { self.map.append(&mut other.map); }
 }
 impl<T: Ord> Default for BTreeSet<T> { fn default() -> Self { Self::new() } }
 impl<T: Clone> Clone for BTreeSet<T> { fn clone(&self) -> Self { Self { map: self.map.clone() } } }

@@ -21,23 +21,10 @@ fn map_val_mut<K, V>((_, v): &mut (K, V)) -> &mut V { v }
 
 impl<K, V> BTreeMap<K, V> {
     pub const fn new() -> Self { Self { entries: Vec::new() } }
-    fn insert_at(&mut self, index: usize, pair: (K, V)) {
-        let mut old = core::mem::take(&mut self.entries).into_iter();
-        let mut entries = Vec::with_capacity(old.size_hint().0 + 1);
-        for _ in 0..index { entries.push(old.next().expect("map index out of bounds")); }
-        entries.push(pair);
-        entries.extend(old);
-        self.entries = entries;
-    }
-    fn remove_at(&mut self, index: usize) -> (K, V) {
-        let mut old = core::mem::take(&mut self.entries).into_iter();
-        let mut entries = Vec::with_capacity(old.size_hint().0);
-        for _ in 0..index { entries.push(old.next().expect("map index out of bounds")); }
-        let removed = old.next().expect("map index out of bounds");
-        entries.extend(old);
-        self.entries = entries;
-        removed
-    }
+    // The entries stay one sorted Vec; an insert or removal moves only the tail behind `index`
+    // (an append moves nothing) and never reallocates the whole map.
+    fn insert_at(&mut self, index: usize, pair: (K, V)) { self.entries.insert(index, pair); }
+    fn remove_at(&mut self, index: usize) -> (K, V) { self.entries.remove(index) }
     pub(super) fn iter_raw(&self) -> core::slice::Iter<'_, (K, V)> { self.entries.iter() }
     pub fn clear(&mut self) { self.entries.clear(); }
     pub fn len(&self) -> usize { self.entries.len() }
@@ -64,14 +51,7 @@ impl<K, V> BTreeMap<K, V> {
     pub fn pop_first(&mut self) -> Option<(K, V)> { if self.is_empty() { None } else { Some(self.remove_at(0)) } }
     pub fn pop_last(&mut self) -> Option<(K, V)> { self.entries.pop() }
     pub fn retain<F: FnMut(&K, &mut V) -> bool>(&mut self, mut f: F) {
-        let mut i = 0;
-        while i < self.entries.len() {
-            let keep = {
-                let (k, v) = &mut self.entries[i];
-                f(&*k, v)
-            };
-            if keep { i += 1; } else { self.remove_at(i); }
-        }
+        self.entries.retain_mut(|(k, v)| f(&*k, v));
     }
 }
 
@@ -134,7 +114,29 @@ impl<K: Ord, V> BTreeMap<K, V> {
         let (lo, hi) = self.range_bounds(&range);
         self.entries[lo..hi].iter_mut().map(map_iter_mut::<K, V>)
     }
-    pub fn append(&mut self, other: &mut Self) { while let Some((k, v)) = other.pop_first() { self.insert(k, v); } }
+    /// Both sides are sorted, so this is one linear merge; on an equal key `other`'s pair wins.
+    pub fn append(&mut self, other: &mut Self) {
+        let theirs = core::mem::take(&mut other.entries);
+        if theirs.is_empty() { return; }
+        if self.entries.is_empty() { self.entries = theirs; return; }
+        let ours = core::mem::take(&mut self.entries);
+        let mut merged = Vec::with_capacity(ours.len() + theirs.len());
+        let (mut a, mut b) = (ours.into_iter(), theirs.into_iter());
+        let (mut x, mut y) = (a.next(), b.next());
+        loop {
+            match (x.take(), y.take()) {
+                (Some(p), Some(q)) => match p.0.cmp(&q.0) {
+                    Ordering::Less => { merged.push(p); x = a.next(); y = Some(q); }
+                    Ordering::Greater => { merged.push(q); x = Some(p); y = b.next(); }
+                    Ordering::Equal => { merged.push(q); x = a.next(); y = b.next(); }
+                },
+                (Some(p), None) => { merged.push(p); merged.extend(a); break; }
+                (None, Some(q)) => { merged.push(q); merged.extend(b); break; }
+                (None, None) => break,
+            }
+        }
+        self.entries = merged;
+    }
 }
 
 impl<K, V> Default for BTreeMap<K, V> { fn default() -> Self { Self::new() } }
