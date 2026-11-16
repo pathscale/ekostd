@@ -79,6 +79,7 @@ macro_rules! atomic_int { ($name:ident,$t:ty) => {
 } }
 atomic_int!(AtomicU8,u8); atomic_int!(AtomicU16,u16); atomic_int!(AtomicU32,u32); atomic_int!(AtomicU64,u64);
 atomic_int!(AtomicUsize,usize); atomic_int!(AtomicIsize,isize); atomic_int!(AtomicI32,i32); atomic_int!(AtomicI64,i64);
+atomic_int!(AtomicI8,i8); atomic_int!(AtomicI16,i16);
 
 #[repr(transparent)] pub struct AtomicPtr<T>(UnsafeCell<*mut T>); unsafe impl<T> Sync for AtomicPtr<T> {} unsafe impl<T> Send for AtomicPtr<T> {}
 impl<T> AtomicPtr<T> {
@@ -176,4 +177,128 @@ macro_rules! atomic_value_traits {
         }
     )*};
 }
-atomic_value_traits!(atomic::AtomicU8, u8, 0; atomic::AtomicU16, u16, 0; atomic::AtomicU32, u32, 0; atomic::AtomicU64, u64, 0; atomic::AtomicUsize, usize, 0; atomic::AtomicIsize, isize, 0; atomic::AtomicI32, i32, 0; atomic::AtomicI64, i64, 0; atomic::AtomicBool, bool, false);
+atomic_value_traits!(atomic::AtomicU8, u8, 0; atomic::AtomicU16, u16, 0; atomic::AtomicU32, u32, 0; atomic::AtomicU64, u64, 0; atomic::AtomicUsize, usize, 0; atomic::AtomicIsize, isize, 0; atomic::AtomicI32, i32, 0; atomic::AtomicI64, i64, 0; atomic::AtomicBool, bool, false; atomic::AtomicI8, i8, 0; atomic::AtomicI16, i16, 0);
+atomic_get_mut!(atomic::AtomicI8, i8; atomic::AtomicI16, i16);
+atomic_fetch_max!(atomic::AtomicI8, i8; atomic::AtomicI16, i16);
+atomic_fetch_min!(atomic::AtomicI8, i8; atomic::AtomicI16, i16);
+
+// Runs the atomic xor intrinsic on `$p` with the intrinsic ordering that matches `$o`.
+macro_rules! atomic_xor_ordered {
+    ($p:expr, $v:expr, $t:ty, $o:expr) => {{
+        use crate::intrinsics::{atomic_xor, AtomicOrdering as IOrd};
+        match $o {
+            atomic::Ordering::Relaxed => unsafe { atomic_xor::<$t, $t, { IOrd::Relaxed }>($p, $v) },
+            atomic::Ordering::Release => unsafe { atomic_xor::<$t, $t, { IOrd::Release }>($p, $v) },
+            atomic::Ordering::Acquire => unsafe { atomic_xor::<$t, $t, { IOrd::Acquire }>($p, $v) },
+            atomic::Ordering::AcqRel => unsafe { atomic_xor::<$t, $t, { IOrd::AcqRel }>($p, $v) },
+            atomic::Ordering::SeqCst => unsafe { atomic_xor::<$t, $t, { IOrd::SeqCst }>($p, $v) },
+        }
+    }};
+}
+
+macro_rules! atomic_int_bit_ops {
+    ($($name:path, $t:ty);*) => {$(
+        impl $name {
+            /// Bitwise xor with `value`; returns the previous value.
+            pub fn fetch_xor(&self, value: $t, order: atomic::Ordering) -> $t {
+                atomic_xor_ordered!(self.as_ptr(), value, $t, order)
+            }
+            /// Stores `!(current & value)`; returns the previous value.
+            pub fn fetch_nand(&self, value: $t, order: atomic::Ordering) -> $t {
+                let mut current = self.load(atomic::Ordering::Relaxed);
+                loop {
+                    match self.compare_exchange(current, !(current & value), order, atomic::Ordering::Relaxed) {
+                        Ok(previous) => return previous,
+                        Err(actual) => current = actual,
+                    }
+                }
+            }
+            /// Views the integer at `ptr` as an atomic. The caller keeps `ptr` aligned for `Self`,
+            /// valid for `'a`, and accessed only atomically while the reference lives.
+            pub const unsafe fn from_ptr<'a>(ptr: *mut $t) -> &'a Self {
+                // `repr(transparent)` over a cell of `$t`: same layout.
+                unsafe { &*(ptr as *mut Self) }
+            }
+        }
+        impl crate::convert::From<$t> for $name {
+            fn from(value: $t) -> Self { <$name>::new(value) }
+        }
+    )*};
+}
+atomic_int_bit_ops!(atomic::AtomicU8, u8; atomic::AtomicU16, u16; atomic::AtomicU32, u32; atomic::AtomicU64, u64; atomic::AtomicUsize, usize; atomic::AtomicIsize, isize; atomic::AtomicI32, i32; atomic::AtomicI64, i64; atomic::AtomicI8, i8; atomic::AtomicI16, i16);
+
+impl atomic::AtomicBool {
+    /// Pointer to the stored bool. Only 0 and 1 are ever stored.
+    pub const fn as_ptr(&self) -> *mut bool {
+        // `repr(transparent)` over a cell of one byte holding 0 or 1.
+        self as *const Self as *mut bool
+    }
+    /// Views the bool at `ptr` as an atomic. The caller keeps `ptr` valid for `'a`
+    /// and accessed only atomically while the reference lives.
+    pub const unsafe fn from_ptr<'a>(ptr: *mut bool) -> &'a Self {
+        unsafe { &*(ptr as *mut Self) }
+    }
+    /// Logical xor with `value`; returns the previous value.
+    pub fn fetch_xor(&self, value: bool, order: atomic::Ordering) -> bool {
+        // 0 or 1 xor 0 or 1 stays 0 or 1.
+        atomic_xor_ordered!(self.as_ptr() as *mut u8, value as u8, u8, order) != 0
+    }
+    /// Stores `!(current & value)`; returns the previous value.
+    pub fn fetch_nand(&self, value: bool, order: atomic::Ordering) -> bool {
+        let mut current = self.load(atomic::Ordering::Relaxed);
+        loop {
+            match self.compare_exchange(current, !(current & value), order, atomic::Ordering::Relaxed) {
+                Ok(previous) => return previous,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+    /// Flips the value; returns the previous value.
+    pub fn fetch_not(&self, order: atomic::Ordering) -> bool { self.fetch_xor(true, order) }
+}
+impl crate::convert::From<bool> for atomic::AtomicBool {
+    fn from(value: bool) -> Self { Self::new(value) }
+}
+
+impl<T> atomic::AtomicPtr<T> {
+    /// Pointer to the stored pointer.
+    pub const fn as_ptr(&self) -> *mut *mut T {
+        // `repr(transparent)` over a cell of `*mut T`: same address, same layout.
+        self as *const Self as *mut *mut T
+    }
+    /// Views the pointer at `ptr` as an atomic. The caller keeps `ptr` aligned for `Self`,
+    /// valid for `'a`, and accessed only atomically while the reference lives.
+    pub const unsafe fn from_ptr<'a>(ptr: *mut *mut T) -> &'a Self {
+        unsafe { &*(ptr as *mut Self) }
+    }
+    /// Ownership needs no atomic operation.
+    pub fn into_inner(self) -> *mut T { self.load(atomic::Ordering::Relaxed) }
+}
+impl<T> crate::default::Default for atomic::AtomicPtr<T> {
+    fn default() -> Self { Self::new(crate::ptr::null_mut()) }
+}
+impl<T> crate::convert::From<*mut T> for atomic::AtomicPtr<T> {
+    fn from(p: *mut T) -> Self { Self::new(p) }
+}
+impl<T> crate::fmt::Debug for atomic::AtomicPtr<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        crate::fmt::Debug::fmt(&self.load(atomic::Ordering::Relaxed), f)
+    }
+}
+
+impl crate::fmt::Debug for atomic::Ordering {
+    /// Prints the variant name.
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str(match self {
+            atomic::Ordering::Relaxed => "Relaxed",
+            atomic::Ordering::Release => "Release",
+            atomic::Ordering::Acquire => "Acquire",
+            atomic::Ordering::AcqRel => "AcqRel",
+            atomic::Ordering::SeqCst => "SeqCst",
+        })
+    }
+}
+impl crate::hash::Hash for atomic::Ordering {
+    /// Hashes the discriminant.
+    fn hash<H: crate::hash::Hasher>(&self, state: &mut H) { state.write_u32(*self as u32) }
+}
