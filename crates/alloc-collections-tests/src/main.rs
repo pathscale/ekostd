@@ -1100,6 +1100,74 @@ fn vecs_api(run: &mut Run) {
     run.check(st.capacity() == 4 && st.as_str() == "ab", "string shrink_to", 0);
 }
 
+fn rc_slices(run: &mut Run) {
+    struct D<'a>(&'a core::cell::Cell<u32>);
+    impl Drop for D<'_> {
+        fn drop(&mut self) { self.0.set(self.0.get() + 1); }
+    }
+
+    // Rc<[T]> from a Vec keeps the elements in order; a clone shares the allocation.
+    let mut v = Vec::new();
+    v.push(1i32);
+    v.push(2);
+    v.push(3);
+    let a: alloc::rc::Rc<[i32]> = alloc::rc::Rc::from(v);
+    let sum = a.iter().fold(0i32, |s, x| s + *x);
+    run.check(a.len() == 3 && a[0] == 1 && a[2] == 3 && sum == 6, "rc slice from vec", 0);
+    let b = a.clone();
+    run.check(alloc::rc::Rc::strong_count(&a) == 2 && alloc::rc::Rc::ptr_eq(&a, &b), "rc slice from vec", 1);
+    drop(b);
+    let mut a = a;
+    if let Some(s) = alloc::rc::Rc::get_mut(&mut a) { s[1] = 20; }
+    run.check(alloc::rc::Rc::strong_count(&a) == 1 && a[1] == 20, "rc slice from vec", 2);
+
+    // From &[String] clones each element; the source stays usable.
+    let src = [alloc::string::String::from("x"), alloc::string::String::from("yz")];
+    let rs: alloc::rc::Rc<[alloc::string::String]> = alloc::rc::Rc::from(&src[..]);
+    run.check(rs.len() == 2 && rs[0].as_str() == "x" && rs[1].as_str() == "yz", "rc slice from slice clones", 0);
+    run.check(src[0].as_str() == "x" && src[1].as_str() == "yz", "rc slice from slice clones", 1);
+
+    // Rc<str> from &str, String and Box<str>.
+    let s1: alloc::rc::Rc<str> = alloc::rc::Rc::from("héllo");
+    run.check(&*s1 == "héllo" && s1.len() == 6, "rc str", 0);
+    let s2: alloc::rc::Rc<str> = alloc::rc::Rc::from(alloc::string::String::from("ab"));
+    run.check(&*s2 == "ab", "rc str", 1);
+    let s3: alloc::rc::Rc<str> = alloc::rc::Rc::from(alloc::boxed::Box::<str>::from("box"));
+    run.check(&*s3 == "box", "rc str", 2);
+    let s4 = s1.clone();
+    run.check(alloc::rc::Rc::strong_count(&s1) == 2 && &*s4 == "héllo", "rc str", 3);
+
+    // collect into Rc<[T]> keeps the iteration order.
+    let c = (0..5u32).collect::<alloc::rc::Rc<[u32]>>();
+    run.check(c.len() == 5 && c[0] == 0 && c[1] == 1 && c[2] == 2 && c[3] == 3 && c[4] == 4, "rc slice collect", 0);
+
+    // Elements moved from a Vec drop once, when the last strong reference drops.
+    let drops = core::cell::Cell::new(0u32);
+    let mut dv = Vec::new();
+    dv.push(D(&drops));
+    dv.push(D(&drops));
+    dv.push(D(&drops));
+    let d: alloc::rc::Rc<[D<'_>]> = alloc::rc::Rc::from(dv);
+    run.check(drops.get() == 0 && d.len() == 3, "rc slice drops", 0);
+    let d2 = d.clone();
+    drop(d2);
+    run.check(drops.get() == 0, "rc slice drops", 1);
+    drop(d);
+    run.check(drops.get() == 3, "rc slice drops", 2);
+
+    // An empty slice Rc.
+    let e: alloc::rc::Rc<[u8]> = alloc::rc::Rc::from(Vec::new());
+    run.check(e.len() == 0, "rc slice empty", 0);
+    drop(e);
+
+    // A Weak to a slice Rc stops upgrading once the Rc drops.
+    let r: alloc::rc::Rc<[i32]> = alloc::rc::Rc::from(&[7, 8][..]);
+    let w = alloc::rc::Rc::downgrade(&r);
+    run.check(w.upgrade().is_some(), "rc slice weak", 0);
+    drop(r);
+    run.check(w.upgrade().is_none(), "rc slice weak", 1);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     let mut run = Run { passed: 0, failed: 0 };
@@ -1109,6 +1177,7 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     session(&mut run, 7, 2_000, 200_000);
     session(&mut run, 99, 100_000, 300_000);
     sets(&mut run);
+    rc_slices(&mut run);
     vecs_api(&mut run);
     btrees_api(&mut run);
     strings_api(&mut run);
