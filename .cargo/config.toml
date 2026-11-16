@@ -3,3 +3,9 @@
 # core, alloc and compiler_builtins come from bootstrap/ only. Do not remove, override or work around this.
 [build]
 rustflags = ["--sysroot", "/Users/revenge/code/ekostd/sysroot-empty", "-Cpanic=abort"]
+
+# HARD RULE: no blanket RUSTC_BOOTSTRAP=1. Unstable features are allowed ONLY inside the three language crates
+# (core, alloc, compiler_builtins from ekostd bootstrap), which define lang items and cannot exist without them.
+# Every other crate compiles as plain stable Rust. Do not widen this list.
+[env]
+RUSTC_BOOTSTRAP = "core,alloc,compiler_builtins"
