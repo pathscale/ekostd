@@ -403,6 +403,22 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
         check!(r, "false", "{}", 'a'.is_ascii_whitespace());
         check!(r, "false", "{}", b'\x0B'.is_ascii_whitespace());
     }
+    { // lw2-e: iter::Skip size_hint, len, next_back, nth
+        let a = [1i32, 2, 3, 4];
+        check!(r, "3", "{}", a.iter().skip(1).len());
+        check!(r, "0", "{}", a.iter().skip(10).len());
+        check!(r, "(2, Some(2))", "{:?}", a.iter().skip(2).size_hint());
+        check!(r, "432", "{}", a.iter().skip(1).rev().fold(0, |acc, &x| acc * 10 + x));
+        check!(r, "None", "{:?}", a.iter().skip(4).next_back());
+        check!(r, "Some(3)", "{:?}", a.iter().skip(1).nth(1));
+        check!(r, "None", "{:?}", a.iter().skip(1).nth(5));
+        let mut s = a.iter().skip(1);
+        check!(r, "Some(4)", "{:?}", s.next_back());
+        check!(r, "Some(2)", "{:?}", s.next());
+        check!(r, "Some(3)", "{:?}", s.next_back());
+        check!(r, "None", "{:?}", s.next());
+        check!(r, "(18446744073709551612, None)", "{:?}", (0..).skip(3).size_hint());
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
