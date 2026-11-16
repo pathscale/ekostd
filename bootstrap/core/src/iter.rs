@@ -991,6 +991,24 @@ impl<I> StepBy<I> {
     }
 }
 impl<I: ExactSizeIterator> ExactSizeIterator for StepBy<I> {}
+impl<I: Clone> Clone for StepBy<I> {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), step: self.step, first: self.first } }
+}
+impl<I: DoubleEndedIterator + ExactSizeIterator> DoubleEndedIterator for StepBy<I> {
+    /// Takes the last item `next` would still reach, dropping the inner items behind it.
+    /// With `first` set the items left sit at offsets 0, step, 2*step, ... of the inner
+    /// iterator, otherwise at step-1, 2*step-1, ...; what is left keeps that pattern.
+    fn next_back(&mut self) -> Option<I::Item> {
+        let n = self.iter.len();
+        if self.first {
+            if n == 0 { return None; }
+            self.iter.nth_back((n - 1) % self.step)
+        } else {
+            if n < self.step { return None; }
+            self.iter.nth_back(n % self.step)
+        }
+    }
+}
 
 /// Types that can be made by adding up an iterator. `Iterator::sum` goes through this.
 pub trait Sum<A = Self>: Sized {
@@ -1479,6 +1497,154 @@ impl<I: crate::fmt::Debug> crate::fmt::Debug for Fuse<I> {
         f.debug_struct("Fuse").field("iter", &self.iter).finish()
     }
 }
+
+/// Debug for the adapters prints the same fields as Rust; closures are never printed.
+impl<I: crate::fmt::Debug, F> crate::fmt::Debug for Map<I, F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Map").field("iter", &self.iter).finish()
+    }
+}
+impl<I: crate::fmt::Debug, P> crate::fmt::Debug for Filter<I, P> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Filter").field("iter", &self.iter).finish()
+    }
+}
+impl<I: crate::fmt::Debug, F> crate::fmt::Debug for FilterMap<I, F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("FilterMap").field("iter", &self.iter).finish()
+    }
+}
+impl<A: crate::fmt::Debug, B: crate::fmt::Debug> crate::fmt::Debug for Zip<A, B> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Zip").field("a", &self.a).field("b", &self.b).finish()
+    }
+}
+impl<A: crate::fmt::Debug, B: crate::fmt::Debug> crate::fmt::Debug for Chain<A, B> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Chain").field("a", &self.a).field("b", &self.b).finish()
+    }
+}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Take<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Take").field("iter", &self.iter).field("n", &self.n).finish()
+    }
+}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Skip<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Skip").field("iter", &self.iter).field("n", &self.n).finish()
+    }
+}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Copied<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Copied").field("it", &self.iter).finish()
+    }
+}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Cloned<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Cloned").field("it", &self.iter).finish()
+    }
+}
+impl<I: crate::fmt::Debug> crate::fmt::Debug for Rev<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Rev").field("iter", &self.iter).finish()
+    }
+}
+impl<T: crate::fmt::Debug> crate::fmt::Debug for Once<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Once").field("inner", &self.inner).finish()
+    }
+}
+impl<T> crate::fmt::Debug for Empty<T> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("Empty")
+    }
+}
+impl<T: crate::fmt::Debug, F> crate::fmt::Debug for Successors<T, F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Successors").field("next", &self.next).finish()
+    }
+}
+impl<F> crate::fmt::Debug for FromFn<F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("FromFn")
+    }
+}
+impl<F> crate::fmt::Debug for RepeatWith<F> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.write_str("RepeatWith { .. }")
+    }
+}
+/// Rust stores `step - 1` and calls the first-item flag `first_take`; this prints those values.
+impl<I: crate::fmt::Debug> crate::fmt::Debug for StepBy<I> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("StepBy").field("iter", &self.iter).field("step", &(self.step - 1)).field("first_take", &self.first).finish()
+    }
+}
+impl<I: crate::fmt::Debug, U: IntoIterator, F> crate::fmt::Debug for FlatMap<I, U, F> where U::IntoIter: crate::fmt::Debug {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("FlatMap").field("iter", &self.iter).field("frontiter", &self.front).field("backiter", &self.back).finish()
+    }
+}
+impl<I: Iterator + crate::fmt::Debug> crate::fmt::Debug for Flatten<I>
+where I::Item: IntoIterator, <I::Item as IntoIterator>::IntoIter: crate::fmt::Debug {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Flatten").field("iter", &self.iter).field("frontiter", &self.front).field("backiter", &self.back).finish()
+    }
+}
+impl<I: Iterator + crate::fmt::Debug> crate::fmt::Debug for Peekable<I> where I::Item: crate::fmt::Debug {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Peekable").field("iter", &self.iter).field("peeked", &self.peeked).finish()
+    }
+}
+/// Rust calls the "predicate already failed" flag `flag`.
+impl<I: crate::fmt::Debug, P> crate::fmt::Debug for TakeWhile<I, P> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("TakeWhile").field("iter", &self.iter).field("flag", &self.done).finish()
+    }
+}
+impl<I: crate::fmt::Debug, P> crate::fmt::Debug for SkipWhile<I, P> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("SkipWhile").field("iter", &self.iter).field("flag", &self.flag).finish()
+    }
+}
+impl<I: crate::fmt::Debug, P> crate::fmt::Debug for MapWhile<I, P> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("MapWhile").field("iter", &self.iter).finish()
+    }
+}
+impl<A: crate::fmt::Debug> crate::fmt::Debug for Repeat<A> {
+    fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
+        f.debug_struct("Repeat").field("element", &self.element).finish()
+    }
+}
+
+impl<I: Iterator + Clone> Clone for Peekable<I> where I::Item: Clone {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), peeked: self.peeked.clone() } }
+}
+impl<I: Clone, P: Clone> Clone for TakeWhile<I, P> {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), predicate: self.predicate.clone(), done: self.done } }
+}
+impl<I: Clone, P: Clone> Clone for MapWhile<I, P> {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), predicate: self.predicate.clone() } }
+}
+impl<I: Iterator + Clone> Clone for Flatten<I> where I::Item: IntoIterator, <I::Item as IntoIterator>::IntoIter: Clone {
+    fn clone(&self) -> Self { Self { iter: self.iter.clone(), front: self.front.clone(), back: self.back.clone() } }
+}
+
+/// Adapters that only pass items through stay done once the inner iterator is done.
+impl<B, I: FusedIterator, F: FnMut(I::Item) -> B> FusedIterator for Map<I, F> {}
+impl<I: FusedIterator, P: FnMut(&I::Item) -> bool> FusedIterator for Filter<I, P> {}
+impl<B, I: FusedIterator, F: FnMut(I::Item) -> Option<B>> FusedIterator for FilterMap<I, F> {}
+impl<I: FusedIterator> FusedIterator for Enumerate<I> {}
+impl<A: FusedIterator, B: FusedIterator> FusedIterator for Zip<A, B> {}
+impl<I: FusedIterator> FusedIterator for Take<I> {}
+impl<'a, I: FusedIterator<Item = &'a T>, T: 'a + Copy> FusedIterator for Copied<I> {}
+impl<'a, I: FusedIterator<Item = &'a T>, T: 'a + Clone> FusedIterator for Cloned<I> {}
+impl<I: DoubleEndedIterator + FusedIterator> FusedIterator for Rev<I> {}
+impl<I: FusedIterator, P: FnMut(&I::Item) -> bool> FusedIterator for TakeWhile<I, P> {}
+impl<I: FusedIterator, P: FnMut(&I::Item) -> bool> FusedIterator for SkipWhile<I, P> {}
+impl<I: Iterator> FusedIterator for Fuse<I> {}
+impl<T, F: FnMut(&T) -> Option<T>> FusedIterator for Successors<T, F> {}
 
 /// Yields what `predicate` maps to `Some`, and ends at the first `None`.
 pub struct MapWhile<I, P> { iter: I, predicate: P }
