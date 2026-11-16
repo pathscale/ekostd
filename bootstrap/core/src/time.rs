@@ -3,6 +3,7 @@ use crate::cmp::{Eq, Ord, Ordering, PartialEq, PartialOrd};
 use crate::default::Default;
 use crate::marker::Copy;
 use crate::option::Option::{self, None, Some};
+use crate::result::Result::{Err, Ok};
 
 pub struct Duration { secs: u64, nanos: u32 }
 impl Copy for Duration {}
@@ -160,13 +161,113 @@ impl Duration {
 }
 impl Default for Duration { fn default() -> Self { Self::ZERO } }
 
+/// Rust's `Debug` for `Duration`: the value in the largest unit it reaches (`s`, `ms`, `µs`, `ns`) as a decimal.
 impl crate::fmt::Debug for Duration {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
-        f.debug_struct("Duration")
-            .field("secs", &self.secs)
-            .field("nanos", &self.nanos)
-            .finish()
+        let prefix = if f.sign_plus() { "+" } else { "" };
+        let (integer_part, fractional_part, divisor, suffix): (u64, u32, u32, &str) = if self.secs > 0 {
+            (self.secs, self.nanos, 100_000_000, "s")
+        } else if self.nanos >= 1_000_000 {
+            ((self.nanos / 1_000_000) as u64, self.nanos % 1_000_000, 100_000, "ms")
+        } else if self.nanos >= 1_000 {
+            ((self.nanos / 1_000) as u64, self.nanos % 1_000, 100, "\u{b5}s")
+        } else {
+            (self.nanos as u64, 0, 1, "ns")
+        };
+        fmt_decimal(f, integer_part, fractional_part, divisor, prefix, suffix)
     }
+}
+
+macro_rules! attempt {
+    ($e:expr) => { match $e { Ok(value) => value, Err(error) => return Err(error) } };
+}
+
+/// Rust's `fmt_decimal`: `integer_part`, then the digits of `fractional_part / divisor` (at most the precision, nine by
+/// default) rounded half up with the carry running into the integer part, then `suffix`, padded left aligned by default.
+fn fmt_decimal(
+    f: &mut crate::fmt::Formatter<'_>,
+    integer_part: u64,
+    mut fractional_part: u32,
+    mut divisor: u32,
+    prefix: &str,
+    suffix: &str,
+) -> crate::fmt::Result {
+    let mut buf = [b'0'; 9];
+    let mut pos = 0;
+    let limit = match f.precision() { Some(p) if p < 9 => p, _ => 9 };
+    while fractional_part > 0 && pos < limit {
+        buf[pos] = b'0' + (fractional_part / divisor) as u8;
+        fractional_part = fractional_part % divisor;
+        divisor = divisor / 10;
+        pos += 1;
+    }
+    let integer_part = if fractional_part > 0 && fractional_part >= divisor * 5 {
+        let mut rev = pos;
+        let mut carry = true;
+        while carry && rev > 0 {
+            rev = rev - 1;
+            if buf[rev] < b'9' {
+                buf[rev] = buf[rev] + 1;
+                carry = false;
+            } else {
+                buf[rev] = b'0';
+            }
+        }
+        if carry { integer_part.checked_add(1) } else { Some(integer_part) }
+    } else {
+        Some(integer_part)
+    };
+    let end = match f.precision() { Some(p) => if p < 9 { p } else { 9 }, None => pos };
+    let frac_width = match f.precision() { Some(p) => p, None => pos };
+
+    let mut len = prefix.len();
+    let suffix_bytes = suffix.as_bytes();
+    let mut i = 0;
+    while i < suffix_bytes.len() {
+        if suffix_bytes[i] & 0xC0 != 0x80 { len += 1; }
+        i += 1;
+    }
+    if end > 0 { len += 1 + frac_width; }
+    len += match integer_part {
+        Some(value) => match value.checked_ilog10() { Some(log) => log as usize + 1, None => 1 },
+        None => 20,
+    };
+    let missing = match f.width() { Some(width) if width > len => width - len, _ => 0 };
+    let fill = f.fill();
+    let before = match f.align() {
+        Some(crate::fmt::Alignment::Right) => missing,
+        Some(crate::fmt::Alignment::Center) => missing / 2,
+        Some(crate::fmt::Alignment::Left) | None => 0,
+    };
+
+    let mut n = 0;
+    while n < before { attempt!(f.write_char(fill)); n += 1; }
+    attempt!(f.write_str(prefix));
+    match integer_part {
+        Some(value) => {
+            let mut digits = [b'0'; 20];
+            let mut start = 20;
+            let mut rest = value;
+            loop {
+                start = start - 1;
+                digits[start] = b'0' + (rest % 10) as u8;
+                rest = rest / 10;
+                if rest == 0 { break; }
+            }
+            attempt!(f.write_str(unsafe { crate::str::from_utf8_unchecked(&digits[start..]) }));
+        }
+        None => { attempt!(f.write_str("18446744073709551616")); }
+    }
+    if end > 0 {
+        attempt!(f.write_char('.'));
+        attempt!(f.write_str(unsafe { crate::str::from_utf8_unchecked(&buf[..end]) }));
+        let mut zeros = end;
+        while zeros < frac_width { attempt!(f.write_char('0')); zeros += 1; }
+    }
+    attempt!(f.write_str(suffix));
+    let mut n = before;
+    while n < missing { attempt!(f.write_char(fill)); n += 1; }
+    Ok(())
 }
 
 impl crate::ops::Add for Duration {

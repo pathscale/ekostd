@@ -7,6 +7,7 @@
 #![no_main]
 
 use core::fmt::{self, Debug, Formatter, Write};
+use core::time::Duration;
 
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
@@ -308,6 +309,18 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
     check!(r, "b a b", "{1} {0} {1}", "a", "b");
     check!(r, "{x}", "{{x}}");
     check!(r, "v=3 v=3", "v={v} v={v}", v = 3);
+    check!(r, "1.5s", "{:?}", Duration::from_millis(1500));
+    check!(r, "1s", "{:?}", Duration::from_secs(1));
+    check!(r, "1ms", "{:?}", Duration::from_millis(1));
+    check!(r, "1µs", "{:?}", Duration::from_micros(1));
+    check!(r, "1ns", "{:?}", Duration::from_nanos(1));
+    check!(r, "0ns", "{:?}", Duration::from_nanos(0));
+    check!(r, "1.000001ms", "{:?}", Duration::from_nanos(1_000_001));
+    check!(r, "1.23s", "{:.2?}", Duration::from_millis(1234));
+    check!(r, "2s", "{:.0?}", Duration::from_millis(1500));
+    check!(r, "1.500s", "{:.3?}", Duration::from_millis(1500));
+    check!(r, "+1.5s", "{:+?}", Duration::from_millis(1500));
+    check!(r, "1.5s  |", "{:6?}|", Duration::from_millis(1500));
     check!(r, "'\\u{80}'", "{:?}", '\u{80}');
     check!(r, "\"\\u{200b}\"", "{:?}", "\u{200b}");
     check!(r, "\"\\u{301}\"", "{:?}", "\u{301}");
