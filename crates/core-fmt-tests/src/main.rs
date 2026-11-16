@@ -844,6 +844,18 @@ pub extern "C" fn main(_argc: i32, _argv: *const *const u8) -> i32 {
             Ok(_) => check!(r, "incomplete utf-8 byte sequence from index 1", "{}", "Ok"),
         }
     }
+    { // LANES-W4 ref-neg: unary operators on references to primitives
+        let a = 5i32;
+        let b = -2.5f64;
+        let c = 7i8;
+        let d = 0.0f32;
+        check!(r, "-5", "{}", -&a);
+        check!(r, "2.5", "{}", -&b);
+        check!(r, "-7", "{}", -&c);
+        check!(r, "-0", "{}", -&d);
+        check!(r, "false", "{}", !&true);
+        check!(r, "255", "{}", !&0u8);
+    }
     let mut summary = Buf::new();
     let _ = write!(summary, "core-fmt-tests: {} passed, {} failed\n", r.passed, r.failed);
     out(summary.as_str());
