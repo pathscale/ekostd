@@ -139,6 +139,12 @@ pub fn panic_bounds_check(index: usize, len: usize) -> ! {
 #[rustc_nounwind]
 pub fn panic_cannot_unwind() -> ! { panic_nounwind("panic in a function that cannot unwind") }
 
+/// Called when a destructor that runs during unwinding panics: the second panic cannot unwind,
+/// so it aborts through the panic handler without unwinding.
+#[lang = "panic_in_cleanup"]
+#[rustc_nounwind]
+pub fn panic_in_cleanup() -> ! { panic_nounwind("panic in a destructor during cleanup") }
+
 #[lang = "panic_null_pointer_dereference"]
 #[track_caller]
 #[rustc_nounwind]
