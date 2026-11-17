@@ -1226,13 +1226,14 @@ pub struct ChunksExactMut<'a, T: 'a> {
 impl<'a, T> Iterator for ChunksExactMut<'a, T> {
     type Item = &'a mut [T];
     fn next(&mut self) -> Option<&'a mut [T]> {
-        if self.rest.is_empty() {
+        if self.rest.len() < self.size {
             return None;
         }
         let whole = crate::mem::replace(&mut self.rest, &mut []);
-        let (piece, rest) = whole.split_at_mut(self.size);
-        self.rest = rest;
-        Some(piece)
+        let len = whole.len();
+        let ptr = whole.as_mut_ptr();
+        self.rest = unsafe { from_raw_parts_mut(ptr.add(self.size), len - self.size) };
+        Some(unsafe { from_raw_parts_mut(ptr, self.size) })
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = self.rest.len() / self.size;
@@ -1252,10 +1253,11 @@ impl<'a, T> Iterator for ChunksMut<'a, T> {
             return None;
         }
         let whole = crate::mem::replace(&mut self.rest, &mut []);
-        let at = if self.size < whole.len() { self.size } else { whole.len() };
-        let (piece, rest) = whole.split_at_mut(at);
-        self.rest = rest;
-        Some(piece)
+        let len = whole.len();
+        let at = if self.size < len { self.size } else { len };
+        let ptr = whole.as_mut_ptr();
+        self.rest = unsafe { from_raw_parts_mut(ptr.add(at), len - at) };
+        Some(unsafe { from_raw_parts_mut(ptr, at) })
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = (self.rest.len() + self.size - 1) / self.size;
