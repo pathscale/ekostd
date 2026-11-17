@@ -1,5 +1,15 @@
 use crate::option::Option::{self, None, Some};
 
+impl<T, E> crate::result::Result<T, E> {
+    #[inline]
+    pub fn is_err_and<F: crate::ops::FnOnce(E) -> bool>(self, f: F) -> bool {
+        match self {
+            crate::result::Result::Ok(_) => false,
+            crate::result::Result::Err(e) => f(e),
+        }
+    }
+}
+
 macro_rules! unsigned_ext {
     ($($t:ty, $s:ty);*) => {$(
         impl $t {
