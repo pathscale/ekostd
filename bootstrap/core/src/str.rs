@@ -174,9 +174,10 @@ impl str {
     }
 
     #[inline(always)]
+    #[track_caller]
     pub fn split_at(&self, mid: usize) -> (&str, &str) {
         if !self.is_char_boundary(mid) {
-            intrinsics::abort();
+            panic!("byte index {mid} is not a char boundary or is out of bounds for str of len {}", self.len());
         }
         let (a, b) = self.as_bytes().split_at(mid);
         unsafe { (from_utf8_unchecked(a), from_utf8_unchecked(b)) }
@@ -465,18 +466,21 @@ unsafe impl SliceIndex<str> for Range<usize> {
     }
 
     #[inline(always)]
+    #[track_caller]
     fn index(self, slice: &str) -> &str {
         match self.get(slice) {
             Some(s) => s,
-            None => intrinsics::abort(),
+            None => panic!("str slice index out of bounds or not on char boundary (len {})", slice.len()),
         }
     }
 
     #[inline(always)]
+    #[track_caller]
     fn index_mut(self, slice: &mut str) -> &mut str {
+        let len = slice.len();
         match self.get_mut(slice) {
             Some(s) => s,
-            None => intrinsics::abort(),
+            None => panic!("str slice index out of bounds or not on char boundary (len {len})"),
         }
     }
 }
@@ -618,18 +622,21 @@ unsafe impl SliceIndex<str> for RangeInclusive<usize> {
     }
 
     #[inline(always)]
+    #[track_caller]
     fn index(self, slice: &str) -> &str {
         match self.get(slice) {
             Some(s) => s,
-            None => intrinsics::abort(),
+            None => panic!("str inclusive slice index out of bounds or not on char boundary (len {})", slice.len()),
         }
     }
 
     #[inline(always)]
+    #[track_caller]
     fn index_mut(self, slice: &mut str) -> &mut str {
+        let len = slice.len();
         match self.get_mut(slice) {
             Some(s) => s,
-            None => intrinsics::abort(),
+            None => panic!("str inclusive slice index out of bounds or not on char boundary (len {len})"),
         }
     }
 }
@@ -849,9 +856,10 @@ impl str {
     }
 
     /// The two mutable halves before and after byte `mid`, which must be a char boundary.
+    #[track_caller]
     pub fn split_at_mut(&mut self, mid: usize) -> (&mut str, &mut str) {
         if !self.is_char_boundary(mid) {
-            intrinsics::abort();
+            panic!("byte index {mid} is not a char boundary or is out of bounds for str of len {}", self.len());
         }
         let (a, b) = unsafe { self.as_bytes_mut() }.split_at_mut(mid);
         unsafe { (from_utf8_unchecked_mut(a), from_utf8_unchecked_mut(b)) }
