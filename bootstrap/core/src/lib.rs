@@ -39,6 +39,7 @@ pub mod mem;
 pub mod num;
 mod num_ext;
 pub mod ops;
+mod unsize_ext;
 pub mod option;
 pub mod panic;
 pub mod pin;
