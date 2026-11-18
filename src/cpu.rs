@@ -60,7 +60,7 @@ impl Aarch64Features {
 ///
 /// Source: Apple's "Determining Instruction Set Characteristics", and `std_detect`'s
 /// `os/darwin/aarch64.rs`, which is where these exact names come from.
-#[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(feature = "libc-rs")))]
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(target_os = "none")))]
 fn detect_aarch64() -> Aarch64Features {
     Aarch64Features {
         lse: sysctl_flag(c"hw.optional.arm.FEAT_LSE"),
@@ -79,7 +79,7 @@ fn detect_aarch64() -> Aarch64Features {
 /// `sysctlbyname` writes at most `len` bytes into the buffer and updates `len` with what it
 /// wrote. The buffer is a local `i32` and `len` starts at its size, so the call cannot write past
 /// it whatever the node's real width is.
-#[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(feature = "libc-rs")))]
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(target_os = "none")))]
 fn sysctl_flag(name: &core::ffi::CStr) -> bool {
     let mut enabled: i32 = 0;
     let mut len: usize = core::mem::size_of::<i32>();
@@ -100,7 +100,7 @@ fn sysctl_flag(name: &core::ffi::CStr) -> bool {
 /// Bit positions are `arch/arm64/include/uapi/asm/hwcap.h`. `fp16` is two bits, not one: the
 /// scalar half-precision support (`FPHP`) and the base floating point unit both have to be there
 /// before the type is usable.
-#[cfg(all(target_arch = "aarch64", any(feature = "libc-rs", target_os = "linux")))]
+#[cfg(all(target_arch = "aarch64", any(target_os = "none", target_os = "linux")))]
 fn detect_aarch64() -> Aarch64Features {
     const AT_HWCAP: libc::c_ulong = 16;
     const AT_HWCAP2: libc::c_ulong = 26;
@@ -127,7 +127,7 @@ fn detect_aarch64() -> Aarch64Features {
 /// branch above.
 #[cfg(all(
     target_arch = "aarch64",
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     not(target_vendor = "apple"),
     not(target_os = "linux")
 ))]

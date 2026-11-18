@@ -476,11 +476,11 @@ pub fn fsync(fd: i32) -> core::result::Result<(), Errno> {
 
 /// Perform a raw `ioctl` request on `fd` with pointer/scalar argument `arg`.
 pub fn ioctl_ptr(fd: i32, request: u64, arg: usize) -> core::result::Result<usize, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         unsafe { ::libc_rs::io::ioctl_raw(fd, request, arg) }.map_err(|e| Errno(e.0))
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         crate::checked(unsafe { libc::ioctl_ptr(fd, request, arg) }).map(|v| v as usize)
     }
@@ -606,7 +606,7 @@ fn zero_path_buf() -> Vec<u8> {
     buf
 }
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 fn resolve_canonical(path: &Path) -> Result<crate::path::PathBuf> {
     use crate::path::Component;
     let mut cur = if path.is_absolute() {
@@ -680,11 +680,11 @@ fn resolve_canonical(path: &Path) -> Result<crate::path::PathBuf> {
 
 /// Resolve a path to an absolute one with symlinks followed.
 pub fn canonicalize(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         resolve_canonical(path.as_ref())
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         extern "C" {
             fn realpath(
@@ -783,11 +783,11 @@ fn file_current_dir() -> Option<Vec<u8>> {
 }
 
 fn file_temp_dir() -> Vec<u8> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         crate::env::temp_dir()
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let p = unsafe { libc::getenv(c"TMPDIR".as_ptr()) };
         if p.is_null() {
@@ -922,7 +922,7 @@ impl Drop for TempDir {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 unsafe fn step_remove_dir(dir: *mut libc::DIR, path: &Path) -> bool {
     let ent = unsafe { libc::readdir(dir) };
     if ent.is_null() {
@@ -955,11 +955,11 @@ unsafe fn step_remove_dir(dir: *mut libc::DIR, path: &Path) -> bool {
 /// Ignoring them is deliberate: the caller is a `Drop`, which cannot report, and a scratch
 /// directory that outlives the process is a wasted inode rather than a correctness problem.
 pub fn remove_dir_all(path: &Path) {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let _ = crate::fs::remove_dir_all(path);
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let c = path.as_c();
         let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
@@ -982,11 +982,11 @@ pub fn remove_dir_all(path: &Path) {
 /// directory can be enormous and each entry can be a syscall; here the one caller collects the
 /// listing immediately to sort it, so laziness would buy an iterator type and no work saved.
 pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<crate::path::PathBuf>> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         crate::fs::read_dir(path)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let dir_path = path.as_ref();
         let c = dir_path.as_c();

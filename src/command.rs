@@ -79,16 +79,16 @@ impl Pipe {
         // descriptor the process has, so another thread's child inherits these write ends and
         // never closes them, and this read never reaches end of file. `dup2` clears the flag on
         // the descriptor it creates, so our own child keeps 0, 1 and 2 across the exec.
-        #[cfg(any(feature = "libc-rs", target_os = "linux"))]
+        #[cfg(any(target_os = "none", target_os = "linux"))]
         let made = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
-        #[cfg(not(any(feature = "libc-rs", target_os = "linux")))]
+        #[cfg(not(any(target_os = "none", target_os = "linux")))]
         let made = unsafe { libc::pipe(fds.as_mut_ptr()) };
         if made != 0 {
             return None;
         }
         // macOS has no `pipe2`, so the flag goes on afterwards, leaving a window two syscalls
         // wide rather than the lifetime of a child.
-        #[cfg(not(any(feature = "libc-rs", target_os = "linux")))]
+        #[cfg(not(any(target_os = "none", target_os = "linux")))]
         unsafe {
             libc::fcntl3(fds[0], libc::F_SETFD, libc::FD_CLOEXEC);
             libc::fcntl3(fds[1], libc::F_SETFD, libc::FD_CLOEXEC);
@@ -530,7 +530,7 @@ impl Command {
         matched
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     unsafe fn step_base_env(
         &self,
         envp: *const *const libc::c_char,
@@ -564,7 +564,7 @@ impl Command {
     }
 
     fn environment(&self, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             for existing in crate::env::environ() {
                 if !self.is_key_overridden(&existing, 0) {
@@ -572,7 +572,7 @@ impl Command {
                 }
             }
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let envp = unsafe { crate::env::raw_environ_ptr() };
             if !envp.is_null() {

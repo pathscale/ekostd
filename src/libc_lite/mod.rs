@@ -9,13 +9,13 @@
 
 #![allow(non_camel_case_types)]
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 mod stub_libc_rs;
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 pub use self::stub_libc_rs::*;
 
 #[cfg(all(
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     any(
         target_os = "macos",
         all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
@@ -23,7 +23,7 @@ pub use self::stub_libc_rs::*;
 ))]
 mod file;
 #[cfg(all(
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     any(
         target_os = "macos",
         all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
@@ -31,7 +31,7 @@ mod file;
 ))]
 mod memnet;
 #[cfg(all(
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     any(
         target_os = "macos",
         all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
@@ -39,7 +39,7 @@ mod memnet;
 ))]
 mod process;
 #[cfg(all(
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     any(
         target_os = "macos",
         all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
@@ -48,7 +48,7 @@ mod process;
 mod thread;
 
 #[cfg(all(
-    not(feature = "libc-rs"),
+    not(target_os = "none"),
     any(
         target_os = "macos",
         all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
@@ -56,37 +56,37 @@ mod thread;
 ))]
 pub use self::{file::*, memnet::*, process::*, thread::*};
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn open2(path: *const c_char, oflag: c_int) -> c_int {
     unsafe { open(path, oflag) }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn open3(path: *const c_char, oflag: c_int, mode: mode_t) -> c_int {
     unsafe { open(path, oflag, mode as c_int) }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn fcntl2(fd: c_int, cmd: c_int) -> c_int {
     unsafe { fcntl(fd, cmd) }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn fcntl3(fd: c_int, cmd: c_int, arg: c_int) -> c_int {
     unsafe { fcntl(fd, cmd, arg) }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn fcntl_flock(fd: c_int, cmd: c_int, lock: *const flock) -> c_int {
     unsafe { fcntl(fd, cmd, lock) }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 pub unsafe fn ioctl_ptr(fd: c_int, request: u64, arg: usize) -> c_int {
     #[cfg(not(target_env = "musl"))]

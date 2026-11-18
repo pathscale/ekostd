@@ -1,6 +1,6 @@
 //! Cross-platform readiness poller (`epoll` on Linux/`libc-rs`, `kqueue` on macOS) and wakeup descriptor.
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 use crate::libc_lite as libc;
 use crate::Errno;
 
@@ -61,7 +61,7 @@ impl EpollEvent {
     }
 }
 
-#[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+#[cfg(all(not(target_os = "none"), target_os = "linux"))]
 mod linux_ffi {
     use core::ffi::c_int;
 
@@ -103,7 +103,7 @@ mod linux_ffi {
     }
 }
 
-#[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+#[cfg(all(not(target_os = "none"), target_os = "macos"))]
 mod macos_ffi {
     use core::ffi::{c_int, c_long, c_void};
 
@@ -118,7 +118,7 @@ mod macos_ffi {
     pub const EV_ERROR: u16 = 0x4000;
     pub const EV_EOF: u16 = 0x8000;
 
-    #[repr(C)]
+    #[repr(C, packed(4))]
     #[derive(Clone, Copy)]
     pub struct Kevent {
         pub ident: usize,
@@ -169,20 +169,20 @@ pub struct Epoll {
 impl Epoll {
     /// Creates a new readiness poller with close-on-exec enabled.
     pub fn new() -> Result<Self, Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let fd = ::libc_rs::poll::epoll_create1(::libc_rs::poll::EPOLL_CLOEXEC)
                 .map_err(|e| Errno(e.0))?;
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let fd = crate::checked(unsafe { linux_ffi::epoll_create1(linux_ffi::EPOLL_CLOEXEC) })?;
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let fd = crate::checked(unsafe { macos_ffi::kqueue() })?;
             let _ = unsafe { libc::fcntl3(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
@@ -204,14 +204,14 @@ impl Epoll {
 
     /// Registers `fd` with `token` and `events` mask.
     pub fn add(&self, fd: i32, token: u64, events: u32) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let ev = ::libc_rs::poll::EpollEvent { events, _pad: 0, data: token };
             ::libc_rs::poll::epoll_ctl(self.fd, ::libc_rs::poll::EPOLL_CTL_ADD, fd, Some(&ev))
                 .map_err(|e| Errno(e.0))
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let mut ev = linux_ffi::SysEpollEvent {
                 events,
@@ -225,7 +225,7 @@ impl Epoll {
             Ok(())
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             self.apply_kqueue(fd, token, events, true)
         }
@@ -233,14 +233,14 @@ impl Epoll {
 
     /// Modifies the registration of `fd` to use `token` and `events` mask.
     pub fn modify(&self, fd: i32, token: u64, events: u32) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let ev = ::libc_rs::poll::EpollEvent { events, _pad: 0, data: token };
             ::libc_rs::poll::epoll_ctl(self.fd, ::libc_rs::poll::EPOLL_CTL_MOD, fd, Some(&ev))
                 .map_err(|e| Errno(e.0))
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let mut ev = linux_ffi::SysEpollEvent {
                 events,
@@ -254,7 +254,7 @@ impl Epoll {
             Ok(())
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             self.apply_kqueue(fd, token, events, false)
         }
@@ -262,13 +262,13 @@ impl Epoll {
 
     /// Removes `fd` from the poller's interest set.
     pub fn delete(&self, fd: i32) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             ::libc_rs::poll::epoll_ctl(self.fd, ::libc_rs::poll::EPOLL_CTL_DEL, fd, None)
                 .map_err(|e| Errno(e.0))
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             crate::checked(unsafe {
                 linux_ffi::epoll_ctl(self.fd, linux_ffi::EPOLL_CTL_DEL, fd, core::ptr::null_mut())
@@ -276,7 +276,7 @@ impl Epoll {
             Ok(())
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             self.delete_kqueue(fd)
         }
@@ -287,7 +287,7 @@ impl Epoll {
         self.delete(fd)
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     fn apply_kqueue(&self, fd: i32, token: u64, events: u32, is_add: bool) -> Result<(), Errno> {
         if fd < 0 {
             return Err(Errno(libc::EBADF));
@@ -350,7 +350,7 @@ impl Epoll {
         Ok(())
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     fn delete_kqueue(&self, fd: i32) -> Result<(), Errno> {
         if fd < 0 {
             return Err(Errno(libc::EBADF));
@@ -393,7 +393,7 @@ impl Epoll {
         }
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     fn kevent_change(&self, change: &macos_ffi::Kevent) -> Result<(), Errno> {
         let rc = unsafe {
             macos_ffi::kevent(
@@ -415,7 +415,7 @@ impl Epoll {
             return Ok(0);
         }
 
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let mut raw_events = [::libc_rs::poll::EpollEvent { events: 0, _pad: 0, data: 0 }; 64];
             let max_len = events.len().min(raw_events.len());
@@ -438,7 +438,7 @@ impl Epoll {
             Ok(n)
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let mut raw_events = [linux_ffi::SysEpollEvent {
                 events: 0,
@@ -465,7 +465,7 @@ impl Epoll {
             Ok(n)
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let mut raw_events: [macos_ffi::Kevent; 64] = [macos_ffi::Kevent::ZERO; 64];
             let max_len = events.len().min(raw_events.len());
@@ -530,9 +530,9 @@ impl Epoll {
 
 impl Drop for Epoll {
     fn drop(&mut self) {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         let _ = ::libc_rs::io::close(self.fd);
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         unsafe {
             libc::close(self.fd);
         }
@@ -545,14 +545,14 @@ impl Drop for Epoll {
 #[derive(Debug)]
 pub struct WakerFd {
     read_fd: i32,
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     write_fd: i32,
 }
 
 impl WakerFd {
     /// Creates a new nonblocking close-on-exec wakeup descriptor.
     pub fn new() -> Result<Self, Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let fd = ::libc_rs::poll::eventfd(
                 0,
@@ -562,7 +562,7 @@ impl WakerFd {
             Ok(Self { read_fd: fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let fd = crate::checked(unsafe {
                 linux_ffi::eventfd(0, linux_ffi::EFD_CLOEXEC | linux_ffi::EFD_NONBLOCK)
@@ -570,7 +570,7 @@ impl WakerFd {
             Ok(Self { read_fd: fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let mut fds = [0i32; 2];
             crate::checked(unsafe { libc::pipe(fds.as_mut_ptr()) })?;
@@ -614,7 +614,7 @@ impl WakerFd {
 
     /// Signals the wakeup descriptor so any thread blocked in [`Epoll::wait`] wakes up.
     pub fn wake(&self) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let val: u64 = 1;
             match ::libc_rs::io::write(self.read_fd, &val.to_ne_bytes()) {
@@ -624,7 +624,7 @@ impl WakerFd {
             }
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let val: u64 = 1;
             let bytes = val.to_ne_bytes();
@@ -639,7 +639,7 @@ impl WakerFd {
             Ok(())
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let byte = [1u8];
             let n = unsafe { libc::write(self.write_fd, byte.as_ptr().cast(), 1) };
@@ -661,7 +661,7 @@ impl WakerFd {
 
     /// Drains pending wakeup notifications from the descriptor until `EAGAIN`/`EWOULDBLOCK`.
     pub fn drain(&self) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let mut buf = [0u8; 8];
             loop {
@@ -675,7 +675,7 @@ impl WakerFd {
             }
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             #[cfg(target_os = "linux")]
             let mut buf = [0u8; 8];
@@ -704,15 +704,15 @@ impl WakerFd {
 
 impl Drop for WakerFd {
     fn drop(&mut self) {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         let _ = ::libc_rs::io::close(self.read_fd);
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         unsafe {
             libc::close(self.read_fd);
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         unsafe {
             libc::close(self.read_fd);
             libc::close(self.write_fd);
@@ -725,3 +725,25 @@ pub type EventFd = WakerFd;
 
 /// Alias for [`WakerFd`].
 pub type WakePipe = WakerFd;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoll_and_waker_fd_roundtrip() {
+        let ep = Epoll::new().expect("Epoll::new");
+        let waker = WakerFd::new().expect("WakerFd::new");
+        ep.add(waker.as_raw_fd(), 42, EPOLLIN).expect("ep.add");
+        let mut events = [EpollEvent { events: 0, token: 0 }; 4];
+        assert_eq!(ep.wait(&mut events, 0).expect("ep.wait(0)"), 0);
+        waker.wake().expect("waker.wake");
+        let n = ep.wait(&mut events, 100).expect("ep.wait(100)");
+        assert_eq!(n, 1);
+        assert_eq!(events[0].token, 42);
+        assert_ne!(events[0].events & EPOLLIN, 0);
+        waker.drain().expect("waker.drain");
+        assert_eq!(ep.wait(&mut events, 0).expect("ep.wait(0) after drain"), 0);
+        ep.delete(waker.as_raw_fd()).expect("ep.delete");
+    }
+}

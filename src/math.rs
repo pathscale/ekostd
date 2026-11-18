@@ -16,7 +16,7 @@
 
 // libm is a separate library on Linux and part of libSystem on Apple targets, so `m` is linked
 // only off Apple. On Apple the symbols come from libSystem, which every image already links.
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[cfg_attr(not(target_vendor = "apple"), link(name = "m"))]
 extern "C" {
     fn log(x: f64) -> f64;
@@ -38,11 +38,11 @@ extern "C" {
 /// Edge cases are the platform's and are the ones `std` documents, because they are the same
 /// call: `ln(0.0)` is negative infinity, a negative argument is NaN.
 pub fn ln(x: f64) -> f64 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::math::ln(x)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { log(x) }
     }
@@ -54,11 +54,11 @@ pub fn ln(x: f64) -> f64 {
 /// intrinsic that lowers to this for anything the optimiser cannot unroll, so a caller with an
 /// `i32` exponent converts it and loses nothing.
 pub fn powf(x: f64, y: f64) -> f64 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::math::powf(x, y)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { pow(x, y) }
     }
@@ -66,11 +66,11 @@ pub fn powf(x: f64, y: f64) -> f64 {
 
 /// The largest integer not above `x`, as `f64::floor` would give it with `std`.
 pub fn floor(x: f64) -> f64 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::math::floor(x)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { c_floor(x) }
     }
@@ -78,11 +78,11 @@ pub fn floor(x: f64) -> f64 {
 
 /// The smallest integer not below `x`, as `f64::ceil` would give it with `std`.
 pub fn ceil(x: f64) -> f64 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::math::ceil(x)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { c_ceil(x) }
     }
@@ -90,11 +90,11 @@ pub fn ceil(x: f64) -> f64 {
 
 /// `x` with its fractional part dropped, rounding toward zero, as `f64::trunc` would.
 pub fn trunc(x: f64) -> f64 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::math::trunc(x)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { c_trunc(x) }
     }

@@ -44,7 +44,7 @@ pub fn mount(
     flags: u64,
     data: Option<&[u8]>,
 ) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::fs::mount(
             source.map(str::as_bytes),
@@ -55,7 +55,7 @@ pub fn mount(
         )
         .map_err(|e| Errno(e.0))
     }
-    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    #[cfg(all(not(target_os = "none"), target_os = "linux"))]
     {
         let src_c = source.map(|s| Path::new(s).as_c());
         let tgt_c = Path::new(target).as_c();
@@ -69,7 +69,7 @@ pub fn mount(
         })
         .map(|_| ())
     }
-    #[cfg(all(not(feature = "libc-rs"), not(target_os = "linux")))]
+    #[cfg(all(not(target_os = "none"), not(target_os = "linux")))]
     {
         let _ = (source, target, fstype, flags, data);
         Err(Errno(libc::ENOSYS))
@@ -78,16 +78,16 @@ pub fn mount(
 
 /// Unmount `target` with `flags` (such as [`MNT_DETACH`]).
 pub fn umount2(target: &str, flags: i32) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::fs::umount2(target.as_bytes(), flags).map_err(|e| Errno(e.0))
     }
-    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    #[cfg(all(not(target_os = "none"), target_os = "linux"))]
     {
         checked(with_c_path_ptr(target.as_bytes(), |p| unsafe { libc::umount2(p, flags) }))
             .map(|_| ())
     }
-    #[cfg(all(not(feature = "libc-rs"), not(target_os = "linux")))]
+    #[cfg(all(not(target_os = "none"), not(target_os = "linux")))]
     {
         let _ = (target, flags);
         Err(Errno(libc::ENOSYS))
@@ -96,11 +96,11 @@ pub fn umount2(target: &str, flags: i32) -> Result<(), Errno> {
 
 /// Change the root directory of the calling process to `path`.
 pub fn chroot(path: &str) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::fs::chroot(path.as_bytes()).map_err(|e| Errno(e.0))
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         checked(with_c_path_ptr(path.as_bytes(), |p| unsafe { libc::chroot(p) })).map(|_| ())
     }
@@ -108,11 +108,11 @@ pub fn chroot(path: &str) -> Result<(), Errno> {
 
 /// Flush all filesystem caches to storage (`sync(2)`).
 pub fn sync_filesystems() {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::fs::sync_all_filesystems();
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         unsafe { libc::sync() };
     }
@@ -120,7 +120,7 @@ pub fn sync_filesystems() {
 
 /// Return entry names directly inside `path` (excluding `.` and `..`).
 pub fn read_dir_names(path: &str) -> Result<Vec<String>, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let fd = ::libc_rs::fs::open(
             path.as_bytes(),
@@ -156,7 +156,7 @@ pub fn read_dir_names(path: &str) -> Result<Vec<String>, Errno> {
         let _ = ::libc_rs::io::close(fd);
         Ok(out)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let c = Path::new(path).as_c();
         let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
@@ -261,7 +261,7 @@ pub fn rmdir(path: &[u8]) -> Result<(), Errno> {
 /// order sorts, and any caller walking a tree of inputs should, because two runs over one
 /// directory reading files in different orders is a reproducibility bug waiting for a busy day.
 pub fn read_dir(path: impl AsRef<Path>) -> crate::file::Result<Vec<PathBuf>> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let dir_path = path.as_ref();
         let fd = ::libc_rs::fs::open(
@@ -294,7 +294,7 @@ pub fn read_dir(path: impl AsRef<Path>) -> crate::file::Result<Vec<PathBuf>> {
         let _ = ::libc_rs::io::close(fd);
         Ok(out)
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let c = path.as_ref().as_c();
         let dir = unsafe { libc::opendir(c.as_ptr().cast()) };

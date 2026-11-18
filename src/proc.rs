@@ -135,7 +135,7 @@ pub fn execve(
     args: &[&str],
     envs: &[&str],
 ) -> Result<core::convert::Infallible, crate::Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let mut arg_slices: alloc::vec::Vec<&[u8]> = alloc::vec::Vec::with_capacity(args.len());
         let mut i = 0usize;
@@ -152,7 +152,7 @@ pub fn execve(
         ::libc_rs::process::execve_bytes(path.as_bytes(), &arg_slices, &env_slices)
             .map_err(|e| crate::Errno(e.0))
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         if path.is_empty() || path.as_bytes().contains(&0) {
             return Err(crate::Errno(libc::EINVAL));
@@ -221,9 +221,9 @@ pub fn getrusage_self() -> Result<Rusage, crate::Errno> {
     let system_micros = (raw.ru_stime.tv_sec.max(0) as u64)
         .saturating_mul(1_000_000)
         .saturating_add(raw.ru_stime.tv_usec.max(0) as u64);
-    #[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+    #[cfg(all(target_os = "macos", not(target_os = "none")))]
     let max_rss_bytes = raw.ru_maxrss.max(0) as u64;
-    #[cfg(not(all(target_os = "macos", not(feature = "libc-rs"))))]
+    #[cfg(not(all(target_os = "macos", not(target_os = "none"))))]
     let max_rss_bytes = (raw.ru_maxrss.max(0) as u64).saturating_mul(1024);
     Ok(Rusage { user_micros, system_micros, max_rss_bytes })
 }

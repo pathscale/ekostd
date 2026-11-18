@@ -5,7 +5,7 @@
 # which this is not. `[lib] name` is what a consumer writes, so `use eko::file::File` works.
 [package]
 name = "ekostd"
-version = "0.2.9"
+version = "0.2.10"
 publish = ["crates-io"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -21,10 +21,10 @@ path = "src/lib.rs"
 
 [features]
 default = []
-libc-rs = ["dep:libc-rs"]
+libc-rs = []
 
-[dependencies]
-libc-rs = { version = "^0.2.5", optional = true }
+[target.'cfg(target_os = "none")'.dependencies]
+libc-rs = { version = "^0.2.5" }
 
 # The parity tests compare `libc_lite` with this crate. Nothing else may use it.
 [dev-dependencies]

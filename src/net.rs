@@ -2,7 +2,7 @@
 
 pub use core::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 use crate::libc_lite as libc;
 use crate::Errno;
 
@@ -66,7 +66,7 @@ impl core::fmt::Display for VsockAddr {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 mod host_ffi {
     use core::ffi::{c_int, c_void};
 
@@ -249,7 +249,7 @@ mod host_ffi {
 }
 
 fn set_fd_nonblocking(fd: i32, nonblocking: bool) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let flags = ::libc_rs::io::fcntl(fd, ::libc_rs::io::F_GETFL, 0).map_err(|e| Errno(e.0))?;
         let next = if nonblocking {
@@ -261,7 +261,7 @@ fn set_fd_nonblocking(fd: i32, nonblocking: bool) -> Result<(), Errno> {
         Ok(())
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let flags = crate::checked(unsafe { libc::fcntl2(fd, libc::F_GETFL) })?;
         let next = if nonblocking { flags | libc::O_NONBLOCK } else { flags & !libc::O_NONBLOCK };
@@ -270,7 +270,7 @@ fn set_fd_nonblocking(fd: i32, nonblocking: bool) -> Result<(), Errno> {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 fn init_host_socket(fd: i32, nonblocking: bool) -> Result<(), Errno> {
     crate::checked(unsafe { libc::fcntl3(fd, libc::F_SETFD, libc::FD_CLOEXEC) })?;
     if nonblocking {
@@ -293,7 +293,7 @@ fn init_host_socket(fd: i32, nonblocking: bool) -> Result<(), Errno> {
 }
 
 fn create_ip_socket(addr: &SocketAddr, dgram: bool, nonblocking: bool) -> Result<i32, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let domain = match addr {
             SocketAddr::V4(_) => ::libc_rs::net::AF_INET,
@@ -321,7 +321,7 @@ fn create_ip_socket(addr: &SocketAddr, dgram: bool, nonblocking: bool) -> Result
         Ok(fd)
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let domain = match addr {
             SocketAddr::V4(_) => host_ffi::AF_INET,
@@ -361,7 +361,7 @@ fn create_ip_socket(addr: &SocketAddr, dgram: bool, nonblocking: bool) -> Result
 
 fn set_reuseaddr(fd: i32, reuse: bool) -> Result<(), Errno> {
     let val: i32 = i32::from(reuse);
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         unsafe {
             ::libc_rs::net::setsockopt_raw(
@@ -374,7 +374,7 @@ fn set_reuseaddr(fd: i32, reuse: bool) -> Result<(), Errno> {
             .map_err(|e| Errno(e.0))
         }
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         crate::checked(unsafe {
             libc::setsockopt(
@@ -391,7 +391,7 @@ fn set_reuseaddr(fd: i32, reuse: bool) -> Result<(), Errno> {
 
 fn set_reuseport(fd: i32, reuse: bool) -> Result<(), Errno> {
     let val: i32 = i32::from(reuse);
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         unsafe {
             ::libc_rs::net::setsockopt_raw(
@@ -404,7 +404,7 @@ fn set_reuseport(fd: i32, reuse: bool) -> Result<(), Errno> {
             .map_err(|e| Errno(e.0))
         }
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         crate::checked(unsafe {
             libc::setsockopt(
@@ -420,7 +420,7 @@ fn set_reuseport(fd: i32, reuse: bool) -> Result<(), Errno> {
 }
 
 fn bind_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         match addr {
             SocketAddr::V4(v4) => {
@@ -439,7 +439,7 @@ fn bind_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         match addr {
             SocketAddr::V4(v4) => {
@@ -484,7 +484,7 @@ fn bind_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
 }
 
 fn connect_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         match addr {
             SocketAddr::V4(v4) => {
@@ -503,7 +503,7 @@ fn connect_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         match addr {
             SocketAddr::V4(v4) => {
@@ -548,7 +548,7 @@ fn connect_socket_addr(fd: i32, addr: &SocketAddr) -> Result<(), Errno> {
 }
 
 fn query_socket_addr(fd: i32, peer: bool) -> Result<SocketAddr, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let mut storage = ::libc_rs::net::SockAddrStorage::default();
         let mut len = core::mem::size_of::<::libc_rs::net::SockAddrStorage>() as u32;
@@ -591,7 +591,7 @@ fn query_socket_addr(fd: i32, peer: bool) -> Result<SocketAddr, Errno> {
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let mut storage: host_ffi::SockAddrStorage = unsafe { core::mem::zeroed() };
         let mut len = core::mem::size_of::<host_ffi::SockAddrStorage>() as u32;
@@ -615,7 +615,7 @@ fn query_socket_addr(fd: i32, peer: bool) -> Result<SocketAddr, Errno> {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 fn decode_host_storage(storage: &host_ffi::SockAddrStorage) -> Result<SocketAddr, Errno> {
     match i32::from(storage.ss_family) {
         host_ffi::AF_INET => {
@@ -639,7 +639,7 @@ fn decode_host_storage(storage: &host_ffi::SockAddrStorage) -> Result<SocketAddr
 }
 
 fn query_so_error(fd: i32) -> Result<Option<Errno>, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let code = ::libc_rs::net::get_so_error(fd).map_err(|e| Errno(e.0))?;
         if code == 0 {
@@ -649,7 +649,7 @@ fn query_so_error(fd: i32) -> Result<Option<Errno>, Errno> {
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let mut code: i32 = 0;
         let mut len = core::mem::size_of::<i32>() as u32;
@@ -671,12 +671,12 @@ fn query_so_error(fd: i32) -> Result<Option<Errno>, Errno> {
 }
 
 fn read_fd(fd: i32, buf: &mut [u8]) -> Result<usize, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::io::read(fd, buf).map_err(|e| Errno(e.0))
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
         if n < 0 {
@@ -688,12 +688,12 @@ fn read_fd(fd: i32, buf: &mut [u8]) -> Result<usize, Errno> {
 }
 
 fn write_fd(fd: i32, buf: &[u8]) -> Result<usize, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ::libc_rs::net::send(fd, buf, ::libc_rs::net::MSG_NOSIGNAL).map_err(|e| Errno(e.0))
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let n = unsafe { libc::send(fd, buf.as_ptr().cast(), buf.len(), host_ffi::MSG_NOSIGNAL) };
         if n < 0 {
@@ -708,9 +708,9 @@ fn write_all_fd(fd: i32, mut buf: &[u8]) -> Result<(), Errno> {
     while !buf.is_empty() {
         match write_fd(fd, buf) {
             Ok(0) => {
-                #[cfg(feature = "libc-rs")]
+                #[cfg(target_os = "none")]
                 return Err(Errno(::libc_rs::errno::EPIPE));
-                #[cfg(not(feature = "libc-rs"))]
+                #[cfg(not(target_os = "none"))]
                 return Err(Errno(libc::EPIPE));
             }
             Ok(n) => buf = &buf[n..],
@@ -723,9 +723,9 @@ fn write_all_fd(fd: i32, mut buf: &[u8]) -> Result<(), Errno> {
 
 fn close_fd(fd: i32) {
     if fd >= 0 {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         let _ = ::libc_rs::io::close(fd);
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         unsafe {
             libc::close(fd);
         }
@@ -755,9 +755,9 @@ impl TcpStream {
     pub fn connect_nonblocking(addr: SocketAddr) -> Result<Self, Errno> {
         let fd = create_ip_socket(&addr, false, true)?;
         if let Err(e) = connect_socket_addr(fd, &addr) {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             let in_progress = e.0 == ::libc_rs::errno::EINPROGRESS;
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             let in_progress = e.0 == host_ffi::EINPROGRESS;
             if !in_progress {
                 close_fd(fd);
@@ -816,12 +816,12 @@ impl TcpStream {
 
     /// Enables or disables `TCP_NODELAY` (Nagle's algorithm).
     pub fn set_nodelay(&self, nodelay: bool) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             ::libc_rs::net::set_tcp_nodelay(self.fd, nodelay).map_err(|e| Errno(e.0))
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let val: i32 = i32::from(nodelay);
             crate::checked(unsafe {
@@ -887,11 +887,11 @@ impl TcpStream {
 
     /// Shuts down the read, write, or both halves of this connection.
     pub fn shutdown(&self, how: Shutdown) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             ::libc_rs::net::shutdown(self.fd, how.to_raw()).map_err(|e| Errno(e.0))
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             crate::checked(unsafe { host_ffi::shutdown(self.fd, how.to_raw()) })?;
             Ok(())
@@ -900,13 +900,13 @@ impl TcpStream {
 
     /// Duplicates the underlying socket descriptor into a new [`TcpStream`].
     pub fn try_clone(&self) -> Result<Self, Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let fd = ::libc_rs::io::fcntl(self.fd, ::libc_rs::io::F_DUPFD_CLOEXEC, 0)
                 .map_err(|e| Errno(e.0))?;
             Ok(Self { fd })
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let fd = crate::checked(unsafe { libc::fcntl3(self.fd, libc::F_DUPFD_CLOEXEC, 0) })?;
             Ok(Self { fd })
@@ -951,11 +951,11 @@ impl TcpListener {
                 set_reuseport(fd, true)?;
             }
             bind_socket_addr(fd, &addr)?;
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             {
                 ::libc_rs::net::listen(fd, backlog).map_err(|e| Errno(e.0))?;
             }
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             {
                 crate::checked(unsafe { libc::listen(fd, backlog) })?;
             }
@@ -1018,7 +1018,7 @@ impl TcpListener {
     }
 
     fn accept_inner(&self, nonblocking: bool) -> Result<(TcpStream, SocketAddr), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let mut storage = ::libc_rs::net::SockAddrStorage::default();
             let mut len = core::mem::size_of::<::libc_rs::net::SockAddrStorage>() as u32;
@@ -1063,7 +1063,7 @@ impl TcpListener {
             Ok((stream, peer))
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let mut storage: host_ffi::SockAddrStorage = unsafe { core::mem::zeroed() };
             let mut len = core::mem::size_of::<host_ffi::SockAddrStorage>() as u32;
@@ -1191,7 +1191,7 @@ impl UdpSocket {
 
     /// Sends a datagram to `target`.
     pub fn send_to(&self, buf: &[u8], target: SocketAddr) -> Result<usize, Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             match target {
                 SocketAddr::V4(v4) => {
@@ -1212,7 +1212,7 @@ impl UdpSocket {
             }
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             match target {
                 SocketAddr::V4(v4) => {
@@ -1272,7 +1272,7 @@ impl UdpSocket {
 
     /// Receives a single datagram into `buf`, returning `(bytes_read, sender_addr)`.
     pub fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let local = self.local_addr()?;
             match local {
@@ -1297,7 +1297,7 @@ impl UdpSocket {
             }
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let mut storage: host_ffi::SockAddrStorage = unsafe { core::mem::zeroed() };
             let mut len = core::mem::size_of::<host_ffi::SockAddrStorage>() as u32;
@@ -1327,7 +1327,7 @@ impl Drop for UdpSocket {
 }
 
 fn create_vsock_socket(nonblocking: bool) -> Result<i32, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let mut ty = ::libc_rs::net::SOCK_STREAM | ::libc_rs::net::SOCK_CLOEXEC;
         if nonblocking {
@@ -1336,7 +1336,7 @@ fn create_vsock_socket(nonblocking: bool) -> Result<i32, Errno> {
         ::libc_rs::net::socket(::libc_rs::net::AF_VSOCK, ty, 0).map_err(|e| Errno(e.0))
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    #[cfg(all(not(target_os = "none"), target_os = "linux"))]
     {
         let mut ty = host_ffi::SOCK_STREAM | host_ffi::SOCK_CLOEXEC;
         if nonblocking {
@@ -1345,7 +1345,7 @@ fn create_vsock_socket(nonblocking: bool) -> Result<i32, Errno> {
         crate::checked(unsafe { libc::socket(host_ffi::AF_VSOCK, ty, 0) })
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     {
         let _ = nonblocking;
         Err(Errno(host_ffi::EAFNOSUPPORT))
@@ -1353,7 +1353,7 @@ fn create_vsock_socket(nonblocking: bool) -> Result<i32, Errno> {
 }
 
 fn query_vsock_addr(fd: i32, peer: bool) -> Result<VsockAddr, Errno> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let mut vm = ::libc_rs::net::SockAddrVm::default();
         let mut len = core::mem::size_of::<::libc_rs::net::SockAddrVm>() as u32;
@@ -1377,7 +1377,7 @@ fn query_vsock_addr(fd: i32, peer: bool) -> Result<VsockAddr, Errno> {
         Ok(VsockAddr { cid: vm.svm_cid, port: vm.svm_port })
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    #[cfg(all(not(target_os = "none"), target_os = "linux"))]
     {
         let mut vm = host_ffi::SockAddrVm::default();
         let mut len = core::mem::size_of::<host_ffi::SockAddrVm>() as u32;
@@ -1400,7 +1400,7 @@ fn query_vsock_addr(fd: i32, peer: bool) -> Result<VsockAddr, Errno> {
         Ok(VsockAddr { cid: vm.svm_cid, port: vm.svm_port })
     }
 
-    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+    #[cfg(all(not(target_os = "none"), target_os = "macos"))]
     {
         let _ = (fd, peer);
         Err(Errno(host_ffi::EAFNOSUPPORT))
@@ -1427,7 +1427,7 @@ impl VsockStream {
     fn connect_inner(addr: VsockAddr, nonblocking: bool) -> Result<Self, Errno> {
         let fd = create_vsock_socket(nonblocking)?;
 
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let vm = ::libc_rs::net::SockAddrVm::new(addr.cid, addr.port);
             if let Err(e) = ::libc_rs::net::connect_vsock(fd, &vm) {
@@ -1439,7 +1439,7 @@ impl VsockStream {
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let vm = host_ffi::SockAddrVm {
                 svm_family: host_ffi::AF_VSOCK as u16,
@@ -1466,7 +1466,7 @@ impl VsockStream {
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let _ = addr;
             close_fd(fd);
@@ -1551,11 +1551,11 @@ impl VsockStream {
 
     /// Shuts down the read, write, or both halves of this connection.
     pub fn shutdown(&self, how: Shutdown) -> Result<(), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             ::libc_rs::net::shutdown(self.fd, how.to_raw()).map_err(|e| Errno(e.0))
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             crate::checked(unsafe { host_ffi::shutdown(self.fd, how.to_raw()) })?;
             Ok(())
@@ -1594,7 +1594,7 @@ impl VsockListener {
     ) -> Result<Self, Errno> {
         let fd = create_vsock_socket(nonblocking)?;
 
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let vm = ::libc_rs::net::SockAddrVm::new(addr.cid, addr.port);
             if let Err(e) = ::libc_rs::net::bind_vsock(fd, &vm)
@@ -1606,7 +1606,7 @@ impl VsockListener {
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let vm = host_ffi::SockAddrVm {
                 svm_family: host_ffi::AF_VSOCK as u16,
@@ -1634,7 +1634,7 @@ impl VsockListener {
             Ok(Self { fd })
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let _ = (addr, backlog);
             close_fd(fd);
@@ -1693,7 +1693,7 @@ impl VsockListener {
     }
 
     fn accept_inner(&self, nonblocking: bool) -> Result<(VsockStream, VsockAddr), Errno> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let mut vm = ::libc_rs::net::SockAddrVm::default();
             let mut len = core::mem::size_of::<::libc_rs::net::SockAddrVm>() as u32;
@@ -1713,7 +1713,7 @@ impl VsockListener {
             Ok((VsockStream { fd: client_fd }, VsockAddr { cid: vm.svm_cid, port: vm.svm_port }))
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+        #[cfg(all(not(target_os = "none"), target_os = "linux"))]
         {
             let mut vm = host_ffi::SockAddrVm::default();
             let mut len = core::mem::size_of::<host_ffi::SockAddrVm>() as u32;
@@ -1731,7 +1731,7 @@ impl VsockListener {
             Ok((VsockStream { fd: client_fd }, VsockAddr { cid: vm.svm_cid, port: vm.svm_port }))
         }
 
-        #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
+        #[cfg(all(not(target_os = "none"), target_os = "macos"))]
         {
             let _ = nonblocking;
             Err(Errno(host_ffi::EAFNOSUPPORT))
@@ -1742,5 +1742,64 @@ impl VsockListener {
 impl Drop for VsockListener {
     fn drop(&mut self) {
         close_fd(self.fd);
+    }
+}
+
+#[cfg(test)]
+mod net_loopback_tests {
+    use super::*;
+    use crate::epoll::{Epoll, EpollEvent, EPOLLIN, EPOLLOUT};
+
+    #[test]
+    fn tcp_loopback_with_epoll() {
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+        let listener = TcpListener::bind_nonblocking(addr).expect("TcpListener::bind");
+        let bound = listener.local_addr().expect("listener.local_addr");
+        let ep = Epoll::new().expect("Epoll::new");
+        ep.add(listener.as_raw_fd(), 1, EPOLLIN).expect("ep.add listener");
+        let client = TcpStream::connect_nonblocking(bound).expect("TcpStream::connect");
+        ep.add(client.as_raw_fd(), 2, EPOLLOUT).expect("ep.add client");
+        let mut events = [EpollEvent { events: 0, token: 0 }; 4];
+        let mut accepted = None;
+        let mut client_writable = false;
+        for _ in 0..20 {
+            let n = ep.wait(&mut events, 100).expect("ep.wait");
+            for ev in &events[..n] {
+                if ev.token == 1 && accepted.is_none() {
+                    if let Ok((stream, _)) = listener.accept_nonblocking() {
+                        accepted = Some(stream);
+                    }
+                }
+                if ev.token == 2 && (ev.events & EPOLLOUT) != 0 {
+                    client_writable = true;
+                }
+            }
+            if accepted.is_some() && client_writable { break; }
+        }
+        let server = accepted.expect("accepted connection");
+        assert!(client_writable);
+        assert_eq!(client.write(b"ping").expect("client.write"), 4);
+        let mut buf = [0u8; 8];
+        let mut read_n = 0usize;
+        for _ in 0..20 {
+            match server.read(&mut buf) {
+                Ok(n) => { read_n = n; break; }
+                Err(e) if e.0 == 35 || e.0 == 11 => { let _ = ep.wait(&mut events, 20); }
+                Err(e) => panic!("server.read failed: {:?}", e),
+            }
+        }
+        assert_eq!(&buf[..read_n], b"ping");
+    }
+
+    #[test]
+    fn udp_loopback_sendto_recvfrom() {
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
+        let rx = UdpSocket::bind(addr).expect("UdpSocket::bind rx");
+        let tx = UdpSocket::bind(addr).expect("UdpSocket::bind tx");
+        let rx_addr = rx.local_addr().expect("rx.local_addr");
+        assert_eq!(tx.send_to(b"hello", rx_addr).expect("tx.send_to"), 5);
+        let mut buf = [0u8; 16];
+        let (rn, _) = rx.recv_from(&mut buf).expect("rx.recv_from");
+        assert_eq!(&buf[..rn], b"hello");
     }
 }

@@ -39,7 +39,7 @@ impl<E> EntryOutcome for core::result::Result<(), E> {
 
 /// Emits the process entry point for `main_fn`.
 ///
-/// On freestanding `aarch64-unknown-none` with `feature = "libc-rs"`, delegates to
+/// On freestanding `aarch64-unknown-none` with `target_os = "none"`, delegates to
 /// `::libc_rs::process_entry!` (emitting `_start`, stack initialization, and panic handler)
 /// with `#[allow(unsafe_code)]` so crates with `#![deny(unsafe_code)]` compile cleanly.
 /// On hosted targets (when `not(test)`), emits a standard `fn main()` that exits with
@@ -47,14 +47,14 @@ impl<E> EntryOutcome for core::result::Result<(), E> {
 #[macro_export]
 macro_rules! process_entry {
     ($main_fn:path) => {
-        #[cfg(all(feature = "libc-rs", target_arch = "aarch64", target_os = "none"))]
+        #[cfg(all(target_os = "none", target_arch = "aarch64", target_os = "none"))]
         #[allow(unsafe_code)]
         mod _eko_process_entry {
             use super::*;
             ::libc_rs::process_entry!($main_fn);
         }
 
-        #[cfg(not(all(feature = "libc-rs", target_arch = "aarch64", target_os = "none")))]
+        #[cfg(not(all(target_os = "none", target_arch = "aarch64", target_os = "none")))]
         #[cfg(not(test))]
         #[allow(unsafe_code)]
         fn main() {

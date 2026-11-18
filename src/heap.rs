@@ -28,24 +28,24 @@
 //! has nothing useful to say; the daemon dying is the ruling for this tree anyway.
 
 use core::alloc::{GlobalAlloc, Layout};
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 use core::ptr;
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 use crate::libc_lite as libc;
 
 /// The alignment `malloc` guarantees on this platform.
 ///
 /// 16 on 64-bit, which covers every type the compiler allocates except the deliberately
 /// over-aligned ones, so the `posix_memalign` path is rare.
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 const MIN_ALIGN: usize =
     if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) { 16 } else { 8 };
 
 /// `malloc`/`free`, as the global allocator.
 pub struct Malloc;
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 unsafe impl GlobalAlloc for Malloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -71,7 +71,7 @@ unsafe impl GlobalAlloc for Malloc {
 // Safe: every method forwards to the C allocator, which satisfies `GlobalAlloc`'s contract for
 // the layouts it is given - alignment is handled explicitly below, and a null return is the
 // documented failure signal rather than a panic.
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 unsafe impl GlobalAlloc for Malloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -120,7 +120,7 @@ unsafe impl GlobalAlloc for Malloc {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 #[inline]
 unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
     // See the module comment: Apple's `posix_memalign` mis-answers very large alignments.

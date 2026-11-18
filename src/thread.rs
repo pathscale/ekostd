@@ -33,7 +33,7 @@ where
 {
     let raw = Box::into_raw(Box::new(f));
 
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         match unsafe {
             ::libc_rs::thread::spawn_thread(
@@ -51,7 +51,7 @@ where
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
         let init_rc = unsafe { libc::pthread_attr_init(&mut attr) };
@@ -92,13 +92,13 @@ where
     }
 }
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 extern "C" fn detached_trampoline_rs<F: FnOnce() + Send + 'static>(arg: *mut u8) {
     let f: Box<F> = unsafe { Box::from_raw(arg.cast()) };
     (*f)();
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
     arg: *mut libc::c_void,
 ) -> *mut libc::c_void {
@@ -107,10 +107,10 @@ extern "C" fn detached_trampoline<F: FnOnce() + Send + 'static>(
     core::ptr::null_mut()
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 pub(crate) struct RawMutex(core::sync::atomic::AtomicPtr<libc::pthread_mutex_t>);
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 impl RawMutex {
     const fn new() -> Self {
         Self(core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()))
@@ -142,7 +142,7 @@ impl RawMutex {
     }
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 impl Drop for RawMutex {
     fn drop(&mut self) {
         let ptr = *self.0.get_mut();
@@ -162,9 +162,9 @@ impl Drop for RawMutex {
 /// ignore it - which is the right answer for a compiler session: a request that panicked left the
 /// session as it was, because the panic containment is what decides that, not the lock.
 pub struct Mutex<T: ?Sized> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     pub(crate) inner: ::libc_rs::sync::FutexMutex<()>,
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     pub(crate) inner: RawMutex,
     value: core::cell::UnsafeCell<T>,
 }
@@ -194,9 +194,9 @@ impl<T> Mutex<T> {
     // why the two are separate blocks - `std::sync::Mutex` splits them the same way.
     pub const fn new(value: T) -> Mutex<T> {
         Mutex {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             inner: ::libc_rs::sync::FutexMutex::new(()),
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             inner: RawMutex::new(),
             value: core::cell::UnsafeCell::new(value),
         }
@@ -210,7 +210,7 @@ impl<T: ?Sized> Mutex<T> {
     /// and the honest answer while a request is running is that there is no idle moment - so
     /// failing to take the lock *is* the answer, not a retry to paper over.
     pub fn try_lock(&self) -> Option<Guard<'_, T>> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             if let Some(g) = self.inner.try_lock() {
                 core::mem::forget(g);
@@ -219,7 +219,7 @@ impl<T: ?Sized> Mutex<T> {
                 None
             }
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         if unsafe { libc::pthread_mutex_trylock(self.inner.get()) } == 0 {
             Some(Guard { mutex: self })
         } else {
@@ -234,12 +234,12 @@ impl<T: ?Sized> Mutex<T> {
     /// guard rather than a result. `std::sync::Mutex::lock` returns one only to carry poisoning,
     /// which this does not have.
     pub fn lock(&self) -> Guard<'_, T> {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let g = self.inner.lock();
             core::mem::forget(g);
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         unsafe {
             libc::pthread_mutex_lock(self.inner.get());
         }
@@ -267,11 +267,11 @@ impl<T: ?Sized> core::ops::DerefMut for Guard<'_, T> {
 
 impl<T: ?Sized> Drop for Guard<'_, T> {
     fn drop(&mut self) {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         unsafe {
             self.mutex.inner.raw_unlock();
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         unsafe {
             libc::pthread_mutex_unlock(self.mutex.inner.get());
         }
@@ -336,7 +336,7 @@ impl<T: 'static> ThreadLocal<T> {
         }
     }
 
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     fn key(&self) -> Option<usize> {
         use core::sync::atomic::Ordering;
         unsafe extern "C" fn drop_box_rs<T>(raw: *mut u8) {
@@ -367,7 +367,7 @@ impl<T: 'static> ThreadLocal<T> {
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     fn key(&self) -> Option<libc::pthread_key_t> {
         use core::sync::atomic::Ordering;
         // The destructor is monomorphised per `T`, so it knows what to drop without a registry.
@@ -430,7 +430,7 @@ impl<T: 'static> ThreadLocal<T> {
     pub fn with<R>(&self, init: impl FnOnce() -> T, f: impl FnOnce(&mut T) -> R) -> Option<R> {
         let key = self.key()?;
         unsafe {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             let ptr = {
                 let existing = ::libc_rs::thread::tls_get(key);
                 if existing.is_null() {
@@ -441,7 +441,7 @@ impl<T: 'static> ThreadLocal<T> {
                     existing.cast::<T>()
                 }
             };
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             let ptr = {
                 let existing = libc::pthread_getspecific(key);
                 if existing.is_null() {
@@ -467,7 +467,7 @@ impl<T: 'static> ThreadLocal<T> {
     pub fn with_ref<R>(&self, init: impl FnOnce() -> T, f: impl FnOnce(&T) -> R) -> Option<R> {
         let key = self.key()?;
         unsafe {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             let ptr = {
                 let existing = ::libc_rs::thread::tls_get(key);
                 if existing.is_null() {
@@ -478,7 +478,7 @@ impl<T: 'static> ThreadLocal<T> {
                     existing.cast::<T>()
                 }
             };
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             let ptr = {
                 let existing = libc::pthread_getspecific(key);
                 if existing.is_null() {
@@ -500,9 +500,9 @@ impl<T: 'static> ThreadLocal<T> {
 /// sleep rather than poll, because the thing it is waiting for is a compile that may take a
 /// minute, and a poll loop over that is a core spent asking.
 pub struct Condvar {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     seq: core::sync::atomic::AtomicU32,
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     inner: core::sync::atomic::AtomicPtr<libc::pthread_cond_t>,
     /// How many threads are inside `wait`.
     ///
@@ -520,15 +520,15 @@ unsafe impl Sync for Condvar {}
 impl Condvar {
     pub const fn new() -> Condvar {
         Condvar {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             seq: core::sync::atomic::AtomicU32::new(0),
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             inner: core::sync::atomic::AtomicPtr::new(core::ptr::null_mut()),
             waiters: core::sync::atomic::AtomicUsize::new(0),
         }
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     fn raw(&self) -> *mut libc::pthread_cond_t {
         let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
         if !ptr.is_null() {
@@ -537,7 +537,7 @@ impl Condvar {
         self.init_slow()
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     #[cold]
     fn init_slow(&self) -> *mut libc::pthread_cond_t {
         let boxed = Box::into_raw(Box::new(libc::PTHREAD_COND_INITIALIZER));
@@ -569,7 +569,7 @@ impl Condvar {
         // The guard must not run its `Drop` and unlock: `pthread_cond_wait` does the unlocking,
         // and unlocking twice is undefined.
         core::mem::forget(guard);
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let seq = self.seq.load(core::sync::atomic::Ordering::Acquire);
             self.waiters.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
@@ -578,7 +578,7 @@ impl Condvar {
             self.waiters.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
             mutex.lock()
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             // Counted while the mutex is held, which is what makes `notify_one`'s answer exact for a
             // notifier that holds the same mutex. See `waiters`.
@@ -597,12 +597,12 @@ impl Condvar {
     /// `false` means nobody had entered `wait` yet, not that nobody ever will.
     pub fn notify_one(&self) -> bool {
         let had_waiter = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed) > 0;
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             self.seq.fetch_add(1, core::sync::atomic::Ordering::Release);
             let _ = ::libc_rs::sync::futex_wake_one(&self.seq);
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
             if !ptr.is_null() {
@@ -615,12 +615,12 @@ impl Condvar {
     /// Wake all of them. Returns how many were waiting.
     pub fn notify_all(&self) -> usize {
         let waiting = self.waiters.fetch_add(0, core::sync::atomic::Ordering::Relaxed);
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             self.seq.fetch_add(1, core::sync::atomic::Ordering::Release);
             let _ = ::libc_rs::sync::futex_wake_all(&self.seq);
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let ptr = self.inner.load(core::sync::atomic::Ordering::Acquire);
             if !ptr.is_null() {
@@ -645,7 +645,7 @@ impl Default for Condvar {
 
 impl Drop for Condvar {
     fn drop(&mut self) {
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let ptr = *self.inner.get_mut();
             if !ptr.is_null() {
@@ -825,7 +825,7 @@ const RW_WRITER_BIT: u32 = 1 << 31;
 const RW_WAITERS_BIT: u32 = 1 << 30;
 const RW_READER_MASK: u32 = 0x3fff_ffff;
 
-#[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+#[cfg(all(target_os = "macos", not(target_os = "none")))]
 mod ulock {
     use core::ffi::{c_int, c_void};
     use core::sync::atomic::AtomicU32;
@@ -947,7 +947,7 @@ impl<T: ?Sized> RwLock<T> {
                 s = self.state.load(Ordering::Relaxed);
                 continue;
             }
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             {
                 if (s & RW_WAITERS_BIT) == 0 {
                     match self.state.compare_exchange_weak(
@@ -965,7 +965,7 @@ impl<T: ?Sized> RwLock<T> {
                 }
                 let _ = ::libc_rs::sync::futex_wait(&self.state, s, None);
             }
-            #[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+            #[cfg(all(target_os = "macos", not(target_os = "none")))]
             {
                 if (s & RW_WAITERS_BIT) == 0 {
                     match self.state.compare_exchange_weak(
@@ -983,7 +983,7 @@ impl<T: ?Sized> RwLock<T> {
                 }
                 ulock::wait(&self.state, s, 1000);
             }
-            #[cfg(all(not(target_os = "macos"), not(feature = "libc-rs")))]
+            #[cfg(all(not(target_os = "macos"), not(target_os = "none")))]
             unsafe {
                 libc::sched_yield();
             }
@@ -1037,7 +1037,7 @@ impl<T: ?Sized> RwLock<T> {
                 s = self.state.load(Ordering::Relaxed);
                 continue;
             }
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             {
                 if (s & RW_WAITERS_BIT) == 0 {
                     match self.state.compare_exchange_weak(
@@ -1055,7 +1055,7 @@ impl<T: ?Sized> RwLock<T> {
                 }
                 let _ = ::libc_rs::sync::futex_wait(&self.state, s, None);
             }
-            #[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+            #[cfg(all(target_os = "macos", not(target_os = "none")))]
             {
                 if (s & RW_WAITERS_BIT) == 0 {
                     match self.state.compare_exchange_weak(
@@ -1073,7 +1073,7 @@ impl<T: ?Sized> RwLock<T> {
                 }
                 ulock::wait(&self.state, s, 1000);
             }
-            #[cfg(all(not(target_os = "macos"), not(feature = "libc-rs")))]
+            #[cfg(all(not(target_os = "macos"), not(target_os = "none")))]
             unsafe {
                 libc::sched_yield();
             }
@@ -1105,11 +1105,11 @@ impl<T: ?Sized> Drop for ReadGuard<'_, T> {
         let prev = self.lock.state.fetch_sub(1, Ordering::Release);
         if (prev & RW_READER_MASK) == 1 && (prev & RW_WAITERS_BIT) != 0 {
             self.lock.state.fetch_and(!RW_WAITERS_BIT, Ordering::Relaxed);
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             {
                 let _ = ::libc_rs::sync::futex_wake_all(&self.lock.state);
             }
-            #[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+            #[cfg(all(target_os = "macos", not(target_os = "none")))]
             ulock::wake_all(&self.lock.state);
         }
     }
@@ -1138,11 +1138,11 @@ impl<T: ?Sized> Drop for WriteGuard<'_, T> {
         use core::sync::atomic::Ordering;
         let prev = self.lock.state.fetch_and(!(RW_WRITER_BIT | RW_WAITERS_BIT), Ordering::Release);
         if (prev & RW_WAITERS_BIT) != 0 {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             {
                 let _ = ::libc_rs::sync::futex_wake_all(&self.lock.state);
             }
-            #[cfg(all(target_os = "macos", not(feature = "libc-rs")))]
+            #[cfg(all(target_os = "macos", not(target_os = "none")))]
             ulock::wake_all(&self.lock.state);
         }
     }
@@ -1165,11 +1165,11 @@ impl ThreadId {
 /// hands out, which is fine for every use here: the identifier is compared for equality and
 /// printed, never used as a dense index.
 pub fn current_id() -> ThreadId {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         ThreadId(::libc_rs::thread::current_thread_id())
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         ThreadId(unsafe { libc::pthread_self() } as usize as u64)
     }
@@ -1295,9 +1295,9 @@ use alloc::vec::Vec;
 /// half: `coupled`'s frontend worker and its batch compiler both need the value the thread
 /// produced, and a scoped borrow of data the parent owns.
 pub struct JoinHandle<T> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     handle: Option<::libc_rs::thread::ThreadHandle>,
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     tid: libc::pthread_t,
     // Some until a successful join or detach. The worker owns a separate Arc.
     slot: Option<alloc::sync::Arc<ThreadResult<T>>>,
@@ -1311,7 +1311,7 @@ struct ThreadResult<T> {
 // Arc destruction cannot overlap either access because each accessor owns an Arc.
 unsafe impl<T: Send> Sync for ThreadResult<T> {}
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 unsafe extern "C" {
     fn pthread_detach(thread: libc::pthread_t) -> core::ffi::c_int;
     fn pthread_equal(left: libc::pthread_t, right: libc::pthread_t) -> core::ffi::c_int;
@@ -1325,7 +1325,7 @@ struct SpawnPayload<F, T> {
     slot: alloc::sync::Arc<ThreadResult<T>>,
 }
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 extern "C" fn spawn_trampoline_rs<F: FnOnce() -> T + Send + 'static, T>(arg: *mut u8) {
     let payload: Box<SpawnPayload<F, T>> = unsafe { Box::from_raw(arg.cast()) };
     let SpawnPayload { f, slot } = *payload;
@@ -1333,7 +1333,7 @@ extern "C" fn spawn_trampoline_rs<F: FnOnce() -> T + Send + 'static, T>(arg: *mu
     unsafe { *slot.value.get() = Some(value) };
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 extern "C" fn spawn_trampoline<F: FnOnce() -> T + Send + 'static, T>(
     arg: *mut libc::c_void,
 ) -> *mut libc::c_void {
@@ -1389,7 +1389,7 @@ impl Builder {
         let payload =
             Box::into_raw(Box::new(SpawnPayload { f, slot: alloc::sync::Arc::clone(&slot) }));
 
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             let stack = if self.stack_bytes == 0 {
                 ::libc_rs::thread::DEFAULT_STACK_BYTES
@@ -1413,7 +1413,7 @@ impl Builder {
             }
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let mut attr: libc::pthread_attr_t = unsafe { core::mem::zeroed() };
             let init_rc = unsafe { libc::pthread_attr_init(&mut attr) };
@@ -1466,11 +1466,11 @@ impl<T> JoinHandle<T> {
     /// Whether this still-owned native thread is the caller.
     /// Returns false after successful join or detach, without using a stale native ID.
     pub fn is_current_thread(&self) -> bool {
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             self.slot.is_some() && self.handle.as_ref().is_some_and(|h| h.is_current())
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             self.slot.is_some() && unsafe { pthread_equal(self.tid, libc::pthread_self()) != 0 }
         }
@@ -1487,13 +1487,13 @@ impl<T> JoinHandle<T> {
         if self.is_current_thread() {
             return Err(Errno(libc::EINVAL));
         }
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             if let Some(handle) = self.handle.take() {
                 handle.join().map_err(|e| Errno(e.0))?;
             }
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let rc = unsafe { libc::pthread_join(self.tid, core::ptr::null_mut()) };
             if rc != 0 {
@@ -1520,13 +1520,13 @@ impl<T> JoinHandle<T> {
         if self.slot.is_none() {
             return Ok(());
         }
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             if let Some(handle) = self.handle.take() {
                 handle.detach().map_err(|e| Errno(e.0))?;
             }
         }
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let rc = unsafe { pthread_detach(self.tid) };
             if rc != 0 {
@@ -1543,9 +1543,9 @@ impl<T> Drop for JoinHandle<T> {
     /// use try_detach explicitly to handle a native error while retaining the handle.
     fn drop(&mut self) {
         if self.try_detach().is_err() {
-            #[cfg(feature = "libc-rs")]
+            #[cfg(target_os = "none")]
             panic!("JoinHandle::try_detach failed");
-            #[cfg(not(feature = "libc-rs"))]
+            #[cfg(not(target_os = "none"))]
             unsafe {
                 libc::abort()
             }
@@ -1559,9 +1559,9 @@ impl<T> Drop for JoinHandle<T> {
 
 /// The handle a scoped thread is started through.
 pub struct Scope<'scope, 'env: 'scope> {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     handles: *mut Vec<::libc_rs::thread::ThreadHandle>,
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     handles: *mut Vec<libc::pthread_t>,
     _marker: core::marker::PhantomData<(&'scope (), &'env ())>,
 }
@@ -1570,14 +1570,14 @@ struct ScopedPayload<F> {
     f: F,
 }
 
-#[cfg(feature = "libc-rs")]
+#[cfg(target_os = "none")]
 extern "C" fn scoped_trampoline_rs<F: FnOnce() + Send>(arg: *mut u8) {
     let payload: Box<ScopedPayload<F>> = unsafe { Box::from_raw(arg.cast()) };
     let ScopedPayload { f } = *payload;
     f();
 }
 
-#[cfg(not(feature = "libc-rs"))]
+#[cfg(not(target_os = "none"))]
 extern "C" fn scoped_trampoline<F: FnOnce() + Send>(arg: *mut libc::c_void) -> *mut libc::c_void {
     let payload: Box<ScopedPayload<F>> = unsafe { Box::from_raw(arg.cast()) };
     let ScopedPayload { f } = *payload;
@@ -1597,7 +1597,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
         // The concrete payload retains 'scope in its type. scope joins it before borrowed data expires.
         let payload = Box::into_raw(Box::new(ScopedPayload { f }));
 
-        #[cfg(feature = "libc-rs")]
+        #[cfg(target_os = "none")]
         {
             match unsafe {
                 ::libc_rs::thread::spawn_thread(
@@ -1619,7 +1619,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
             }
         }
 
-        #[cfg(not(feature = "libc-rs"))]
+        #[cfg(not(target_os = "none"))]
         {
             let mut tid: libc::pthread_t = unsafe { core::mem::zeroed() };
             let rc = unsafe {
@@ -1652,7 +1652,7 @@ pub fn scope<'env, F, T>(f: F) -> T
 where
     F: for<'scope> FnOnce(&'scope Scope<'scope, 'env>) -> T,
 {
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     {
         let mut handles: Vec<::libc_rs::thread::ThreadHandle> = Vec::new();
         let sc = Scope {
@@ -1665,7 +1665,7 @@ where
         }
         out
     }
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     {
         let mut handles: Vec<libc::pthread_t> = Vec::new();
         let sc = Scope {
@@ -1842,7 +1842,7 @@ mod tests {
         assert_eq!(moved.into_inner(), 30);
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     #[test]
     fn rwlock_recursive_read_with_waiting_writer_does_not_deadlock() {
         let lock = Arc::new(RwLock::new(42u32));
@@ -1882,7 +1882,7 @@ mod tests {
         assert_eq!(*lock.read(), 99);
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     #[test]
     fn rwlock_multithreaded_contention() {
         let lock = Arc::new(RwLock::new(0usize));
@@ -1913,7 +1913,7 @@ mod tests {
         assert_eq!(*lock.read(), threads * (iters / 4));
     }
 
-    #[cfg(not(feature = "libc-rs"))]
+    #[cfg(not(target_os = "none"))]
     #[test]
     fn mutex_and_condvar_move_after_use() {
         let m = Mutex::new(0u32);
@@ -1947,7 +1947,7 @@ mod tests {
         h.join().unwrap();
     }
 
-    #[cfg(feature = "libc-rs")]
+    #[cfg(target_os = "none")]
     #[test]
     fn libc_rs_sync_tls_and_scope_primitives() {
         let m = Mutex::new(10u32);
