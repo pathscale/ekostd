@@ -15,24 +15,31 @@ use crate::libc_lite as libc;
 /// This is `std::env::var_os`. The name is the same because the semantics are: unset and
 /// "set to nothing" are different, and callers deciding on a `-Z` flag rely on that.
 pub fn var_os(name: &str) -> Option<Vec<u8>> {
-    let mut c = Vec::with_capacity(name.len() + 1);
-    c.extend_from_slice(name.as_bytes());
-    c.push(0);
-    let p = unsafe { libc::getenv(c.as_ptr().cast()) };
-    if p.is_null() {
-        return None;
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::startup::getenv_vec(name.as_bytes())
     }
-    let mut out = Vec::new();
-    let mut i = 0isize;
-    loop {
-        let b = unsafe { *p.offset(i) } as u8;
-        if b == 0 {
-            break;
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let mut c = Vec::with_capacity(name.len() + 1);
+        c.extend_from_slice(name.as_bytes());
+        c.push(0);
+        let p = unsafe { libc::getenv(c.as_ptr().cast()) };
+        if p.is_null() {
+            return None;
         }
-        out.push(b);
-        i += 1;
+        let mut out = Vec::new();
+        let mut i = 0isize;
+        loop {
+            let b = unsafe { *p.offset(i) } as u8;
+            if b == 0 {
+                break;
+            }
+            out.push(b);
+            i += 1;
+        }
+        Some(out)
     }
-    Some(out)
 }
 
 /// The value of an environment variable as UTF-8.
@@ -54,13 +61,20 @@ pub fn var(name: &str) -> Option<String> {
 /// # Safety
 /// No other thread may be reading the environment concurrently.
 pub unsafe fn set_var(name: &str, value: &str) {
-    let mut n = Vec::with_capacity(name.len() + 1);
-    n.extend_from_slice(name.as_bytes());
-    n.push(0);
-    let mut v = Vec::with_capacity(value.len() + 1);
-    v.extend_from_slice(value.as_bytes());
-    v.push(0);
-    unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
+    #[cfg(feature = "libc-rs")]
+    {
+        let _ = ::libc_rs::startup::setenv_bytes(name.as_bytes(), value.as_bytes(), true);
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let mut n = Vec::with_capacity(name.len() + 1);
+        n.extend_from_slice(name.as_bytes());
+        n.push(0);
+        let mut v = Vec::with_capacity(value.len() + 1);
+        v.extend_from_slice(value.as_bytes());
+        v.push(0);
+        unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
+    }
 }
 
 fn zero_bytes(len: usize) -> Vec<u8> {
@@ -125,7 +139,18 @@ pub fn current_dir() -> Option<Vec<u8>> {
 /// so does this, but the two implementations are genuinely different and neither is a fallback
 /// for the other.
 pub fn current_exe() -> Option<Vec<u8>> {
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "libc-rs")]
+    {
+        let mut buf = zero_bytes(4096);
+        let filled = ::libc_rs::fs::readlink(b"/proc/self/exe", &mut buf).ok()?;
+        let len = filled.len();
+        if len == 0 {
+            return None;
+        }
+        buf.truncate(len);
+        Some(buf)
+    }
+    #[cfg(all(not(feature = "libc-rs"), target_os = "macos"))]
     {
         unsafe extern "C" {
             fn _NSGetExecutablePath(buf: *mut libc::c_char, size: *mut u32) -> libc::c_int;
@@ -143,7 +168,7 @@ pub fn current_exe() -> Option<Vec<u8>> {
         buf.truncate(end);
         Some(buf)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(not(feature = "libc-rs"), not(target_os = "macos")))]
     {
         let mut buf = zero_bytes(4096);
         let n = unsafe {
@@ -157,6 +182,7 @@ pub fn current_exe() -> Option<Vec<u8>> {
     }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 #[inline(never)]
 pub(crate) unsafe fn cstr_to_vec(p: *const libc::c_char) -> Vec<u8> {
     let mut out = Vec::new();
@@ -218,6 +244,7 @@ pub fn split_paths(value: &[u8]) -> impl Iterator<Item = &[u8]> {
     SplitPaths { rest: value }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 #[inline(never)]
 pub(crate) unsafe fn cstr_table_at(
     table: *const *const libc::c_char,
@@ -228,6 +255,7 @@ pub(crate) unsafe fn cstr_table_at(
     unsafe { *slot }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 unsafe fn copy_bytes(pair: (*mut u8, *const u8), len: usize) {
     let (dst, src) = pair;
     let mut copied = 0;
@@ -237,6 +265,7 @@ unsafe fn copy_bytes(pair: (*mut u8, *const u8), len: usize) {
     }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 unsafe fn step_push_cstr(
     table: *const *const libc::c_char,
     index: usize,
@@ -267,40 +296,47 @@ unsafe fn step_push_cstr(
 /// This is what a `main` would have been handed. It is read from the OS rather than captured at
 /// startup, so a caller deep in the compiler can ask without an entry point having stashed it.
 pub fn args() -> Vec<Vec<u8>> {
-    let mut out = Vec::new();
-    #[cfg(target_os = "macos")]
+    #[cfg(feature = "libc-rs")]
     {
-        unsafe extern "C" {
-            fn _NSGetArgc() -> *mut libc::c_int;
-            fn _NSGetArgv() -> *mut *mut *mut libc::c_char;
-        }
-        unsafe {
-            let argc = *_NSGetArgc();
-            let argv = *_NSGetArgv();
-            if argv.is_null() || argc <= 0 {
-                return out;
-            }
-            let table = argv as *const *const libc::c_char;
-            let count = argc as usize;
-            let mut i = 0usize;
-            while i < count {
-                let _ = step_push_cstr(table, i, &mut out);
-                i += 1;
-            }
-        }
+        ::libc_rs::startup::args_vec()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(feature = "libc-rs"))]
     {
-        if let Ok(raw) = crate::file::read("/proc/self/cmdline") {
-            // Trailing NUL means a trailing empty split, which is not an argument.
-            for arg in raw.split(|&b| b == 0) {
-                if !arg.is_empty() {
-                    out.push(arg.to_vec());
+        let mut out = Vec::new();
+        #[cfg(target_os = "macos")]
+        {
+            unsafe extern "C" {
+                fn _NSGetArgc() -> *mut libc::c_int;
+                fn _NSGetArgv() -> *mut *mut *mut libc::c_char;
+            }
+            unsafe {
+                let argc = *_NSGetArgc();
+                let argv = *_NSGetArgv();
+                if argv.is_null() || argc <= 0 {
+                    return out;
+                }
+                let table = argv as *const *const libc::c_char;
+                let count = argc as usize;
+                let mut i = 0usize;
+                while i < count {
+                    let _ = step_push_cstr(table, i, &mut out);
+                    i += 1;
                 }
             }
         }
+        #[cfg(not(target_os = "macos"))]
+        {
+            if let Ok(raw) = crate::file::read("/proc/self/cmdline") {
+                // Trailing NUL means a trailing empty split, which is not an argument.
+                for arg in raw.split(|&b| b == 0) {
+                    if !arg.is_empty() {
+                        out.push(arg.to_vec());
+                    }
+                }
+            }
+        }
+        out
     }
-    out
 }
 
 /// Set a variable to raw bytes.
@@ -308,15 +344,23 @@ pub fn args() -> Vec<Vec<u8>> {
 /// # Safety
 /// Races any other thread reading the environment, exactly as `setenv` does.
 pub unsafe fn set_var_bytes(name: &[u8], value: &[u8]) {
-    let mut n = Vec::with_capacity(name.len() + 1);
-    n.extend_from_slice(name);
-    n.push(0);
-    let mut v = Vec::with_capacity(value.len() + 1);
-    v.extend_from_slice(value);
-    v.push(0);
-    unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
+    #[cfg(feature = "libc-rs")]
+    {
+        let _ = ::libc_rs::startup::setenv_bytes(name, value, true);
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let mut n = Vec::with_capacity(name.len() + 1);
+        n.extend_from_slice(name);
+        n.push(0);
+        let mut v = Vec::with_capacity(value.len() + 1);
+        v.extend_from_slice(value);
+        v.push(0);
+        unsafe { libc::setenv(n.as_ptr().cast(), v.as_ptr().cast(), 1) };
+    }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 pub(crate) unsafe fn raw_environ_ptr() -> *const *const libc::c_char {
     #[cfg(target_os = "macos")]
     {
@@ -342,17 +386,24 @@ pub(crate) unsafe fn raw_environ_ptr() -> *const *const libc::c_char {
 ///
 /// Read from `environ` rather than assembled, so it is what the process actually has.
 pub fn environ() -> Vec<Vec<u8>> {
-    let mut out = Vec::new();
-    let envp = unsafe { raw_environ_ptr() };
-    if envp.is_null() {
-        return out;
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::startup::environ_vec()
     }
-    let mut i = 0usize;
-    loop {
-        if !unsafe { step_push_cstr(envp, i, &mut out) } {
-            break;
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let mut out = Vec::new();
+        let envp = unsafe { raw_environ_ptr() };
+        if envp.is_null() {
+            return out;
         }
-        i += 1;
+        let mut i = 0usize;
+        loop {
+            if !unsafe { step_push_cstr(envp, i, &mut out) } {
+                break;
+            }
+            i += 1;
+        }
+        out
     }
-    out
 }

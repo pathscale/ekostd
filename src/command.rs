@@ -79,24 +79,24 @@ impl Pipe {
         // descriptor the process has, so another thread's child inherits these write ends and
         // never closes them, and this read never reaches end of file. `dup2` clears the flag on
         // the descriptor it creates, so our own child keeps 0, 1 and 2 across the exec.
-        #[cfg(target_os = "linux")]
+        #[cfg(any(feature = "libc-rs", target_os = "linux"))]
         let made = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(feature = "libc-rs", target_os = "linux")))]
         let made = unsafe { libc::pipe(fds.as_mut_ptr()) };
         if made != 0 {
             return None;
         }
         // macOS has no `pipe2`, so the flag goes on afterwards, leaving a window two syscalls
         // wide rather than the lifetime of a child.
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(feature = "libc-rs", target_os = "linux")))]
         unsafe {
-            libc::fcntl(fds[0], libc::F_SETFD, libc::FD_CLOEXEC);
-            libc::fcntl(fds[1], libc::F_SETFD, libc::FD_CLOEXEC);
+            libc::fcntl3(fds[0], libc::F_SETFD, libc::FD_CLOEXEC);
+            libc::fcntl3(fds[1], libc::F_SETFD, libc::FD_CLOEXEC);
         }
         // Non-blocking, because `poll` says a descriptor is ready and not how much is there.
         // A blocking read after a readable poll can still stall on the second pass round the
         // loop, and one stalled read is the deadlock this module exists to avoid.
-        unsafe { libc::fcntl(fds[0], libc::F_SETFL, libc::O_NONBLOCK) };
+        unsafe { libc::fcntl3(fds[0], libc::F_SETFL, libc::O_NONBLOCK) };
         Some(Pipe { read: fds[0], write: fds[1], done: false, got: Vec::new() })
     }
 
@@ -288,7 +288,7 @@ unsafe fn exec_child(
 
         // No stdin, so a program that stops to ask a question does not wait forever on
         // an answer nobody will see.
-        let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+        let null = libc::open2(c"/dev/null".as_ptr(), libc::O_RDONLY);
         if null < 0 {
             return 127;
         }
@@ -403,7 +403,10 @@ impl Command {
             let start = self.overrides_offsets[idx];
             let key_len = self.overrides_key_lens[idx];
             if key_len == wanted_key.len() + 1
-                && crate::path::bytes_equal(&self.overrides_buf[start..start + wanted_key.len()], wanted_key)
+                && crate::path::bytes_equal(
+                    &self.overrides_buf[start..start + wanted_key.len()],
+                    wanted_key,
+                )
             {
                 let end = if idx + 1 < self.overrides_offsets.len() {
                     self.overrides_offsets[idx + 1]
@@ -472,8 +475,15 @@ impl Command {
             // have had threads, only async-signal-safe calls are defined. Every buffer this
             // touches was built above, before the fork.
             unsafe {
-                let code =
-                    exec_child(out.write, err.write, &tries_buf, &tries_offsets, &argv, &envp, &self.cwd);
+                let code = exec_child(
+                    out.write,
+                    err.write,
+                    &tries_buf,
+                    &tries_offsets,
+                    &argv,
+                    &envp,
+                    &self.cwd,
+                );
                 libc::_exit(code);
             }
         }
@@ -520,6 +530,7 @@ impl Command {
         matched
     }
 
+    #[cfg(not(feature = "libc-rs"))]
     unsafe fn step_base_env(
         &self,
         envp: *const *const libc::c_char,
@@ -553,14 +564,25 @@ impl Command {
     }
 
     fn environment(&self, buf: &mut Vec<u8>, offsets: &mut Vec<usize>) {
-        let envp = unsafe { crate::env::raw_environ_ptr() };
-        if !envp.is_null() {
-            let mut i = 0usize;
-            loop {
-                if !unsafe { self.step_base_env(envp, i, buf, offsets) } {
-                    break;
+        #[cfg(feature = "libc-rs")]
+        {
+            for existing in crate::env::environ() {
+                if !self.is_key_overridden(&existing, 0) {
+                    push_nul_entry(buf, offsets, &existing);
                 }
-                i += 1;
+            }
+        }
+        #[cfg(not(feature = "libc-rs"))]
+        {
+            let envp = unsafe { crate::env::raw_environ_ptr() };
+            if !envp.is_null() {
+                let mut i = 0usize;
+                loop {
+                    if !unsafe { self.step_base_env(envp, i, buf, offsets) } {
+                        break;
+                    }
+                    i += 1;
+                }
             }
         }
         let count = self.overrides_offsets.len();
@@ -764,5 +786,5 @@ unsafe fn above_stdio(fd: libc::c_int) -> libc::c_int {
     if fd > 2 {
         return fd.wrapping_add(0);
     }
-    unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) }
+    unsafe { libc::fcntl3(fd, libc::F_DUPFD_CLOEXEC, 3) }
 }

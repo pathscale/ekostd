@@ -78,17 +78,17 @@ pub const fn is_real() -> bool {
 /// inside a phase at once - and useless for anything that needs to be true afterwards.
 #[inline]
 pub fn cpu_id() -> u16 {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(feature = "libc-rs")))]
     {
         current_cpu()
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(all(target_arch = "aarch64", target_vendor = "apple", not(feature = "libc-rs"))))]
     {
         0
     }
 }
 
-#[cfg(target_arch = "aarch64")]
+#[cfg(all(target_arch = "aarch64", target_vendor = "apple", not(feature = "libc-rs")))]
 #[inline]
 fn current_cpu() -> u16 {
     let value: u64;

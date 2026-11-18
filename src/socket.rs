@@ -99,9 +99,9 @@ impl Errno {
 /// Read-modify-write rather than a bare `F_SETFL`: overwriting the flags would clear whatever
 /// else the descriptor carries, and on an accepted connection that is not ours to decide.
 fn set_nonblocking(fd: libc::c_int, on: bool) -> Result<(), Errno> {
-    let flags = checked(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
+    let flags = checked(unsafe { libc::fcntl2(fd, libc::F_GETFL) })?;
     let next = if on { flags | libc::O_NONBLOCK } else { flags & !libc::O_NONBLOCK };
-    checked(unsafe { libc::fcntl(fd, libc::F_SETFL, next) })?;
+    checked(unsafe { libc::fcntl3(fd, libc::F_SETFL, next) })?;
     Ok(())
 }
 

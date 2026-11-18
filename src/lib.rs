@@ -69,6 +69,7 @@ pub mod libc_lite;
 pub mod math;
 pub mod mmap;
 pub mod path;
+pub mod poll;
 pub mod print;
 pub mod proc;
 pub mod signal;
@@ -90,9 +91,9 @@ impl Errno {
     /// A function returning a pointer to a thread-local, in every modern libc, which is why this
     /// is not a global read. The symbol differs by platform.
     pub fn current() -> Errno {
-        #[cfg(target_vendor = "apple")]
+        #[cfg(all(target_vendor = "apple", not(feature = "libc-rs")))]
         let p = unsafe { libc::__error() };
-        #[cfg(all(unix, not(target_vendor = "apple")))]
+        #[cfg(any(feature = "libc-rs", all(unix, not(target_vendor = "apple"))))]
         let p = unsafe { libc::__errno_location() };
         Errno(unsafe { *p })
     }
@@ -103,9 +104,9 @@ impl Errno {
     /// `readdir` returns null both at the end of a directory and on an error, and the only way
     /// to tell them apart is to clear `errno` first and read it after.
     pub fn clear() {
-        #[cfg(target_vendor = "apple")]
+        #[cfg(all(target_vendor = "apple", not(feature = "libc-rs")))]
         let p = unsafe { libc::__error() };
-        #[cfg(all(unix, not(target_vendor = "apple")))]
+        #[cfg(any(feature = "libc-rs", all(unix, not(target_vendor = "apple"))))]
         let p = unsafe { libc::__errno_location() };
         unsafe { *p = 0 };
     }

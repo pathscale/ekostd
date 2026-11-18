@@ -5,7 +5,9 @@
 
 #[allow(unused_imports)]
 use super::*;
-use core::ffi::{c_char, c_int, c_long, c_short, c_void};
+#[cfg(target_os = "macos")]
+use core::ffi::c_void;
+use core::ffi::{c_char, c_int, c_long, c_short};
 
 pub type pid_t = i32;
 
@@ -66,9 +68,9 @@ pub const F_UNLCK: c_int = 2;
 
 // glibc types the resource id of `getrlimit` and `setrlimit` unsigned; macOS and musl type it `c_int`.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
-type rlimit_resource_t = core::ffi::c_uint;
+pub(crate) type rlimit_resource_t = core::ffi::c_uint;
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
-type rlimit_resource_t = c_int;
+pub(crate) type rlimit_resource_t = c_int;
 
 pub const RLIMIT_CPU: rlimit_resource_t = 0;
 #[cfg(target_os = "macos")]

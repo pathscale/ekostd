@@ -58,8 +58,8 @@
 //! putting the default back part way through a shutdown is how the process
 //! reacquires the disposition it was avoiding.
 
-use crate::Errno;
 use crate::libc_lite as libc;
+use crate::Errno;
 
 /// The signals a serving process stops on.
 ///
@@ -296,9 +296,9 @@ impl Action {
 fn nonblocking(fd: libc::c_int) -> Result<(), Errno> {
     // SAFETY: `fd` is a live descriptor and `F_SETFL`/`O_NONBLOCK` are both
     // integers; this call reads no memory through a pointer.
-    let flags = checked(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
+    let flags = checked(unsafe { libc::fcntl2(fd, libc::F_GETFL) })?;
     // SAFETY: as above. `fcntl` with `F_SETFL` takes the flags by value.
-    checked(unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) })?;
+    checked(unsafe { libc::fcntl3(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) })?;
     Ok(())
 }
 
@@ -306,6 +306,14 @@ fn nonblocking(fd: libc::c_int) -> Result<(), Errno> {
 ///
 /// Every one of them reports failure as `-1` and sets `errno`, so a caller
 /// reads one type rather than one per call site.
+/// Ignore `SIGPIPE` process-wide (`SIG_IGN` on signal `13`).
+pub fn ignore_sigpipe() -> Result<(), Errno> {
+    let mut act: libc::sigaction = unsafe { core::mem::zeroed() };
+    act.sa_sigaction = 1;
+    unsafe { libc::sigemptyset(&mut act.sa_mask) };
+    checked(unsafe { libc::sigaction(13, &act, core::ptr::null_mut()) }).map(|_| ())
+}
+
 fn checked(returned: i32) -> Result<i32, Errno> {
     if returned == -1 {
         Err(Errno::current())

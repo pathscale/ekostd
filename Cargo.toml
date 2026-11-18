@@ -17,11 +17,12 @@ categories = ["no-std", "os"]
 name = "eko"
 path = "src/lib.rs"
 
+[features]
+default = []
+libc-rs = ["dep:libc-rs"]
+
 [dependencies]
-# `libc` is the only dependency, and only where `src/libc_lite` has no checked declarations yet.
-# A `no_std` crate wrapping `libc` is still `no_std`: the platform already has it.
-[target.'cfg(not(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64"))))'.dependencies]
-libc = { version = "^0.2.189", default-features = false }
+libc-rs = { version = "0.2.1", optional = true }
 
 # The parity tests compare `libc_lite` with this crate. Nothing else may use it.
 [dev-dependencies]

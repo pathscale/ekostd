@@ -16,6 +16,7 @@
 
 // libm is a separate library on Linux and part of libSystem on Apple targets, so `m` is linked
 // only off Apple. On Apple the symbols come from libSystem, which every image already links.
+#[cfg(not(feature = "libc-rs"))]
 #[cfg_attr(not(target_vendor = "apple"), link(name = "m"))]
 extern "C" {
     fn log(x: f64) -> f64;
@@ -37,7 +38,14 @@ extern "C" {
 /// Edge cases are the platform's and are the ones `std` documents, because they are the same
 /// call: `ln(0.0)` is negative infinity, a negative argument is NaN.
 pub fn ln(x: f64) -> f64 {
-    unsafe { log(x) }
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::math::ln(x)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { log(x) }
+    }
 }
 
 /// `x` raised to `y`.
@@ -46,20 +54,48 @@ pub fn ln(x: f64) -> f64 {
 /// intrinsic that lowers to this for anything the optimiser cannot unroll, so a caller with an
 /// `i32` exponent converts it and loses nothing.
 pub fn powf(x: f64, y: f64) -> f64 {
-    unsafe { pow(x, y) }
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::math::powf(x, y)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { pow(x, y) }
+    }
 }
 
 /// The largest integer not above `x`, as `f64::floor` would give it with `std`.
 pub fn floor(x: f64) -> f64 {
-    unsafe { c_floor(x) }
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::math::floor(x)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { c_floor(x) }
+    }
 }
 
 /// The smallest integer not below `x`, as `f64::ceil` would give it with `std`.
 pub fn ceil(x: f64) -> f64 {
-    unsafe { c_ceil(x) }
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::math::ceil(x)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { c_ceil(x) }
+    }
 }
 
 /// `x` with its fractional part dropped, rounding toward zero, as `f64::trunc` would.
 pub fn trunc(x: f64) -> f64 {
-    unsafe { c_trunc(x) }
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::math::trunc(x)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { c_trunc(x) }
+    }
 }

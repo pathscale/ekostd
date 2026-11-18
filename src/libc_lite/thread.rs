@@ -1,5 +1,3 @@
-use super::*;
-
 use core::ffi::{c_int, c_long};
 pub use core::ffi::{c_ulong, c_void};
 
@@ -123,14 +121,17 @@ pub type pthread_key_t = core::ffi::c_uint;
 #[cfg(target_os = "linux")]
 pub type pthread_once_t = c_int;
 
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "aarch64"))]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct pthread_attr_t {
     __size: [usize; 8],
 }
 
-#[cfg(all(target_os = "linux", target_env = "musl"))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_env = "musl", all(target_env = "gnu", target_arch = "x86_64"))
+))]
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct pthread_attr_t {
@@ -144,14 +145,17 @@ pub struct pthread_cond_t {
     size: [u8; 48],
 }
 
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "aarch64"))]
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
 pub struct pthread_mutex_t {
     size: [core::ffi::c_char; 48],
 }
 
-#[cfg(all(target_os = "linux", target_env = "musl"))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_env = "musl", all(target_env = "gnu", target_arch = "x86_64"))
+))]
 #[repr(C, align(8))]
 #[derive(Clone, Copy)]
 pub struct pthread_mutex_t {
@@ -165,9 +169,12 @@ pub struct pthread_rwlock_t {
     size: [u8; 56],
 }
 
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
+#[cfg(all(target_os = "linux", target_env = "gnu", target_arch = "aarch64"))]
 pub const PTHREAD_MUTEX_INITIALIZER: pthread_mutex_t = pthread_mutex_t { size: [0; 48] };
-#[cfg(all(target_os = "linux", target_env = "musl"))]
+#[cfg(all(
+    target_os = "linux",
+    any(target_env = "musl", all(target_env = "gnu", target_arch = "x86_64"))
+))]
 pub const PTHREAD_MUTEX_INITIALIZER: pthread_mutex_t = pthread_mutex_t { size: [0; 40] };
 #[cfg(target_os = "linux")]
 pub const PTHREAD_COND_INITIALIZER: pthread_cond_t = pthread_cond_t { size: [0; 48] };
@@ -240,8 +247,11 @@ unsafe extern "C" {
     pub fn dlsym(handle: *mut c_void, symbol: *const core::ffi::c_char) -> *mut c_void;
     pub fn dlclose(handle: *mut c_void) -> c_int;
 
-    /// Variadic, as in C; the request type is `c_ulong` on Apple and glibc.
+    /// Variadic, as in C; the request type is `c_ulong` on Apple and glibc, `c_int` on musl.
+    #[cfg(not(target_env = "musl"))]
     pub fn ioctl(fd: c_int, request: c_ulong, ...) -> c_int;
+    #[cfg(target_env = "musl")]
+    pub fn ioctl(fd: c_int, request: c_int, ...) -> c_int;
 }
 
 #[cfg(target_os = "macos")]

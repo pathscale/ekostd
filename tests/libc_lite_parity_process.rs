@@ -1,3 +1,4 @@
+#![cfg(not(feature = "libc-rs"))]
 //! `eko::libc_lite` process and signal items against the `libc` crate.
 //!
 //! Every comparison is a compile-time assertion, so `cargo check --tests --target T` proves the
@@ -7,9 +8,14 @@
 //! signature names a struct, the two sides name their own struct (they are different types) and
 //! the struct is proven by the layout assertions.
 
-#[cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64")))]
+#[cfg(any(
+    target_os = "macos",
+    all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
+))]
 mod checks {
-    use core::ffi::{c_char, c_int, c_long, c_short, c_void};
+    #[cfg(target_os = "macos")]
+    use core::ffi::c_void;
+    use core::ffi::{c_char, c_int, c_long, c_short};
 
     const fn same_type_of<T>(_: &T, _: &T) {}
 
@@ -67,16 +73,47 @@ mod checks {
     }
 
     same_const!(
-        EAGAIN, EIO, EWOULDBLOCK, FD_CLOEXEC, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_SETFD, F_SETFL,
-        LOCK_EX, LOCK_NB, O_CLOEXEC, O_NONBLOCK, POLLIN, SA_RESTART, SIGHUP, SIGINT, SIGKILL,
-        SIGTERM, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, WNOHANG, _SC_NPROCESSORS_ONLN,
+        EAGAIN,
+        EIO,
+        EWOULDBLOCK,
+        FD_CLOEXEC,
+        F_DUPFD_CLOEXEC,
+        F_GETFD,
+        F_GETFL,
+        F_SETFD,
+        F_SETFL,
+        LOCK_EX,
+        LOCK_NB,
+        O_CLOEXEC,
+        O_NONBLOCK,
+        POLLIN,
+        SA_RESTART,
+        SIGHUP,
+        SIGINT,
+        SIGKILL,
+        SIGTERM,
+        STDERR_FILENO,
+        STDIN_FILENO,
+        STDOUT_FILENO,
+        WNOHANG,
+        _SC_NPROCESSORS_ONLN,
     );
 
     // The lock kinds are `c_short` on macOS and `c_int` on Linux, and the resource ids are `c_uint`
     // on glibc: comparing the constants fixes their types too.
     same_const!(
-        F_RDLCK, F_SETLK, F_SETLKW, F_UNLCK, F_WRLCK, LOCK_SH, POLLHUP, POSIX_SPAWN_SETPGROUP,
-        RLIMIT_CPU, RLIMIT_NOFILE, RLIM_INFINITY, RUSAGE_SELF,
+        F_RDLCK,
+        F_SETLK,
+        F_SETLKW,
+        F_UNLCK,
+        F_WRLCK,
+        LOCK_SH,
+        POLLHUP,
+        POSIX_SPAWN_SETPGROUP,
+        RLIMIT_CPU,
+        RLIMIT_NOFILE,
+        RLIM_INFINITY,
+        RUSAGE_SELF,
     );
 
     // Only Apple has these two.
@@ -170,8 +207,20 @@ mod checks {
     // here by the offsets of the two fields of that type. The size also covers musl's reserved tail.
     same_struct!(rusage {
         same: [
-            ru_maxrss, ru_ixrss, ru_idrss, ru_isrss, ru_minflt, ru_majflt, ru_nswap, ru_inblock,
-            ru_oublock, ru_msgsnd, ru_msgrcv, ru_nsignals, ru_nvcsw, ru_nivcsw
+            ru_maxrss,
+            ru_ixrss,
+            ru_idrss,
+            ru_isrss,
+            ru_minflt,
+            ru_majflt,
+            ru_nswap,
+            ru_inblock,
+            ru_oublock,
+            ru_msgsnd,
+            ru_msgrcv,
+            ru_nsignals,
+            ru_nvcsw,
+            ru_nivcsw
         ],
         offset_only: [ru_utime, ru_stime]
     });
@@ -181,10 +230,24 @@ mod checks {
     #[cfg(target_os = "macos")]
     same_struct!(proc_taskinfo {
         same: [
-            pti_virtual_size, pti_resident_size, pti_total_user, pti_total_system,
-            pti_threads_user, pti_threads_system, pti_policy, pti_faults, pti_pageins,
-            pti_cow_faults, pti_messages_sent, pti_messages_received, pti_syscalls_mach,
-            pti_syscalls_unix, pti_csw, pti_threadnum, pti_numrunning, pti_priority
+            pti_virtual_size,
+            pti_resident_size,
+            pti_total_user,
+            pti_total_system,
+            pti_threads_user,
+            pti_threads_system,
+            pti_policy,
+            pti_faults,
+            pti_pageins,
+            pti_cow_faults,
+            pti_messages_sent,
+            pti_messages_received,
+            pti_syscalls_mach,
+            pti_syscalls_unix,
+            pti_csw,
+            pti_threadnum,
+            pti_numrunning,
+            pti_priority
         ],
         offset_only: []
     });
@@ -217,16 +280,14 @@ mod checks {
     same_struct!(sigaction { same: [sa_sigaction, sa_mask, sa_flags], offset_only: [] });
 
     #[cfg(target_os = "linux")]
-    same_struct!(sigaction {
-        same: [sa_sigaction, sa_flags, sa_restorer],
-        offset_only: [sa_mask]
-    });
+    same_struct!(sigaction { same: [sa_sigaction, sa_flags, sa_restorer], offset_only: [sa_mask] });
 
     // `sigset_t` on Linux has a private field, so only its size and alignment can be compared.
     #[cfg(target_os = "linux")]
     const _: () = {
         assert!(
-            core::mem::size_of::<eko::libc_lite::sigset_t>() == core::mem::size_of::<libc::sigset_t>()
+            core::mem::size_of::<eko::libc_lite::sigset_t>()
+                == core::mem::size_of::<libc::sigset_t>()
         );
         assert!(
             core::mem::align_of::<eko::libc_lite::sigset_t>()
@@ -337,8 +398,11 @@ mod checks {
     same_fn!(umask: unsafe extern "C" fn(u32) -> u32);
 
     // These signatures name a struct, so each side is assigned to a pointer type naming its own.
-    const _: unsafe extern "C" fn(*mut eko::libc_lite::pollfd, eko::libc_lite::nfds_t, c_int) -> c_int =
-        eko::libc_lite::poll;
+    const _: unsafe extern "C" fn(
+        *mut eko::libc_lite::pollfd,
+        eko::libc_lite::nfds_t,
+        c_int,
+    ) -> c_int = eko::libc_lite::poll;
     const _: unsafe extern "C" fn(*mut libc::pollfd, libc::nfds_t, c_int) -> c_int = libc::poll;
 
     const _: unsafe extern "C" fn(
@@ -352,7 +416,8 @@ mod checks {
     #[cfg(target_os = "macos")]
     same_fn!(sigemptyset: unsafe extern "C" fn(*mut u32) -> c_int);
     #[cfg(target_os = "linux")]
-    const _: unsafe extern "C" fn(*mut eko::libc_lite::sigset_t) -> c_int = eko::libc_lite::sigemptyset;
+    const _: unsafe extern "C" fn(*mut eko::libc_lite::sigset_t) -> c_int =
+        eko::libc_lite::sigemptyset;
     #[cfg(target_os = "linux")]
     const _: unsafe extern "C" fn(*mut libc::sigset_t) -> c_int = libc::sigemptyset;
 }

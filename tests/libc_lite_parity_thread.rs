@@ -1,3 +1,4 @@
+#![cfg(not(feature = "libc-rs"))]
 //! `eko::libc_lite` thread area against the `libc` crate. Every comparison is a compile-time
 //! assertion, so `cargo check --tests --target T` proves it without running anything.
 
@@ -16,7 +17,14 @@ macro_rules! same_consts {
     };
 }
 
-same_consts!(CLOCK_MONOTONIC, CLOCK_REALTIME, EINVAL, PTHREAD_CREATE_DETACHED, RTLD_NOW, RTLD_LOCAL);
+same_consts!(
+    CLOCK_MONOTONIC,
+    CLOCK_REALTIME,
+    EINVAL,
+    PTHREAD_CREATE_DETACHED,
+    RTLD_NOW,
+    RTLD_LOCAL
+);
 // `AT_SECURE` is read from the aux vector, so only the Linux targets have it.
 #[cfg(target_os = "linux")]
 same_consts!(AT_SECURE);
@@ -62,12 +70,8 @@ same_layout!(
 // The only public fields are on `timespec`. The lock types keep their fields private in both
 // crates, so their layout is checked by size and alignment above and by initialiser bytes below.
 const _: () = {
-    assert!(
-        offset_of!(eko::libc_lite::timespec, tv_sec) == offset_of!(libc::timespec, tv_sec)
-    );
-    assert!(
-        offset_of!(eko::libc_lite::timespec, tv_nsec) == offset_of!(libc::timespec, tv_nsec)
-    );
+    assert!(offset_of!(eko::libc_lite::timespec, tv_sec) == offset_of!(libc::timespec, tv_sec));
+    assert!(offset_of!(eko::libc_lite::timespec, tv_nsec) == offset_of!(libc::timespec, tv_nsec));
 };
 
 const _: () = {
@@ -81,18 +85,10 @@ const _: () = {
 
 // `Dl_info` is all public fields: every offset and every field type.
 const _: () = {
-    assert!(
-        offset_of!(eko::libc_lite::Dl_info, dli_fname) == offset_of!(libc::Dl_info, dli_fname)
-    );
-    assert!(
-        offset_of!(eko::libc_lite::Dl_info, dli_fbase) == offset_of!(libc::Dl_info, dli_fbase)
-    );
-    assert!(
-        offset_of!(eko::libc_lite::Dl_info, dli_sname) == offset_of!(libc::Dl_info, dli_sname)
-    );
-    assert!(
-        offset_of!(eko::libc_lite::Dl_info, dli_saddr) == offset_of!(libc::Dl_info, dli_saddr)
-    );
+    assert!(offset_of!(eko::libc_lite::Dl_info, dli_fname) == offset_of!(libc::Dl_info, dli_fname));
+    assert!(offset_of!(eko::libc_lite::Dl_info, dli_fbase) == offset_of!(libc::Dl_info, dli_fbase));
+    assert!(offset_of!(eko::libc_lite::Dl_info, dli_sname) == offset_of!(libc::Dl_info, dli_sname));
+    assert!(offset_of!(eko::libc_lite::Dl_info, dli_saddr) == offset_of!(libc::Dl_info, dli_saddr));
     let ours: eko::libc_lite::Dl_info = unsafe { core::mem::zeroed() };
     let theirs: libc::Dl_info = unsafe { core::mem::zeroed() };
     same_field_type(&ours.dli_fname, &theirs.dli_fname);
@@ -153,8 +149,7 @@ macro_rules! fn_signatures {
             $c::pthread_join;
 
         const _: unsafe extern "C" fn(*mut $c::pthread_attr_t) -> c_int = $c::pthread_attr_init;
-        const _: unsafe extern "C" fn(*mut $c::pthread_attr_t) -> c_int =
-            $c::pthread_attr_destroy;
+        const _: unsafe extern "C" fn(*mut $c::pthread_attr_t) -> c_int = $c::pthread_attr_destroy;
         const _: unsafe extern "C" fn(*mut $c::pthread_attr_t, usize) -> c_int =
             $c::pthread_attr_setstacksize;
         const _: unsafe extern "C" fn(*mut $c::pthread_attr_t, c_int) -> c_int =
@@ -175,8 +170,7 @@ macro_rules! fn_signatures {
         const _: unsafe extern "C" fn(*mut $c::pthread_mutex_t) -> c_int = $c::pthread_mutex_lock;
         const _: unsafe extern "C" fn(*mut $c::pthread_mutex_t) -> c_int =
             $c::pthread_mutex_trylock;
-        const _: unsafe extern "C" fn(*mut $c::pthread_mutex_t) -> c_int =
-            $c::pthread_mutex_unlock;
+        const _: unsafe extern "C" fn(*mut $c::pthread_mutex_t) -> c_int = $c::pthread_mutex_unlock;
 
         const _: unsafe extern "C" fn(*mut $c::pthread_cond_t, *mut $c::pthread_mutex_t) -> c_int =
             $c::pthread_cond_wait;
@@ -192,11 +186,17 @@ macro_rules! fn_signatures {
         const _: unsafe extern "C" fn(*mut $c::pthread_rwlock_t) -> c_int =
             $c::pthread_rwlock_unlock;
 
-        const _: unsafe extern "C" fn(*const core::ffi::c_char, c_int) -> *mut $c::c_void = $c::dlopen;
-        const _: unsafe extern "C" fn(*mut $c::c_void, *const core::ffi::c_char) -> *mut $c::c_void =
-            $c::dlsym;
+        const _: unsafe extern "C" fn(*const core::ffi::c_char, c_int) -> *mut $c::c_void =
+            $c::dlopen;
+        const _: unsafe extern "C" fn(
+            *mut $c::c_void,
+            *const core::ffi::c_char,
+        ) -> *mut $c::c_void = $c::dlsym;
         const _: unsafe extern "C" fn(*mut $c::c_void) -> c_int = $c::dlclose;
+        #[cfg(not(target_env = "musl"))]
         const _: unsafe extern "C" fn(c_int, core::ffi::c_ulong, ...) -> c_int = $c::ioctl;
+        #[cfg(target_env = "musl")]
+        const _: unsafe extern "C" fn(c_int, c_int, ...) -> c_int = $c::ioctl;
 
         #[cfg(target_os = "macos")]
         const _: unsafe extern "C" fn(

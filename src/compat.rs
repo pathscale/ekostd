@@ -33,7 +33,9 @@ pub mod env {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             match self {
                 VarError::NotPresent => f.write_str("environment variable not found"),
-                VarError::NotUnicode(_) => f.write_str("environment variable was not valid unicode"),
+                VarError::NotUnicode(_) => {
+                    f.write_str("environment variable was not valid unicode")
+                }
             }
         }
     }

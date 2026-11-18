@@ -1,3 +1,4 @@
+#![cfg(not(feature = "libc-rs"))]
 //! `libc_lite` file declarations against the `libc` crate.
 //!
 //! Every comparison is a `const` assertion or a `const` of an explicit function pointer type, so
@@ -13,8 +14,9 @@ macro_rules! same_const {
 }
 
 same_const!(
-    EACCES, EBADF, ENOMEM, EEXIST, EFBIG, EILSEQ, EINTR, EISDIR, ENOENT, EPERM, F_OK, O_APPEND, O_CREAT,
-    O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, PATH_MAX, SEEK_CUR, SEEK_SET, S_IFDIR, S_IFMT, S_IFREG,
+    EACCES, EBADF, ENOMEM, EEXIST, EFBIG, EILSEQ, EINTR, EISDIR, ENOENT, EPERM, F_OK, O_APPEND,
+    O_CREAT, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, PATH_MAX, SEEK_CUR, SEEK_SET, S_IFDIR, S_IFMT,
+    S_IFREG,
 );
 
 same_const!(ENOSYS, ENOTSUP, EOPNOTSUPP, EXDEV, O_EXCL, O_NOFOLLOW);
@@ -60,12 +62,12 @@ same_offsets!(
 #[cfg(target_os = "macos")]
 same_offsets!(dirent: d_ino, d_seekoff, d_reclen, d_namlen, d_type, d_name);
 
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
 same_offsets!(
     stat: st_dev, st_ino, st_mode, st_nlink, st_uid, st_gid, st_rdev, st_size, st_blksize,
     st_blocks, st_atime, st_atime_nsec, st_mtime, st_mtime_nsec, st_ctime, st_ctime_nsec,
 );
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64")))]
 same_offsets!(dirent: d_ino, d_off, d_reclen, d_type, d_name);
 
 // Functions whose signature names no `libc_lite` struct: one function pointer type, two constants.

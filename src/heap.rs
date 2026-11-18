@@ -28,23 +28,50 @@
 //! has nothing useful to say; the daemon dying is the ruling for this tree anyway.
 
 use core::alloc::{GlobalAlloc, Layout};
+#[cfg(not(feature = "libc-rs"))]
 use core::ptr;
 
+#[cfg(not(feature = "libc-rs"))]
 use crate::libc_lite as libc;
 
 /// The alignment `malloc` guarantees on this platform.
 ///
 /// 16 on 64-bit, which covers every type the compiler allocates except the deliberately
 /// over-aligned ones, so the `posix_memalign` path is rare.
+#[cfg(not(feature = "libc-rs"))]
 const MIN_ALIGN: usize =
     if cfg!(any(target_arch = "x86_64", target_arch = "aarch64")) { 16 } else { 8 };
 
 /// `malloc`/`free`, as the global allocator.
 pub struct Malloc;
 
+#[cfg(feature = "libc-rs")]
+unsafe impl GlobalAlloc for Malloc {
+    #[inline]
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe { ::libc_rs::heap::GLOBAL_MMAP_HEAP.alloc(layout) }
+    }
+
+    #[inline]
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        unsafe { ::libc_rs::heap::GLOBAL_MMAP_HEAP.alloc_zeroed(layout) }
+    }
+
+    #[inline]
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { ::libc_rs::heap::GLOBAL_MMAP_HEAP.dealloc(ptr, layout) }
+    }
+
+    #[inline]
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        unsafe { ::libc_rs::heap::GLOBAL_MMAP_HEAP.realloc(ptr, layout, new_size) }
+    }
+}
+
 // Safe: every method forwards to the C allocator, which satisfies `GlobalAlloc`'s contract for
 // the layouts it is given - alignment is handled explicitly below, and a null return is the
 // documented failure signal rather than a panic.
+#[cfg(not(feature = "libc-rs"))]
 unsafe impl GlobalAlloc for Malloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -93,6 +120,7 @@ unsafe impl GlobalAlloc for Malloc {
     }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 #[inline]
 unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
     // See the module comment: Apple's `posix_memalign` mis-answers very large alignments.

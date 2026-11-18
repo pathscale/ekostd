@@ -51,7 +51,7 @@ pub struct stat {
     pub st_qspare: [i64; 2],
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 #[allow(non_camel_case_types, dead_code)]
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -75,6 +75,31 @@ pub struct stat {
     pub st_ctime: i64,
     pub st_ctime_nsec: c_long,
     __unused: [c_int; 2],
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[allow(non_camel_case_types, dead_code)]
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct stat {
+    pub st_dev: u64,
+    pub st_ino: u64,
+    pub st_nlink: u64,
+    pub st_mode: mode_t,
+    pub st_uid: u32,
+    pub st_gid: u32,
+    __pad0: c_int,
+    pub st_rdev: u64,
+    pub st_size: off_t,
+    pub st_blksize: c_long,
+    pub st_blocks: i64,
+    pub st_atime: i64,
+    pub st_atime_nsec: c_long,
+    pub st_mtime: i64,
+    pub st_mtime_nsec: c_long,
+    pub st_ctime: i64,
+    pub st_ctime_nsec: c_long,
+    __unused: [c_long; 3],
 }
 
 #[cfg(target_os = "macos")]
@@ -154,8 +179,10 @@ pub const O_EXCL: c_int = 2048;
 pub const O_EXCL: c_int = 128;
 #[cfg(target_os = "macos")]
 pub const O_NOFOLLOW: c_int = 0x100;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub const O_NOFOLLOW: c_int = 0x8000;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub const O_NOFOLLOW: c_int = 0x20000;
 
 #[cfg(target_os = "macos")]
 pub const PATH_MAX: c_int = 1024;
@@ -172,22 +199,13 @@ pub const S_IFMT: mode_t = 0o17_0000;
 unsafe extern "C" {
     pub fn rename(oldname: *const c_char, newname: *const c_char) -> c_int;
     pub fn getenv(s: *const c_char) -> *mut c_char;
-    #[cfg_attr(
-        all(target_os = "macos", not(target_arch = "aarch64")),
-        link_name = "fstat$INODE64"
-    )]
+    #[cfg_attr(all(target_os = "macos", not(target_arch = "aarch64")), link_name = "fstat$INODE64")]
     pub fn fstat(fildes: c_int, buf: *mut stat) -> c_int;
     pub fn mkdir(path: *const c_char, mode: mode_t) -> c_int;
-    #[cfg_attr(
-        all(target_os = "macos", not(target_arch = "aarch64")),
-        link_name = "stat$INODE64"
-    )]
+    #[cfg_attr(all(target_os = "macos", not(target_arch = "aarch64")), link_name = "stat$INODE64")]
     pub fn stat(path: *const c_char, buf: *mut stat) -> c_int;
     pub fn open(path: *const c_char, oflag: c_int, ...) -> c_int;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86_64"),
-        link_name = "opendir$INODE64"
-    )]
+    #[cfg_attr(all(target_os = "macos", target_arch = "x86_64"), link_name = "opendir$INODE64")]
     pub fn opendir(dirname: *const c_char) -> *mut DIR;
     #[cfg_attr(
         all(target_os = "macos", not(target_arch = "aarch64")),
@@ -196,10 +214,7 @@ unsafe extern "C" {
     pub fn readdir(dirp: *mut DIR) -> *mut dirent;
     pub fn closedir(dirp: *mut DIR) -> c_int;
     pub fn access(path: *const c_char, amode: c_int) -> c_int;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86_64"),
-        link_name = "close$NOCANCEL"
-    )]
+    #[cfg_attr(all(target_os = "macos", target_arch = "x86_64"), link_name = "close$NOCANCEL")]
     pub fn close(fd: c_int) -> c_int;
     pub fn getcwd(buf: *mut c_char, size: usize) -> *mut c_char;
     pub fn getpid() -> i32;
@@ -210,10 +225,7 @@ unsafe extern "C" {
     pub fn rmdir(path: *const c_char) -> c_int;
     pub fn unlink(c: *const c_char) -> c_int;
     pub fn write(fd: c_int, buf: *const c_void, count: usize) -> isize;
-    #[cfg_attr(
-        all(target_os = "macos", not(target_arch = "aarch64")),
-        link_name = "lstat$INODE64"
-    )]
+    #[cfg_attr(all(target_os = "macos", not(target_arch = "aarch64")), link_name = "lstat$INODE64")]
     pub fn lstat(path: *const c_char, buf: *mut stat) -> c_int;
     pub fn readlink(path: *const c_char, buf: *mut c_char, bufsz: usize) -> isize;
     pub fn fsync(fd: c_int) -> c_int;

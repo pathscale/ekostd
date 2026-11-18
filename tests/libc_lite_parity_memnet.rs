@@ -7,7 +7,13 @@
 //! Where `libc_lite` and `libc` name different types for the same pointer (`sockaddr`, `timespec`),
 //! both sides are coerced to a function pointer with the pointer type kept open, then turned into
 //! one type with erased pointers. The integer arguments and the return type still have to match.
-#![cfg(any(target_os = "macos", all(target_os = "linux", target_arch = "aarch64")))]
+#![cfg(all(
+    not(feature = "libc-rs"),
+    any(
+        target_os = "macos",
+        all(target_os = "linux", any(target_arch = "aarch64", target_arch = "x86_64"))
+    )
+))]
 
 use core::ffi::{c_char, c_int, c_void};
 use core::mem::{align_of, offset_of, size_of};
@@ -85,10 +91,8 @@ const _: () = assert!(size_of::<eko::libc_lite::time_t>() == size_of::<libc::tim
 const _: () = assert!(align_of::<eko::libc_lite::time_t>() == align_of::<libc::time_t>());
 
 // `sockaddr_un`: size, alignment and every field offset.
-const _: () =
-    assert!(size_of::<eko::libc_lite::sockaddr_un>() == size_of::<libc::sockaddr_un>());
-const _: () =
-    assert!(align_of::<eko::libc_lite::sockaddr_un>() == align_of::<libc::sockaddr_un>());
+const _: () = assert!(size_of::<eko::libc_lite::sockaddr_un>() == size_of::<libc::sockaddr_un>());
+const _: () = assert!(align_of::<eko::libc_lite::sockaddr_un>() == align_of::<libc::sockaddr_un>());
 #[cfg(target_os = "macos")]
 const _: () = assert!(
     offset_of!(eko::libc_lite::sockaddr_un, sun_len) == offset_of!(libc::sockaddr_un, sun_len)
@@ -115,10 +119,7 @@ same_fn!(calloc, unsafe extern "C" fn(usize, usize) -> *mut c_void);
 same_fn!(realloc, unsafe extern "C" fn(*mut c_void, usize) -> *mut c_void);
 same_fn!(free, unsafe extern "C" fn(*mut c_void));
 same_fn!(posix_memalign, unsafe extern "C" fn(*mut *mut c_void, usize, usize) -> c_int);
-same_fn!(
-    mmap,
-    unsafe extern "C" fn(*mut c_void, usize, c_int, c_int, c_int, i64) -> *mut c_void
-);
+same_fn!(mmap, unsafe extern "C" fn(*mut c_void, usize, c_int, c_int, c_int, i64) -> *mut c_void);
 same_fn!(munmap, unsafe extern "C" fn(*mut c_void, usize) -> c_int);
 same_fn!(mprotect, unsafe extern "C" fn(*mut c_void, usize, c_int) -> c_int);
 same_fn!(madvise, unsafe extern "C" fn(*mut c_void, usize, c_int) -> c_int);
@@ -131,10 +132,7 @@ same_fn!(socket, unsafe extern "C" fn(c_int, c_int, c_int) -> c_int);
 same_fn!(listen, unsafe extern "C" fn(c_int, c_int) -> c_int);
 same_fn!(dup, unsafe extern "C" fn(c_int) -> c_int);
 same_fn!(strerror_r, unsafe extern "C" fn(c_int, *mut c_char, usize) -> c_int);
-same_fn!(
-    setsockopt,
-    unsafe extern "C" fn(c_int, c_int, c_int, *const c_void, u32) -> c_int
-);
+same_fn!(setsockopt, unsafe extern "C" fn(c_int, c_int, c_int, *const c_void, u32) -> c_int);
 same_fn!(socketpair, unsafe extern "C" fn(c_int, c_int, c_int, *mut c_int) -> c_int);
 same_fn!(send, unsafe extern "C" fn(c_int, *const c_void, usize, c_int) -> isize);
 same_fn!(recv, unsafe extern "C" fn(c_int, *mut c_void, usize, c_int) -> isize);

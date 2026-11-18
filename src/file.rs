@@ -176,7 +176,7 @@ impl File {
     /// Open for reading.
     pub fn open(path: impl AsRef<Path>) -> Result<File> {
         let c = path.as_ref().as_c();
-        let fd = unsafe { libc::open(c.as_ptr().cast(), libc::O_RDONLY) };
+        let fd = unsafe { libc::open2(c.as_ptr().cast(), libc::O_RDONLY) };
         if fd < 0 {
             return Err(err("open"));
         }
@@ -187,7 +187,7 @@ impl File {
     pub fn create(path: impl AsRef<Path>) -> Result<File> {
         let c = path.as_ref().as_c();
         let fd = unsafe {
-            libc::open(c.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644)
+            libc::open3(c.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644)
         };
         if fd < 0 {
             return Err(err("create"));
@@ -199,7 +199,7 @@ impl File {
     pub fn append(path: impl AsRef<Path>) -> Result<File> {
         let c = path.as_ref().as_c();
         let fd = unsafe {
-            libc::open(c.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND, 0o644)
+            libc::open3(c.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND, 0o644)
         };
         if fd < 0 {
             return Err(err("append"));
@@ -210,7 +210,7 @@ impl File {
     /// Open an existing file for both reading and writing.
     pub fn open_rw(path: impl AsRef<Path>) -> Result<File> {
         let c = path.as_ref().as_c();
-        let fd = unsafe { libc::open(c.as_ptr().cast(), libc::O_RDWR) };
+        let fd = unsafe { libc::open2(c.as_ptr().cast(), libc::O_RDWR) };
         if fd < 0 {
             return Err(err("open"));
         }
@@ -225,7 +225,7 @@ impl File {
     pub fn create_rw(path: impl AsRef<Path>) -> Result<File> {
         let c = path.as_ref().as_c();
         let fd = unsafe {
-            libc::open(c.as_ptr().cast(), libc::O_RDWR | libc::O_CREAT | libc::O_TRUNC, 0o644)
+            libc::open3(c.as_ptr().cast(), libc::O_RDWR | libc::O_CREAT | libc::O_TRUNC, 0o644)
         };
         if fd < 0 {
             return Err(err("create"));
@@ -249,6 +249,59 @@ impl File {
             return Err(err("lseek"));
         }
         Ok(n as u64)
+    }
+
+    /// Wrap an existing raw file descriptor.
+    ///
+    /// # Safety
+    /// The caller must transfer ownership of an open file descriptor.
+    pub unsafe fn from_raw_fd(fd: i32) -> File {
+        File { fd }
+    }
+
+    /// Borrow the underlying raw file descriptor.
+    pub fn as_raw_fd(&self) -> i32 {
+        self.fd
+    }
+
+    /// Consume this `File` and return its raw file descriptor without closing it.
+    pub fn into_raw_fd(self) -> i32 {
+        let fd = self.fd;
+        core::mem::forget(self);
+        fd
+    }
+
+    /// Flush all modified data and metadata to disk via `fsync(2)`.
+    pub fn sync_all(&self) -> Result<()> {
+        if unsafe { libc::fsync(self.fd) } != 0 {
+            Err(err("fsync"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Set permissions on this open file via `fchmod(2)`.
+    pub fn set_permissions_mode(&self, mode: u32) -> Result<()> {
+        if unsafe { libc::fchmod(self.fd, mode as libc::mode_t) } != 0 {
+            Err(err("fchmod"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Acquire an exclusive advisory lock on this file.
+    pub fn lock_exclusive(&self, nonblocking: bool) -> Result<()> {
+        flock_exclusive(self.fd, nonblocking).map_err(|e| Error::from_errno(e, "flock"))
+    }
+
+    /// Acquire a shared advisory lock on this file.
+    pub fn lock_shared(&self, nonblocking: bool) -> Result<()> {
+        flock_shared(self.fd, nonblocking).map_err(|e| Error::from_errno(e, "flock"))
+    }
+
+    /// Release an advisory lock on this file.
+    pub fn unlock(&self) -> Result<()> {
+        flock_unlock(self.fd).map_err(|e| Error::from_errno(e, "flock"))
     }
 
     /// Move the position back to the start.
@@ -374,6 +427,53 @@ impl Drop for File {
     }
 }
 
+/// Set or clear `FD_CLOEXEC` on `fd`.
+pub fn set_cloexec(fd: i32, on: bool) -> core::result::Result<(), Errno> {
+    let flags = crate::checked(unsafe { libc::fcntl2(fd, libc::F_GETFD) })?;
+    let next = if on { flags | libc::FD_CLOEXEC } else { flags & !libc::FD_CLOEXEC };
+    crate::checked(unsafe { libc::fcntl3(fd, libc::F_SETFD, next) }).map(|_| ())
+}
+
+/// Set or clear `O_NONBLOCK` on `fd`.
+pub fn set_nonblocking(fd: i32, on: bool) -> core::result::Result<(), Errno> {
+    let flags = crate::checked(unsafe { libc::fcntl2(fd, libc::F_GETFL) })?;
+    let next = if on { flags | libc::O_NONBLOCK } else { flags & !libc::O_NONBLOCK };
+    crate::checked(unsafe { libc::fcntl3(fd, libc::F_SETFL, next) }).map(|_| ())
+}
+
+/// Duplicate `fd` to the lowest available descriptor `>= min_fd` with `FD_CLOEXEC` set.
+pub fn dup_cloexec(fd: i32, min_fd: i32) -> core::result::Result<i32, Errno> {
+    crate::checked(unsafe { libc::fcntl3(fd, libc::F_DUPFD_CLOEXEC, min_fd) })
+}
+
+/// Acquire an exclusive advisory lock on `fd`.
+pub fn flock_exclusive(fd: i32, nonblocking: bool) -> core::result::Result<(), Errno> {
+    let op = if nonblocking { libc::LOCK_EX | libc::LOCK_NB } else { libc::LOCK_EX };
+    crate::checked(unsafe { libc::flock(fd, op) }).map(|_| ())
+}
+
+/// Acquire a shared advisory lock on `fd`.
+pub fn flock_shared(fd: i32, nonblocking: bool) -> core::result::Result<(), Errno> {
+    let op = if nonblocking { libc::LOCK_SH | libc::LOCK_NB } else { libc::LOCK_SH };
+    crate::checked(unsafe { libc::flock(fd, op) }).map(|_| ())
+}
+
+/// Release an advisory lock on `fd`.
+pub fn flock_unlock(fd: i32) -> core::result::Result<(), Errno> {
+    const LOCK_UN: i32 = 8;
+    crate::checked(unsafe { libc::flock(fd, LOCK_UN) }).map(|_| ())
+}
+
+/// Set permissions on `fd` via `fchmod(2)`.
+pub fn fchmod(fd: i32, mode: u32) -> core::result::Result<(), Errno> {
+    crate::checked(unsafe { libc::fchmod(fd, mode as libc::mode_t) }).map(|_| ())
+}
+
+/// Flush modified data and metadata for `fd` via `fsync(2)`.
+pub fn fsync(fd: i32) -> core::result::Result<(), Errno> {
+    crate::checked(unsafe { libc::fsync(fd) }).map(|_| ())
+}
+
 /// Read a whole file.
 pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
     let mut f = File::open(path)?;
@@ -494,24 +594,103 @@ fn zero_path_buf() -> Vec<u8> {
     buf
 }
 
+#[cfg(feature = "libc-rs")]
+fn resolve_canonical(path: &Path) -> Result<crate::path::PathBuf> {
+    use crate::path::Component;
+    let mut cur = if path.is_absolute() {
+        Vec::from(&b"/"[..])
+    } else {
+        file_current_dir().ok_or_else(Error::no_cwd)?
+    };
+    let mut pending: Vec<Vec<u8>> = Vec::new();
+    for comp in path.components() {
+        match comp {
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => pending.push(b"..".to_vec()),
+            Component::Normal(s) => pending.push(s.to_vec()),
+        }
+    }
+    pending.reverse();
+    let mut hops = 0usize;
+    while let Some(part) = pending.pop() {
+        if crate::path::bytes_equal(&part, b".") || part.is_empty() {
+            continue;
+        }
+        if crate::path::bytes_equal(&part, b"..") {
+            let p = crate::path::Path::new(&cur);
+            cur = match p.parent() {
+                Some(parent) if !parent.as_bytes().is_empty() => parent.as_bytes().to_vec(),
+                _ => b"/".to_vec(),
+            };
+            continue;
+        }
+        if cur.len() > 1 || (cur.len() == 1 && cur[0] != b'/') {
+            cur.push(b'/');
+        }
+        cur.extend_from_slice(&part);
+        let st =
+            ::libc_rs::fs::lstat(&cur).map_err(|e| Error::from_errno(Errno(e.0), "realpath"))?;
+        if (st.st_mode & libc::S_IFMT) == libc::S_IFLNK {
+            hops += 1;
+            if hops > 40 {
+                return Err(Error::from_errno(Errno(libc::ELOOP), "realpath"));
+            }
+            let mut lbuf = [0u8; 4096];
+            let target = ::libc_rs::fs::readlink(&cur, &mut lbuf)
+                .map_err(|e| Error::from_errno(Errno(e.0), "realpath"))?;
+            let target_path = crate::path::Path::new(target);
+            if target_path.is_absolute() {
+                cur.clear();
+                cur.push(b'/');
+            } else {
+                let p = crate::path::Path::new(&cur);
+                cur = match p.parent() {
+                    Some(parent) if !parent.as_bytes().is_empty() => parent.as_bytes().to_vec(),
+                    _ => b"/".to_vec(),
+                };
+            }
+            let mut target_parts: Vec<Vec<u8>> = Vec::new();
+            for comp in target_path.components() {
+                match comp {
+                    Component::RootDir | Component::CurDir => {}
+                    Component::ParentDir => target_parts.push(b"..".to_vec()),
+                    Component::Normal(s) => target_parts.push(s.to_vec()),
+                }
+            }
+            while let Some(tp) = target_parts.pop() {
+                pending.push(tp);
+            }
+        }
+    }
+    let _ = ::libc_rs::fs::stat(&cur).map_err(|e| Error::from_errno(Errno(e.0), "realpath"))?;
+    Ok(crate::path::PathBuf::from_bytes(cur))
+}
+
 /// Resolve a path to an absolute one with symlinks followed.
 pub fn canonicalize(path: impl AsRef<Path>) -> Result<crate::path::PathBuf> {
-    extern "C" {
-        fn realpath(
-            file_name: *const libc::c_char,
-            resolved_name: *mut libc::c_char,
-        ) -> *mut libc::c_char;
+    #[cfg(feature = "libc-rs")]
+    {
+        resolve_canonical(path.as_ref())
     }
-    let c = path.as_ref().as_c();
-    // PATH_MAX is the contract of `realpath` with a null second argument on the platforms this
-    // targets; the allocation is sized to it rather than guessed.
-    let mut buf = zero_path_buf();
-    let p = unsafe { realpath(c.as_ptr().cast(), buf.as_mut_ptr().cast()) };
-    if p.is_null() {
-        return Err(err("realpath"));
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        extern "C" {
+            fn realpath(
+                file_name: *const libc::c_char,
+                resolved_name: *mut libc::c_char,
+            ) -> *mut libc::c_char;
+        }
+        let c = path.as_ref().as_c();
+        // PATH_MAX is the contract of `realpath` with a null second argument on the platforms this
+        // targets; the allocation is sized to it rather than guessed.
+        let mut buf = zero_path_buf();
+        let p = unsafe { realpath(c.as_ptr().cast(), buf.as_mut_ptr().cast()) };
+        if p.is_null() {
+            return Err(err("realpath"));
+        }
+        let out = unsafe { file_cstr_to_vec(p) };
+        Ok(crate::path::PathBuf::from_bytes(out))
     }
-    let out = unsafe { file_cstr_to_vec(p) };
-    Ok(crate::path::PathBuf::from_bytes(out))
 }
 
 /// Create a directory, succeeding if it is already there.
@@ -592,15 +771,22 @@ fn file_current_dir() -> Option<Vec<u8>> {
 }
 
 fn file_temp_dir() -> Vec<u8> {
-    let p = unsafe { libc::getenv(c"TMPDIR".as_ptr()) };
-    if p.is_null() {
-        return b"/tmp".to_vec();
+    #[cfg(feature = "libc-rs")]
+    {
+        crate::env::temp_dir()
     }
-    let v = unsafe { file_cstr_to_vec(p) };
-    if v.is_empty() {
-        b"/tmp".to_vec()
-    } else {
-        v
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let p = unsafe { libc::getenv(c"TMPDIR".as_ptr()) };
+        if p.is_null() {
+            return b"/tmp".to_vec();
+        }
+        let v = unsafe { file_cstr_to_vec(p) };
+        if v.is_empty() {
+            b"/tmp".to_vec()
+        } else {
+            v
+        }
     }
 }
 
@@ -724,6 +910,7 @@ impl Drop for TempDir {
     }
 }
 
+#[cfg(not(feature = "libc-rs"))]
 unsafe fn step_remove_dir(dir: *mut libc::DIR, path: &Path) -> bool {
     let ent = unsafe { libc::readdir(dir) };
     if ent.is_null() {
@@ -756,18 +943,25 @@ unsafe fn step_remove_dir(dir: *mut libc::DIR, path: &Path) -> bool {
 /// Ignoring them is deliberate: the caller is a `Drop`, which cannot report, and a scratch
 /// directory that outlives the process is a wasted inode rather than a correctness problem.
 pub fn remove_dir_all(path: &Path) {
-    let c = path.as_c();
-    let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
-    if dir.is_null() {
-        return;
+    #[cfg(feature = "libc-rs")]
+    {
+        let _ = crate::fs::remove_dir_all(path);
     }
-    loop {
-        if !unsafe { step_remove_dir(dir, path) } {
-            break;
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let c = path.as_c();
+        let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
+        if dir.is_null() {
+            return;
         }
+        loop {
+            if !unsafe { step_remove_dir(dir, path) } {
+                break;
+            }
+        }
+        unsafe { libc::closedir(dir) };
+        unsafe { libc::rmdir(c.as_ptr().cast()) };
     }
-    unsafe { libc::closedir(dir) };
-    unsafe { libc::rmdir(c.as_ptr().cast()) };
 }
 
 /// The names in a directory, excluding `.` and `..`.
@@ -776,41 +970,48 @@ pub fn remove_dir_all(path: &Path) {
 /// directory can be enormous and each entry can be a syscall; here the one caller collects the
 /// listing immediately to sort it, so laziness would buy an iterator type and no work saved.
 pub fn read_dir(path: impl AsRef<Path>) -> Result<Vec<crate::path::PathBuf>> {
-    let dir_path = path.as_ref();
-    let c = dir_path.as_c();
-    let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
-    if dir.is_null() {
-        return Err(err("opendir"));
+    #[cfg(feature = "libc-rs")]
+    {
+        crate::fs::read_dir(path)
     }
-    let mut out = Vec::new();
-    loop {
-        // `readdir` returns NULL both at end-of-directory and on error, distinguished by errno.
-        // The distinction is not made here: a truncated listing and a complete one are treated
-        // alike, which matches what the caller does with a directory it cannot read at all.
-        let ent = unsafe { libc::readdir(dir) };
-        if ent.is_null() {
-            break;
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let dir_path = path.as_ref();
+        let c = dir_path.as_c();
+        let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
+        if dir.is_null() {
+            return Err(err("opendir"));
         }
-        let name_ptr = unsafe { (*ent).d_name.as_ptr() };
-        let mut name = Vec::new();
-        let mut i = 0isize;
+        let mut out = Vec::new();
         loop {
-            let b = unsafe { *name_ptr.offset(i) } as u8;
-            if b == 0 {
+            // `readdir` returns NULL both at end-of-directory and on error, distinguished by errno.
+            // The distinction is not made here: a truncated listing and a complete one are treated
+            // alike, which matches what the caller does with a directory it cannot read at all.
+            let ent = unsafe { libc::readdir(dir) };
+            if ent.is_null() {
                 break;
             }
-            name.push(b);
-            i += 1;
+            let name_ptr = unsafe { (*ent).d_name.as_ptr() };
+            let mut name = Vec::new();
+            let mut i = 0isize;
+            loop {
+                let b = unsafe { *name_ptr.offset(i) } as u8;
+                if b == 0 {
+                    break;
+                }
+                name.push(b);
+                i += 1;
+            }
+            if (name.len() == 1 && name[0] == b'.')
+                || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
+            {
+                continue;
+            }
+            out.push(dir_path.join(&name[..]));
         }
-        if (name.len() == 1 && name[0] == b'.')
-            || (name.len() == 2 && name[0] == b'.' && name[1] == b'.')
-        {
-            continue;
-        }
-        out.push(dir_path.join(&name[..]));
+        unsafe { libc::closedir(dir) };
+        Ok(out)
     }
-    unsafe { libc::closedir(dir) };
-    Ok(out)
 }
 
 /// Where a symbolic link points.

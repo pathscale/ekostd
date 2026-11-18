@@ -189,8 +189,12 @@ unsafe extern "C" {
         value: *const c_void,
         option_len: socklen_t,
     ) -> c_int;
-    pub fn socketpair(domain: c_int, ty: c_int, protocol: c_int, socket_vector: *mut c_int)
-    -> c_int;
+    pub fn socketpair(
+        domain: c_int,
+        ty: c_int,
+        protocol: c_int,
+        socket_vector: *mut c_int,
+    ) -> c_int;
     pub fn send(socket: c_int, buf: *const c_void, len: usize, flags: c_int) -> isize;
     pub fn recv(socket: c_int, buf: *mut c_void, len: usize, flags: c_int) -> isize;
 

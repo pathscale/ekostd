@@ -39,8 +39,8 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 
-use crate::Errno;
 use crate::libc_lite as libc;
+use crate::Errno;
 
 /// The daemon's end of the readiness pipe.
 ///
@@ -272,11 +272,7 @@ pub fn daemonize(pid_file: Option<&[u8]>) -> Result<Started, DaemonizeError> {
 /// Returns `0` on success, `-1` if locked by another process, or a positive errno code.
 fn write_pid_file_raw(path: &[u8]) -> i32 {
     let fd = unsafe {
-        libc::open(
-            path.as_ptr().cast(),
-            libc::O_WRONLY | libc::O_CREAT | libc::O_CLOEXEC,
-            0o644,
-        )
+        libc::open3(path.as_ptr().cast(), libc::O_WRONLY | libc::O_CREAT | libc::O_CLOEXEC, 0o644)
     };
     if fd == -1 {
         return Errno::current().0.max(1);
@@ -338,7 +334,7 @@ pub fn format_pid(pid: libc::pid_t, buf: &mut [u8; 24]) -> &[u8] {
 /// step this skips, because the readiness pipe has to survive - and skipping it is stated here
 /// rather than merely omitted, so nobody adds it back to be thorough and makes the parent hang.
 fn redirect_standard_streams_raw() -> i32 {
-    let devnull = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDWR) };
+    let devnull = unsafe { libc::open2(c"/dev/null".as_ptr(), libc::O_RDWR) };
     if devnull == -1 {
         return Errno::current().0.max(1);
     }
@@ -376,7 +372,8 @@ mod pid_lock_tests {
     use std::os::unix::fs::MetadataExt;
     #[test]
     fn retained_pid_lock_closes_on_exec() {
-        let path = std::env::temp_dir().join(std::format!("eko-pid-cloexec-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(std::format!("eko-pid-cloexec-{}", std::process::id()));
         let cpath = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
         assert_eq!(write_pid_file_raw(cpath.as_bytes_with_nul()), 0);
         let meta = std::fs::metadata(&path).unwrap();
@@ -394,8 +391,10 @@ mod pid_lock_tests {
             }
         }
         let fd = found.expect("retained PID descriptor");
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-        unsafe { libc::close(fd); }
+        let flags = unsafe { libc::fcntl2(fd, libc::F_GETFD) };
+        unsafe {
+            libc::close(fd);
+        }
         std::fs::remove_file(path).unwrap();
         assert!(flags >= 0 && flags & libc::FD_CLOEXEC != 0);
     }

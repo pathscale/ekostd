@@ -20,6 +20,19 @@ use crate::libc_lite as libc;
 use crate::path::{Path, PathBuf};
 use crate::{checked, Errno};
 
+fn with_c_path_ptr<R>(path: &[u8], f: impl FnOnce(*const libc::c_char) -> R) -> R {
+    if path.last() == Some(&0) {
+        return f(path.as_ptr().cast());
+    }
+    if path.len() < 256 {
+        let mut buf = [0u8; 256];
+        buf[..path.len()].copy_from_slice(path);
+        return f(buf.as_ptr().cast());
+    }
+    let c = Path::new(path).as_c();
+    f(c.as_ptr().cast())
+}
+
 /// Remove a name, and do not care whether it was there.
 ///
 /// **Deliberately returns nothing.** Every caller is clearing a stale socket file before binding,
@@ -28,12 +41,14 @@ use crate::{checked, Errno};
 /// *live* socket would be a real hazard, and the guard against that is `ekod`'s liveness probe,
 /// not this function.
 pub fn unlink(path: &[u8]) {
-    unsafe { libc::unlink(path.as_ptr().cast()) };
+    with_c_path_ptr(path, |p| {
+        unsafe { libc::unlink(p) };
+    });
 }
 
 /// Create a directory, succeeding if it already exists.
-pub fn mkdir(path: &[u8], mode: libc::mode_t) -> Result<(), Errno> {
-    if unsafe { libc::mkdir(path.as_ptr().cast(), mode) } == 0 {
+pub fn mkdir(path: &[u8], mode: u32) -> Result<(), Errno> {
+    if with_c_path_ptr(path, |p| unsafe { libc::mkdir(p, mode as libc::mode_t) }) == 0 {
         return Ok(());
     }
     let e = Errno::current();
@@ -46,7 +61,7 @@ pub fn mkdir(path: &[u8], mode: libc::mode_t) -> Result<(), Errno> {
 
 /// Whether a name exists at all.
 pub fn exists(path: &[u8]) -> bool {
-    checked(unsafe { libc::access(path.as_ptr().cast(), libc::F_OK) }).is_ok()
+    checked(with_c_path_ptr(path, |p| unsafe { libc::access(p, libc::F_OK) })).is_ok()
 }
 
 /// Remove an empty directory.
@@ -54,7 +69,7 @@ pub fn exists(path: &[u8]) -> bool {
 /// Empty, because `rmdir(2)` is. [`remove_dir_all`] is the recursive one, and keeping them
 /// apart means a caller that meant to delete one directory cannot delete a tree by typo.
 pub fn rmdir(path: &[u8]) -> Result<(), Errno> {
-    checked(unsafe { libc::rmdir(path.as_ptr().cast()) }).map(|_| ())
+    checked(with_c_path_ptr(path, |p| unsafe { libc::rmdir(p) })).map(|_| ())
 }
 
 /// Every name directly inside a directory, as full paths, without `.` and `..`.
@@ -70,38 +85,74 @@ pub fn rmdir(path: &[u8]) -> Result<(), Errno> {
 /// order sorts, and any caller walking a tree of inputs should, because two runs over one
 /// directory reading files in different orders is a reproducibility bug waiting for a busy day.
 pub fn read_dir(path: impl AsRef<Path>) -> crate::file::Result<Vec<PathBuf>> {
-    let c = path.as_ref().as_c();
-    let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
-    if dir.is_null() {
-        return Err(crate::file::Error::from_errno(Errno::current(), "opendir"));
-    }
-    let mut out = Vec::new();
-    loop {
-        // `readdir` reports end-of-directory and failure the same way, with a null return, and
-        // the difference is whether it set errno. Clearing it first is the only way to ask.
-        Errno::clear();
-        let entry = unsafe { libc::readdir(dir) };
-        if entry.is_null() {
-            let e = Errno::current();
-            unsafe { libc::closedir(dir) };
-            if e.0 != 0 {
-                return Err(crate::file::Error::from_errno(e, "readdir"));
+    #[cfg(feature = "libc-rs")]
+    {
+        let dir_path = path.as_ref();
+        let fd = ::libc_rs::fs::open(
+            dir_path.as_bytes(),
+            ::libc_rs::fs::O_RDONLY | ::libc_rs::fs::O_DIRECTORY | ::libc_rs::fs::O_CLOEXEC,
+            0,
+        )
+        .map_err(|e| crate::file::Error::from_errno(Errno(e.0), "opendir"))?;
+        let mut buf = [0u8; 4096];
+        let mut out = Vec::new();
+        loop {
+            let n = match ::libc_rs::fs::getdents64(fd, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = ::libc_rs::io::close(fd);
+                    return Err(crate::file::Error::from_errno(Errno(e.0), "readdir"));
+                }
+            };
+            for entry in ::libc_rs::fs::parse_dirents(&buf[..n]) {
+                let bytes = entry.name;
+                if (bytes.len() == 1 && bytes[0] == b'.')
+                    || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
+                {
+                    continue;
+                }
+                out.push(dir_path.join(Path::new(bytes)));
             }
-            return Ok(out);
         }
-        let name = unsafe { (*entry).d_name };
-        let mut bytes = Vec::new();
-        let mut index = 0;
-        while index < name.len() && name[index] != 0 {
-            bytes.push(name[index] as u8);
-            index += 1;
+        let _ = ::libc_rs::io::close(fd);
+        Ok(out)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let c = path.as_ref().as_c();
+        let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
+        if dir.is_null() {
+            return Err(crate::file::Error::from_errno(Errno::current(), "opendir"));
         }
-        if (bytes.len() == 1 && bytes[0] == b'.')
-            || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
-        {
-            continue;
+        let mut out = Vec::new();
+        loop {
+            // `readdir` reports end-of-directory and failure the same way, with a null return, and
+            // the difference is whether it set errno. Clearing it first is the only way to ask.
+            Errno::clear();
+            let entry = unsafe { libc::readdir(dir) };
+            if entry.is_null() {
+                let e = Errno::current();
+                unsafe { libc::closedir(dir) };
+                if e.0 != 0 {
+                    return Err(crate::file::Error::from_errno(e, "readdir"));
+                }
+                return Ok(out);
+            }
+            let name = unsafe { (*entry).d_name };
+            let mut bytes = Vec::new();
+            let mut index = 0;
+            while index < name.len() && name[index] != 0 {
+                bytes.push(name[index] as u8);
+                index += 1;
+            }
+            if (bytes.len() == 1 && bytes[0] == b'.')
+                || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
+            {
+                continue;
+            }
+            out.push(path.as_ref().join(Path::new(&bytes)));
         }
-        out.push(path.as_ref().join(Path::new(&bytes)));
     }
 }
 
