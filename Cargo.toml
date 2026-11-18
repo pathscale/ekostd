@@ -5,14 +5,14 @@
 # which this is not. `[lib] name` is what a consumer writes, so `use eko::file::File` works.
 [package]
 name = "ekostd"
-version = "0.2.7"
+version = "0.2.8"
 publish = ["crates-io"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pathscale/ekostd"
-description = "Janky stuff to help you reduce the deps you need on std: the operating system, over libc"
+description = "Janky stuff to help you reduce the deps you need on std: one OS API across macOS, Linux (libc_lite), and unikernel-rs (libc-rs)"
 exclude = [".cargo/**", ".github/**", "bootstrap/**", "crates/**", "docs/**", "sysroot-empty/**"]
-keywords = ["no_std", "libc", "bootstrap"]
+keywords = ["no_std", "libc", "unikernel", "bootstrap"]
 categories = ["no-std", "os"]
 
 [lib]
