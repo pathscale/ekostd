@@ -474,6 +474,18 @@ pub fn fsync(fd: i32) -> core::result::Result<(), Errno> {
     crate::checked(unsafe { libc::fsync(fd) }).map(|_| ())
 }
 
+/// Perform a raw `ioctl` request on `fd` with pointer/scalar argument `arg`.
+pub fn ioctl_ptr(fd: i32, request: u64, arg: usize) -> core::result::Result<usize, Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        unsafe { ::libc_rs::io::ioctl_raw(fd, request, arg) }.map_err(|e| Errno(e.0))
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        crate::checked(unsafe { libc::ioctl_ptr(fd, request, arg) }).map(|v| v as usize)
+    }
+}
+
 /// Read a whole file.
 pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
     let mut f = File::open(path)?;

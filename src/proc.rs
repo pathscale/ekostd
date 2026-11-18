@@ -129,6 +129,88 @@ pub struct Rusage {
     pub max_rss_bytes: u64,
 }
 
+/// Replace the current process image with `path`, passing `args` (`argv`) and `envs` (`envp`).
+pub fn execve(
+    path: &str,
+    args: &[&str],
+    envs: &[&str],
+) -> Result<core::convert::Infallible, crate::Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        let mut arg_slices: alloc::vec::Vec<&[u8]> = alloc::vec::Vec::with_capacity(args.len());
+        let mut i = 0usize;
+        while i < args.len() {
+            arg_slices.push(args[i].as_bytes());
+            i += 1;
+        }
+        let mut env_slices: alloc::vec::Vec<&[u8]> = alloc::vec::Vec::with_capacity(envs.len());
+        let mut j = 0usize;
+        while j < envs.len() {
+            env_slices.push(envs[j].as_bytes());
+            j += 1;
+        }
+        ::libc_rs::process::execve_bytes(path.as_bytes(), &arg_slices, &env_slices)
+            .map_err(|e| crate::Errno(e.0))
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        if path.is_empty() || path.as_bytes().contains(&0) {
+            return Err(crate::Errno(libc::EINVAL));
+        }
+        let path_c = crate::path::Path::new(path).as_c();
+        let mut arg_bufs: alloc::vec::Vec<alloc::vec::Vec<u8>> =
+            alloc::vec::Vec::with_capacity(args.len());
+        let mut i = 0usize;
+        while i < args.len() {
+            let b = args[i].as_bytes();
+            if b.contains(&0) {
+                return Err(crate::Errno(libc::EINVAL));
+            }
+            let mut v = alloc::vec::Vec::with_capacity(b.len() + 1);
+            v.extend_from_slice(b);
+            v.push(0);
+            arg_bufs.push(v);
+            i += 1;
+        }
+        let mut argv_ptrs: alloc::vec::Vec<*const libc::c_char> =
+            alloc::vec::Vec::with_capacity(arg_bufs.len() + 1);
+        let mut k = 0usize;
+        while k < arg_bufs.len() {
+            argv_ptrs.push(arg_bufs[k].as_ptr().cast());
+            k += 1;
+        }
+        argv_ptrs.push(core::ptr::null());
+
+        let mut env_bufs: alloc::vec::Vec<alloc::vec::Vec<u8>> =
+            alloc::vec::Vec::with_capacity(envs.len());
+        let mut m = 0usize;
+        while m < envs.len() {
+            let b = envs[m].as_bytes();
+            if b.contains(&0) {
+                return Err(crate::Errno(libc::EINVAL));
+            }
+            let mut v = alloc::vec::Vec::with_capacity(b.len() + 1);
+            v.extend_from_slice(b);
+            v.push(0);
+            env_bufs.push(v);
+            m += 1;
+        }
+        let mut envp_ptrs: alloc::vec::Vec<*const libc::c_char> =
+            alloc::vec::Vec::with_capacity(env_bufs.len() + 1);
+        let mut n = 0usize;
+        while n < env_bufs.len() {
+            envp_ptrs.push(env_bufs[n].as_ptr().cast());
+            n += 1;
+        }
+        envp_ptrs.push(core::ptr::null());
+
+        unsafe {
+            libc::execve(path_c.as_ptr().cast(), argv_ptrs.as_ptr(), envp_ptrs.as_ptr());
+        }
+        Err(crate::Errno::current())
+    }
+}
+
 /// Query resource usage for the calling process.
 pub fn getrusage_self() -> Result<Rusage, crate::Errno> {
     let mut raw: libc::rusage = unsafe { core::mem::zeroed() };

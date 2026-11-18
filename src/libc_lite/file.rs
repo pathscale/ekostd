@@ -194,7 +194,38 @@ pub const SEEK_CUR: c_int = 1;
 
 pub const S_IFDIR: mode_t = 0o4_0000;
 pub const S_IFREG: mode_t = 0o10_0000;
+pub const S_IFLNK: mode_t = 0o12_0000;
 pub const S_IFMT: mode_t = 0o17_0000;
+
+#[cfg(target_os = "linux")]
+pub const MS_RDONLY: c_ulong = 1;
+#[cfg(target_os = "linux")]
+pub const MS_NOSUID: c_ulong = 2;
+#[cfg(target_os = "linux")]
+pub const MS_NODEV: c_ulong = 4;
+#[cfg(target_os = "linux")]
+pub const MS_NOEXEC: c_ulong = 8;
+#[cfg(target_os = "linux")]
+pub const MS_SYNCHRONOUS: c_ulong = 16;
+#[cfg(target_os = "linux")]
+pub const MS_REMOUNT: c_ulong = 32;
+#[cfg(target_os = "linux")]
+pub const MS_NOATIME: c_ulong = 1024;
+#[cfg(target_os = "linux")]
+pub const MS_BIND: c_ulong = 4096;
+#[cfg(target_os = "linux")]
+pub const MS_MOVE: c_ulong = 8192;
+#[cfg(target_os = "linux")]
+pub const MS_REC: c_ulong = 16384;
+
+#[cfg(target_os = "linux")]
+pub const MNT_FORCE: c_int = 1;
+#[cfg(target_os = "linux")]
+pub const MNT_DETACH: c_int = 2;
+#[cfg(target_os = "linux")]
+pub const MNT_EXPIRE: c_int = 4;
+#[cfg(target_os = "linux")]
+pub const UMOUNT_NOFOLLOW: c_int = 8;
 
 unsafe extern "C" {
     pub fn rename(oldname: *const c_char, newname: *const c_char) -> c_int;
@@ -229,11 +260,25 @@ unsafe extern "C" {
     pub fn lstat(path: *const c_char, buf: *mut stat) -> c_int;
     pub fn readlink(path: *const c_char, buf: *mut c_char, bufsz: usize) -> isize;
     pub fn fsync(fd: c_int) -> c_int;
+    pub fn sync();
+    pub fn chroot(path: *const c_char) -> c_int;
     pub fn fchmod(fd: c_int, mode: mode_t) -> c_int;
     pub fn geteuid() -> uid_t;
     pub fn getuid() -> uid_t;
     pub fn getegid() -> gid_t;
     pub fn getgid() -> gid_t;
+}
+
+#[cfg(target_os = "linux")]
+unsafe extern "C" {
+    pub fn mount(
+        src: *const c_char,
+        target: *const c_char,
+        fstype: *const c_char,
+        flags: c_ulong,
+        data: *const c_void,
+    ) -> c_int;
+    pub fn umount2(target: *const c_char, flags: c_int) -> c_int;
 }
 
 // Only the BSD family has `issetugid`. The Linux targets read `AT_SECURE` from the aux vector.

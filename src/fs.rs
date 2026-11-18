@@ -14,11 +14,187 @@
 // match, which is why a `std::` grep cannot see them and the attribute has to be flipped
 // to find them at all.
 
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::libc_lite as libc;
 use crate::path::{Path, PathBuf};
 use crate::{checked, Errno};
+
+/// Mount read-only.
+pub const MS_RDONLY: u64 = 1;
+/// Ignore suid and sgid bits.
+pub const MS_NOSUID: u64 = 2;
+/// Disallow access to device special files.
+pub const MS_NODEV: u64 = 4;
+/// Disallow program execution.
+pub const MS_NOEXEC: u64 = 8;
+/// Perform a bind mount.
+pub const MS_BIND: u64 = 4096;
+/// Move a subtree.
+pub const MS_MOVE: u64 = 8192;
+/// Lazy unmount (`MNT_DETACH`).
+pub const MNT_DETACH: i32 = 2;
+
+/// Mount a filesystem at `target`.
+pub fn mount(
+    source: Option<&str>,
+    target: &str,
+    fstype: Option<&str>,
+    flags: u64,
+    data: Option<&[u8]>,
+) -> Result<(), Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::fs::mount(
+            source.map(str::as_bytes),
+            target.as_bytes(),
+            fstype.map(str::as_bytes),
+            flags,
+            data,
+        )
+        .map_err(|e| Errno(e.0))
+    }
+    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    {
+        let src_c = source.map(|s| Path::new(s).as_c());
+        let tgt_c = Path::new(target).as_c();
+        let fs_c = fstype.map(|s| Path::new(s).as_c());
+        let data_c = data.map(|d| Path::new(d).as_c());
+        let src_ptr = src_c.as_ref().map_or(core::ptr::null(), |v| v.as_ptr().cast());
+        let fs_ptr = fs_c.as_ref().map_or(core::ptr::null(), |v| v.as_ptr().cast());
+        let data_ptr = data_c.as_ref().map_or(core::ptr::null(), |v| v.as_ptr().cast());
+        checked(unsafe {
+            libc::mount(src_ptr, tgt_c.as_ptr().cast(), fs_ptr, flags as libc::c_ulong, data_ptr)
+        })
+        .map(|_| ())
+    }
+    #[cfg(all(not(feature = "libc-rs"), not(target_os = "linux")))]
+    {
+        let _ = (source, target, fstype, flags, data);
+        Err(Errno(libc::ENOSYS))
+    }
+}
+
+/// Unmount `target` with `flags` (such as [`MNT_DETACH`]).
+pub fn umount2(target: &str, flags: i32) -> Result<(), Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::fs::umount2(target.as_bytes(), flags).map_err(|e| Errno(e.0))
+    }
+    #[cfg(all(not(feature = "libc-rs"), target_os = "linux"))]
+    {
+        checked(with_c_path_ptr(target.as_bytes(), |p| unsafe { libc::umount2(p, flags) }))
+            .map(|_| ())
+    }
+    #[cfg(all(not(feature = "libc-rs"), not(target_os = "linux")))]
+    {
+        let _ = (target, flags);
+        Err(Errno(libc::ENOSYS))
+    }
+}
+
+/// Change the root directory of the calling process to `path`.
+pub fn chroot(path: &str) -> Result<(), Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::fs::chroot(path.as_bytes()).map_err(|e| Errno(e.0))
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        checked(with_c_path_ptr(path.as_bytes(), |p| unsafe { libc::chroot(p) })).map(|_| ())
+    }
+}
+
+/// Flush all filesystem caches to storage (`sync(2)`).
+pub fn sync_filesystems() {
+    #[cfg(feature = "libc-rs")]
+    {
+        ::libc_rs::fs::sync_all_filesystems();
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        unsafe { libc::sync() };
+    }
+}
+
+/// Return entry names directly inside `path` (excluding `.` and `..`).
+pub fn read_dir_names(path: &str) -> Result<Vec<String>, Errno> {
+    #[cfg(feature = "libc-rs")]
+    {
+        let fd = ::libc_rs::fs::open(
+            path.as_bytes(),
+            ::libc_rs::fs::O_RDONLY | ::libc_rs::fs::O_DIRECTORY | ::libc_rs::fs::O_CLOEXEC,
+            0,
+        )
+        .map_err(|e| Errno(e.0))?;
+        let mut buf = [0u8; 4096];
+        let mut out = Vec::new();
+        loop {
+            let n = match ::libc_rs::fs::getdents64(fd, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    let _ = ::libc_rs::io::close(fd);
+                    return Err(Errno(e.0));
+                }
+            };
+            for entry in ::libc_rs::fs::parse_dirents(&buf[..n]) {
+                let bytes = entry.name;
+                if (bytes.len() == 1 && bytes[0] == b'.')
+                    || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
+                {
+                    continue;
+                }
+                if let Ok(s) = core::str::from_utf8(bytes) {
+                    let mut name = String::new();
+                    name.push_str(s);
+                    out.push(name);
+                }
+            }
+        }
+        let _ = ::libc_rs::io::close(fd);
+        Ok(out)
+    }
+    #[cfg(not(feature = "libc-rs"))]
+    {
+        let c = Path::new(path).as_c();
+        let dir = unsafe { libc::opendir(c.as_ptr().cast()) };
+        if dir.is_null() {
+            return Err(Errno::current());
+        }
+        let mut out = Vec::new();
+        loop {
+            Errno::clear();
+            let entry = unsafe { libc::readdir(dir) };
+            if entry.is_null() {
+                let e = Errno::current();
+                unsafe { libc::closedir(dir) };
+                if e.0 != 0 {
+                    return Err(e);
+                }
+                return Ok(out);
+            }
+            let name = unsafe { (*entry).d_name };
+            let mut bytes = Vec::new();
+            let mut index = 0;
+            while index < name.len() && name[index] != 0 {
+                bytes.push(name[index] as u8);
+                index += 1;
+            }
+            if (bytes.len() == 1 && bytes[0] == b'.')
+                || (bytes.len() == 2 && bytes[0] == b'.' && bytes[1] == b'.')
+            {
+                continue;
+            }
+            if let Ok(s) = core::str::from_utf8(&bytes) {
+                let mut entry_name = String::new();
+                entry_name.push_str(s);
+                out.push(entry_name);
+            }
+        }
+    }
+}
 
 fn with_c_path_ptr<R>(path: &[u8], f: impl FnOnce(*const libc::c_char) -> R) -> R {
     if path.last() == Some(&0) {

@@ -36,6 +36,7 @@ pub mod intrinsics;
 pub mod iter;
 pub mod marker;
 pub mod mem;
+pub mod net;
 pub mod num;
 mod num_ext;
 pub mod ops;

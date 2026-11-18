@@ -12,6 +12,9 @@ pub type socklen_t = u32;
 pub type size_t = usize;
 pub type time_t = i64;
 pub type rlim_t = u64;
+pub type sa_family_t = u16;
+pub type in_addr_t = u32;
+pub type in_port_t = u16;
 
 pub type stat = ::libc_rs::fs::Stat;
 pub type timespec = ::libc_rs::time::Timespec;
@@ -36,6 +39,28 @@ pub struct sockaddr_un {
     pub sun_path: [c_char; 108],
 }
 
+pub type in_addr = ::libc_rs::net::InAddr;
+pub type sockaddr_in = ::libc_rs::net::SockAddrIn;
+pub type in6_addr = ::libc_rs::net::In6Addr;
+pub type sockaddr_in6 = ::libc_rs::net::SockAddrIn6;
+pub type sockaddr_vm = ::libc_rs::net::SockAddrVm;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct sockaddr_storage {
+    pub ss_family: sa_family_t,
+    pub __ss_padding: [u8; 118],
+    pub __ss_align: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct epoll_event {
+    pub events: u32,
+    pub _pad: u32,
+    pub u64: u64,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct sigaction {
@@ -54,22 +79,27 @@ pub struct Dl_info {
 }
 
 pub use ::libc_rs::errno::{
-    E2BIG, EACCES, EADDRINUSE, EAGAIN, EBADF, EBUSY, ECHILD, ECONNREFUSED, ECONNRESET, EDEADLK,
-    EDOM, EEXIST, EFAULT, EFBIG, EILSEQ, EINTR, EINVAL, EIO, EISDIR, ELOOP, EMFILE, EMLINK,
-    EMSGSIZE, ENAMETOOLONG, ENFILE, ENODEV, ENOENT, ENOEXEC, ENOLCK, ENOMEM, ENOSPC, ENOSYS,
-    ENOTCONN, ENOTDIR, ENOTEMPTY, ENOTSOCK, ENOTSUP, ENOTTY, ENXIO, EOPNOTSUPP, EOVERFLOW, EPERM,
-    EPIPE, EPROTO, ERANGE, EROFS, ESPIPE, ESRCH, ETIMEDOUT, ETXTBSY, EWOULDBLOCK, EXDEV,
+    E2BIG, EACCES, EADDRINUSE, EADDRNOTAVAIL, EAFNOSUPPORT, EAGAIN, EALREADY, EBADF, EBUSY,
+    ECANCELED, ECHILD, ECONNABORTED, ECONNREFUSED, ECONNRESET, EDEADLK, EDESTADDRREQ, EDOM, EEXIST,
+    EFAULT, EFBIG, EHOSTUNREACH, EILSEQ, EINPROGRESS, EINTR, EINVAL, EIO, EISCONN, EISDIR, ELOOP,
+    EMFILE, EMLINK, EMSGSIZE, ENAMETOOLONG, ENETDOWN, ENETRESET, ENETUNREACH, ENFILE, ENOBUFS,
+    ENODEV, ENOENT, ENOEXEC, ENOLCK, ENOMEM, ENOPROTOOPT, ENOSPC, ENOSYS, ENOTCONN, ENOTDIR,
+    ENOTEMPTY, ENOTSOCK, ENOTSUP, ENOTTY, ENXIO, EOPNOTSUPP, EOVERFLOW, EPERM, EPIPE, EPROTO,
+    EPROTONOSUPPORT, EPROTOTYPE, ERANGE, EROFS, ESHUTDOWN, ESPIPE, ESRCH, ETIMEDOUT, ETXTBSY,
+    EWOULDBLOCK, EXDEV,
 };
 pub use ::libc_rs::fd::{AT_FDCWD, AT_REMOVEDIR, AT_SYMLINK_NOFOLLOW};
 pub use ::libc_rs::fs::{
-    F_OK, LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL,
-    O_NOFOLLOW, O_NONBLOCK, O_RDONLY, O_RDWR, O_TRUNC, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET,
-    S_IFDIR, S_IFLNK, S_IFMT, S_IFREG,
+    F_OK, LOCK_EX, LOCK_NB, LOCK_SH, LOCK_UN, MNT_DETACH, MNT_EXPIRE, MNT_FORCE, MS_BIND, MS_MOVE,
+    MS_NOATIME, MS_NODEV, MS_NOEXEC, MS_NOSUID, MS_RDONLY, MS_REC, MS_REMOUNT, MS_SYNCHRONOUS,
+    O_APPEND, O_CLOEXEC, O_CREAT, O_DIRECTORY, O_EXCL, O_NOFOLLOW, O_NONBLOCK, O_RDONLY, O_RDWR,
+    O_TRUNC, O_WRONLY, SEEK_CUR, SEEK_END, SEEK_SET, S_IFDIR, S_IFLNK, S_IFMT, S_IFREG,
+    UMOUNT_NOFOLLOW,
 };
 pub const PATH_MAX: c_int = ::libc_rs::fs::PATH_MAX as c_int;
 pub use ::libc_rs::io::{
-    FD_CLOEXEC, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_RDLCK, F_SETFD, F_SETFL, F_SETLK,
-    F_SETLKW, F_UNLCK, F_WRLCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO,
+    FD_CLOEXEC, FIONBIO, F_DUPFD, F_DUPFD_CLOEXEC, F_GETFD, F_GETFL, F_RDLCK, F_SETFD, F_SETFL,
+    F_SETLK, F_SETLKW, F_UNLCK, F_WRLCK, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO, TCGETS,
 };
 pub use ::libc_rs::mm::{
     MADV_DONTNEED, MADV_FREE, MAP_ANON, MAP_FIXED, MAP_NORESERVE, MAP_PRIVATE, MAP_SHARED,
@@ -77,9 +107,18 @@ pub use ::libc_rs::mm::{
 };
 pub const MAP_FAILED: *mut c_void = !0 as *mut c_void;
 pub use ::libc_rs::net::{
-    AF_UNIX, MSG_NOSIGNAL, SOCK_STREAM, SOL_SOCKET, SO_RCVTIMEO, SO_SNDTIMEO,
+    AF_INET, AF_INET6, AF_UNIX, AF_UNSPEC, AF_VSOCK, IPPROTO_ICMP, IPPROTO_IP, IPPROTO_IPV6,
+    IPPROTO_TCP, IPPROTO_UDP, IPV6_V6ONLY, MSG_DONTWAIT, MSG_NOSIGNAL, MSG_WAITALL, SHUT_RD,
+    SHUT_RDWR, SHUT_WR, SOCK_CLOEXEC, SOCK_DGRAM, SOCK_NONBLOCK, SOCK_STREAM, SOL_SOCKET, SO_ERROR,
+    SO_KEEPALIVE, SO_RCVBUF, SO_RCVTIMEO, SO_REUSEADDR, SO_REUSEPORT, SO_SNDBUF, SO_SNDTIMEO,
+    TCP_KEEPCNT, TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_NODELAY, VMADDR_CID_ANY, VMADDR_CID_HOST,
+    VMADDR_CID_LOCAL,
 };
-pub use ::libc_rs::poll::{POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT};
+pub use ::libc_rs::poll::{
+    EFD_CLOEXEC, EFD_NONBLOCK, EFD_SEMAPHORE, EPOLLERR, EPOLLET, EPOLLHUP, EPOLLIN, EPOLLONESHOT,
+    EPOLLOUT, EPOLLRDHUP, EPOLL_CLOEXEC, EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD, POLLERR,
+    POLLHUP, POLLIN, POLLNVAL, POLLOUT, POLLPRI, POLLRDHUP,
+};
 pub use ::libc_rs::process::{
     RLIM_INFINITY, RUSAGE_SELF, SIGHUP, SIGINT, SIGKILL, SIGPIPE, SIGTERM, SIG_DFL, SIG_IGN,
     WNOHANG,
@@ -189,6 +228,20 @@ pub unsafe fn fcntl3(fd: c_int, cmd: c_int, arg: c_int) -> c_int {
 
 pub unsafe fn fcntl_flock(fd: c_int, cmd: c_int, lock: *const flock) -> c_int {
     ret_fd(::libc_rs::io::fcntl(fd, cmd, lock as usize))
+}
+
+pub unsafe fn ioctl(fd: c_int, request: c_ulong, arg: usize) -> c_int {
+    ret_fd(unsafe { ::libc_rs::io::ioctl(fd, request, arg) })
+}
+
+pub unsafe fn ioctl_ptr(fd: c_int, request: u64, arg: usize) -> c_int {
+    match unsafe { ::libc_rs::io::ioctl_raw(fd, request, arg) } {
+        Ok(v) => v as c_int,
+        Err(e) => {
+            set_errno(e);
+            -1
+        }
+    }
 }
 
 pub unsafe fn close(fd: c_int) -> c_int {
@@ -418,6 +471,82 @@ pub unsafe fn chdir(dir: *const c_char) -> c_int {
     ret_unit(::libc_rs::fs::chdir(s))
 }
 
+pub unsafe fn chroot(path: *const c_char) -> c_int {
+    let s = match unsafe { ::libc_rs::fs::cstr_slice(path.cast()) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_errno(e);
+            return -1;
+        }
+    };
+    ret_unit(::libc_rs::fs::chroot(s))
+}
+
+pub unsafe fn mount(
+    src: *const c_char,
+    target: *const c_char,
+    fstype: *const c_char,
+    flags: c_ulong,
+    data: *const c_void,
+) -> c_int {
+    let src_opt = if src.is_null() {
+        None
+    } else {
+        match unsafe { ::libc_rs::fs::cstr_slice(src.cast()) } {
+            Ok(s) => Some(s),
+            Err(e) => {
+                set_errno(e);
+                return -1;
+            }
+        }
+    };
+    let tgt = match unsafe { ::libc_rs::fs::cstr_slice(target.cast()) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_errno(e);
+            return -1;
+        }
+    };
+    let fs_opt = if fstype.is_null() {
+        None
+    } else {
+        match unsafe { ::libc_rs::fs::cstr_slice(fstype.cast()) } {
+            Ok(s) => Some(s),
+            Err(e) => {
+                set_errno(e);
+                return -1;
+            }
+        }
+    };
+    let data_opt = if data.is_null() {
+        None
+    } else {
+        match unsafe { ::libc_rs::fs::cstr_slice(data.cast()) } {
+            Ok(s) => Some(s),
+            Err(e) => {
+                set_errno(e);
+                return -1;
+            }
+        }
+    };
+    ret_unit(::libc_rs::fs::mount(src_opt, tgt, fs_opt, flags, data_opt))
+}
+
+pub unsafe fn umount2(target: *const c_char, flags: c_int) -> c_int {
+    let tgt = match unsafe { ::libc_rs::fs::cstr_slice(target.cast()) } {
+        Ok(s) => s,
+        Err(e) => {
+            set_errno(e);
+            return -1;
+        }
+    };
+    ret_unit(::libc_rs::fs::umount2(tgt, flags))
+}
+
+pub unsafe fn sync() {
+    ::libc_rs::fs::sync_all_filesystems();
+}
+
 pub unsafe fn isatty(fd: c_int) -> c_int {
     if ::libc_rs::io::isatty(fd) {
         1
@@ -580,6 +709,27 @@ pub unsafe fn accept(socket: c_int, address: *mut sockaddr, address_len: *mut so
     ret_fd(unsafe { ::libc_rs::net::accept4_raw(socket, address.cast(), address_len, 0) })
 }
 
+pub unsafe fn accept4(
+    socket: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+    flags: c_int,
+) -> c_int {
+    ret_fd(unsafe { ::libc_rs::net::accept4_raw(socket, address.cast(), address_len, flags) })
+}
+
+pub unsafe fn getsockopt(
+    socket: c_int,
+    level: c_int,
+    name: c_int,
+    value: *mut c_void,
+    option_len: *mut socklen_t,
+) -> c_int {
+    ret_unit(unsafe {
+        ::libc_rs::net::getsockopt_raw(socket, level, name, value.cast(), option_len)
+    })
+}
+
 pub unsafe fn setsockopt(
     socket: c_int,
     level: c_int,
@@ -592,12 +742,185 @@ pub unsafe fn setsockopt(
     })
 }
 
+pub unsafe fn getsockname(
+    socket: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    ret_unit(unsafe { ::libc_rs::net::getsockname_raw(socket, address.cast(), address_len) })
+}
+
+pub unsafe fn getpeername(
+    socket: c_int,
+    address: *mut sockaddr,
+    address_len: *mut socklen_t,
+) -> c_int {
+    ret_unit(unsafe { ::libc_rs::net::getpeername_raw(socket, address.cast(), address_len) })
+}
+
+pub unsafe fn shutdown(socket: c_int, how: c_int) -> c_int {
+    ret_unit(::libc_rs::net::shutdown(socket, how))
+}
+
 pub unsafe fn send(socket: c_int, buf: *const c_void, len: usize, flags: c_int) -> isize {
     ret_isize(unsafe { ::libc_rs::net::send_raw(socket, buf.cast(), len, flags) })
 }
 
 pub unsafe fn recv(socket: c_int, buf: *mut c_void, len: usize, flags: c_int) -> isize {
     ret_isize(unsafe { ::libc_rs::net::recv_raw(socket, buf.cast(), len, flags) })
+}
+
+pub unsafe fn sendto(
+    socket: c_int,
+    buf: *const c_void,
+    len: usize,
+    flags: c_int,
+    addr: *const sockaddr,
+    addrlen: socklen_t,
+) -> isize {
+    if addr.is_null() || addrlen == 0 {
+        return unsafe { send(socket, buf, len, flags) };
+    }
+    let slice = if len == 0 || buf.is_null() {
+        &[][..]
+    } else {
+        unsafe { core::slice::from_raw_parts(buf.cast::<u8>(), len) }
+    };
+    let family = unsafe { (*addr).sa_family } as c_int;
+    if family == AF_INET && addrlen as usize >= core::mem::size_of::<sockaddr_in>() {
+        let sin = unsafe { &*(addr.cast::<sockaddr_in>()) };
+        ret_isize(::libc_rs::net::sendto_in(socket, slice, flags, sin))
+    } else if family == AF_INET6 && addrlen as usize >= core::mem::size_of::<sockaddr_in6>() {
+        let sin6 = unsafe { &*(addr.cast::<sockaddr_in6>()) };
+        ret_isize(::libc_rs::net::sendto_in6(socket, slice, flags, sin6))
+    } else {
+        set_errno(::libc_rs::errno::Errno(EAFNOSUPPORT));
+        -1
+    }
+}
+
+pub unsafe fn recvfrom(
+    socket: c_int,
+    buf: *mut c_void,
+    len: usize,
+    flags: c_int,
+    addr: *mut sockaddr,
+    addrlen: *mut socklen_t,
+) -> isize {
+    if addr.is_null() || addrlen.is_null() {
+        return unsafe { recv(socket, buf, len, flags) };
+    }
+    let slice = if len == 0 || buf.is_null() {
+        &mut [][..]
+    } else {
+        unsafe { core::slice::from_raw_parts_mut(buf.cast::<u8>(), len) }
+    };
+    let cap = unsafe { *addrlen } as usize;
+    if cap >= core::mem::size_of::<sockaddr_in6>() {
+        match ::libc_rs::net::recvfrom_in6(socket, slice, flags) {
+            Ok((n, src6)) => {
+                if src6.sin6_family == AF_INET as u16 && cap >= core::mem::size_of::<sockaddr_in>()
+                {
+                    unsafe {
+                        core::ptr::copy_nonoverlapping(
+                            core::ptr::from_ref(&src6).cast::<u8>(),
+                            addr.cast::<u8>(),
+                            core::mem::size_of::<sockaddr_in>(),
+                        );
+                        *addrlen = core::mem::size_of::<sockaddr_in>() as socklen_t;
+                    }
+                } else {
+                    unsafe {
+                        *(addr.cast::<sockaddr_in6>()) = src6;
+                        *addrlen = core::mem::size_of::<sockaddr_in6>() as socklen_t;
+                    }
+                }
+                n as isize
+            }
+            Err(e) => {
+                set_errno(e);
+                -1
+            }
+        }
+    } else if cap >= core::mem::size_of::<sockaddr_in>() {
+        match ::libc_rs::net::recvfrom_in(socket, slice, flags) {
+            Ok((n, src4)) => {
+                unsafe {
+                    *(addr.cast::<sockaddr_in>()) = src4;
+                    *addrlen = core::mem::size_of::<sockaddr_in>() as socklen_t;
+                }
+                n as isize
+            }
+            Err(e) => {
+                set_errno(e);
+                -1
+            }
+        }
+    } else {
+        set_errno(::libc_rs::errno::Errno(EINVAL));
+        -1
+    }
+}
+
+pub unsafe fn epoll_create1(flags: c_int) -> c_int {
+    ret_fd(::libc_rs::poll::epoll_create1(flags))
+}
+
+pub unsafe fn epoll_ctl(epfd: c_int, op: c_int, fd: c_int, event: *mut epoll_event) -> c_int {
+    let ev = if event.is_null() {
+        None
+    } else {
+        let e = unsafe { *event };
+        Some(::libc_rs::poll::EpollEvent { events: e.events, _pad: 0, data: e.u64 })
+    };
+    ret_unit(::libc_rs::poll::epoll_ctl(epfd, op, fd, ev.as_ref()))
+}
+
+pub unsafe fn epoll_wait(
+    epfd: c_int,
+    events: *mut epoll_event,
+    maxevents: c_int,
+    timeout: c_int,
+) -> c_int {
+    unsafe { epoll_pwait(epfd, events, maxevents, timeout, core::ptr::null()) }
+}
+
+pub unsafe fn epoll_pwait(
+    epfd: c_int,
+    events: *mut epoll_event,
+    maxevents: c_int,
+    timeout: c_int,
+    _sigmask: *const sigset_t,
+) -> c_int {
+    if events.is_null() || maxevents <= 0 {
+        set_errno(::libc_rs::errno::Errno(EINVAL));
+        return -1;
+    }
+    let slice = unsafe {
+        core::slice::from_raw_parts_mut(
+            events.cast::<::libc_rs::poll::EpollEvent>(),
+            maxevents as usize,
+        )
+    };
+    let ts_val;
+    let ts_opt = if timeout < 0 {
+        None
+    } else {
+        let ms = i64::from(timeout);
+        ts_val = ::libc_rs::time::Timespec { tv_sec: ms / 1000, tv_nsec: (ms % 1000) * 1_000_000 };
+        Some(&ts_val)
+    };
+    match ::libc_rs::poll::epoll_wait(epfd, slice, ts_opt) {
+        Ok(n) => n as c_int,
+        Err(e) => {
+            set_errno(e);
+            -1
+        }
+    }
+}
+
+pub unsafe fn eventfd(initval: core::ffi::c_uint, flags: c_int) -> c_int {
+    ret_fd(::libc_rs::poll::eventfd(initval, flags))
 }
 
 pub unsafe fn clock_gettime(clk_id: c_int, tp: *mut timespec) -> c_int {

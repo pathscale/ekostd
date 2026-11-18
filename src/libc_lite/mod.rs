@@ -85,3 +85,16 @@ pub unsafe fn fcntl3(fd: c_int, cmd: c_int, arg: c_int) -> c_int {
 pub unsafe fn fcntl_flock(fd: c_int, cmd: c_int, lock: *const flock) -> c_int {
     unsafe { fcntl(fd, cmd, lock) }
 }
+
+#[cfg(not(feature = "libc-rs"))]
+#[inline]
+pub unsafe fn ioctl_ptr(fd: c_int, request: u64, arg: usize) -> c_int {
+    #[cfg(not(target_env = "musl"))]
+    {
+        unsafe { ioctl(fd, request as c_ulong, arg) }
+    }
+    #[cfg(target_env = "musl")]
+    {
+        unsafe { ioctl(fd, request as c_int, arg) }
+    }
+}
