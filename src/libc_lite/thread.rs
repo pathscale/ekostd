@@ -197,8 +197,17 @@ pub const RTLD_LOCAL: c_int = 0x4;
 #[cfg(target_os = "linux")]
 pub const RTLD_LOCAL: c_int = 0;
 
+#[cfg(not(any(target_os = "macos", target_os = "android", target_os = "espidf")))]
+#[repr(C, align(8))]
+#[derive(Clone, Copy)]
+pub struct pthread_condattr_t {
+    __size: [u8; 64],
+}
+
 unsafe extern "C" {
     pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int;
+    #[cfg(target_os = "macos")]
+    pub fn gettimeofday(tp: *mut timeval, tz: *mut c_void) -> c_int;
     pub fn sched_yield() -> c_int;
 
     pub fn pthread_self() -> pthread_t;
@@ -234,6 +243,17 @@ unsafe extern "C" {
 
     pub fn pthread_cond_init(cond: *mut pthread_cond_t, attr: *const c_void) -> c_int;
     pub fn pthread_cond_wait(cond: *mut pthread_cond_t, lock: *mut pthread_mutex_t) -> c_int;
+    pub fn pthread_cond_timedwait(
+        cond: *mut pthread_cond_t,
+        lock: *mut pthread_mutex_t,
+        abstime: *const timespec,
+    ) -> c_int;
+    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "espidf")))]
+    pub fn pthread_condattr_init(attr: *mut pthread_condattr_t) -> c_int;
+    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "espidf")))]
+    pub fn pthread_condattr_setclock(attr: *mut pthread_condattr_t, clock_id: c_int) -> c_int;
+    #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "espidf")))]
+    pub fn pthread_condattr_destroy(attr: *mut pthread_condattr_t) -> c_int;
     pub fn pthread_cond_signal(cond: *mut pthread_cond_t) -> c_int;
     pub fn pthread_cond_broadcast(cond: *mut pthread_cond_t) -> c_int;
     pub fn pthread_cond_destroy(cond: *mut pthread_cond_t) -> c_int;

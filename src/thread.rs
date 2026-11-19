@@ -541,6 +541,18 @@ impl Condvar {
     #[cold]
     fn init_slow(&self) -> *mut libc::pthread_cond_t {
         let boxed = Box::into_raw(Box::new(libc::PTHREAD_COND_INITIALIZER));
+        #[cfg(not(any(target_os = "macos", target_os = "android", target_os = "espidf")))]
+        unsafe {
+            let mut attr = core::mem::MaybeUninit::<libc::pthread_condattr_t>::uninit();
+            if libc::pthread_condattr_init(attr.as_mut_ptr()) == 0 {
+                let _ = libc::pthread_condattr_setclock(
+                    attr.as_mut_ptr(),
+                    libc::CLOCK_MONOTONIC as core::ffi::c_int,
+                );
+                let _ = libc::pthread_cond_init(boxed, attr.as_ptr().cast());
+                let _ = libc::pthread_condattr_destroy(attr.as_mut_ptr());
+            }
+        }
         match self.inner.compare_exchange(
             core::ptr::null_mut(),
             boxed,
@@ -549,7 +561,10 @@ impl Condvar {
         ) {
             Ok(_) => boxed,
             Err(existing) => {
-                unsafe { drop(Box::from_raw(boxed)) };
+                unsafe {
+                    libc::pthread_cond_destroy(boxed);
+                    drop(Box::from_raw(boxed));
+                }
                 existing
             }
         }
@@ -586,6 +601,49 @@ impl Condvar {
             unsafe { libc::pthread_cond_wait(self.raw(), mutex.inner.get()) };
             self.waiters.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
             Guard { mutex }
+        }
+    }
+
+    /// Release the lock, wait to be notified or until `dur` elapses, and take it again.
+    ///
+    /// Returns `(guard, timed_out)`.
+    pub fn wait_timeout<'a, T>(
+        &self,
+        guard: Guard<'a, T>,
+        dur: core::time::Duration,
+    ) -> (Guard<'a, T>, bool) {
+        if dur.is_zero() {
+            return (guard, true);
+        }
+        let mutex = guard.mutex;
+        core::mem::forget(guard);
+        #[cfg(target_os = "none")]
+        {
+            let start = crate::time::Instant::now();
+            let seq = self.seq.load(core::sync::atomic::Ordering::Acquire);
+            self.waiters.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            unsafe { mutex.inner.raw_unlock() };
+            let ts = ::libc_rs::time::Timespec {
+                tv_sec: dur.as_secs().min(i64::MAX as u64) as i64,
+                tv_nsec: i64::from(dur.subsec_nanos()),
+            };
+            ::libc_rs::sync::futex_wait(&self.seq, seq, Some(&ts));
+            self.waiters.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+            let timed_out = start.elapsed() >= dur;
+            (mutex.lock(), timed_out)
+        }
+        #[cfg(not(target_os = "none"))]
+        {
+            let abstime = cond_abstime(dur);
+            self.waiters.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            let rc = match abstime {
+                Some(ts) => unsafe {
+                    libc::pthread_cond_timedwait(self.raw(), mutex.inner.get(), &ts)
+                },
+                None => unsafe { libc::pthread_cond_wait(self.raw(), mutex.inner.get()) },
+            };
+            self.waiters.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+            (Guard { mutex }, rc == libc::ETIMEDOUT)
         }
     }
 
@@ -629,6 +687,40 @@ impl Condvar {
         }
         waiting
     }
+}
+
+#[cfg(not(target_os = "none"))]
+fn cond_abstime(dur: core::time::Duration) -> Option<libc::timespec> {
+    if dur.as_secs() > core::ffi::c_long::MAX as u64 {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    let now = {
+        let mut tv = libc::timeval { tv_sec: 0, tv_usec: 0 };
+        unsafe { libc::gettimeofday(&mut tv, core::ptr::null_mut()) };
+        libc::timespec {
+            tv_sec: tv.tv_sec,
+            tv_nsec: core::ffi::c_long::from(tv.tv_usec) * 1000,
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let now = {
+        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        let clk = if cfg!(target_os = "android") {
+            libc::CLOCK_REALTIME
+        } else {
+            libc::CLOCK_MONOTONIC
+        };
+        unsafe { libc::clock_gettime(clk, &mut ts) };
+        ts
+    };
+    let mut nsec = now.tv_nsec + dur.subsec_nanos() as core::ffi::c_long;
+    let mut sec = now.tv_sec.checked_add(dur.as_secs() as _);
+    if nsec >= 1_000_000_000 {
+        nsec -= 1_000_000_000;
+        sec = sec.and_then(|s| s.checked_add(1));
+    }
+    sec.map(|tv_sec| libc::timespec { tv_sec, tv_nsec: nsec })
 }
 
 impl core::fmt::Debug for Condvar {
@@ -1944,6 +2036,41 @@ mod tests {
             drop(g);
             unsafe { libc::sched_yield() };
         }
+        h.join().unwrap();
+    }
+
+    #[cfg(not(target_os = "none"))]
+    #[test]
+    fn condvar_wait_timeout_interruptible_and_expires() {
+        use core::time::Duration;
+        let pair = Arc::new((Mutex::new(false), Condvar::new()));
+
+        // Expiry path.
+        let t0 = crate::time::Instant::now();
+        let g = pair.0.lock();
+        let (g, timed_out) = pair.1.wait_timeout(g, Duration::from_millis(10));
+        drop(g);
+        assert!(timed_out);
+        assert!(t0.elapsed() >= Duration::from_millis(8));
+
+        // Early wake path: notify during a 500ms wait must return promptly.
+        let p2 = Arc::clone(&pair);
+        let h = spawn(move || {
+            crate::sleep_ms(5);
+            let mut g = p2.0.lock();
+            *g = true;
+            p2.1.notify_one();
+        })
+        .unwrap();
+
+        let t1 = crate::time::Instant::now();
+        let mut g = pair.0.lock();
+        while !*g {
+            let (ng, _) = pair.1.wait_timeout(g, Duration::from_millis(500));
+            g = ng;
+        }
+        assert!(t1.elapsed() < Duration::from_millis(200));
+        drop(g);
         h.join().unwrap();
     }
 

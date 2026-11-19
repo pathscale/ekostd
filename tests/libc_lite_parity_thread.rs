@@ -174,6 +174,14 @@ macro_rules! fn_signatures {
 
         const _: unsafe extern "C" fn(*mut $c::pthread_cond_t, *mut $c::pthread_mutex_t) -> c_int =
             $c::pthread_cond_wait;
+        const _: unsafe extern "C" fn(
+            *mut $c::pthread_cond_t,
+            *mut $c::pthread_mutex_t,
+            *const $c::timespec,
+        ) -> c_int = $c::pthread_cond_timedwait;
+        #[cfg(target_os = "macos")]
+        const _: unsafe extern "C" fn(*mut $c::timeval, *mut $c::c_void) -> c_int =
+            $c::gettimeofday;
         const _: unsafe extern "C" fn(*mut $c::pthread_cond_t) -> c_int = $c::pthread_cond_signal;
         const _: unsafe extern "C" fn(*mut $c::pthread_cond_t) -> c_int =
             $c::pthread_cond_broadcast;
