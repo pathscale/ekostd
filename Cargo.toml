@@ -4,7 +4,7 @@
 # on crates.io in 2019 by an unrelated project, and the `ps-` prefix this house uses marks *forks*,
 # which this is not. `[lib] name` is what a consumer writes, so `use eko::file::File` works.
 [package]
-publish = ["vip"]
+publish = ["crates-io"]
 name = "ekostd"
 version = "0.2.10"
 edition = "2021"
