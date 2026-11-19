@@ -67,6 +67,7 @@ impl core::fmt::Display for VsockAddr {
 }
 
 #[cfg(not(target_os = "none"))]
+#[allow(non_camel_case_types)]
 mod host_ffi {
     use core::ffi::{c_int, c_void};
 

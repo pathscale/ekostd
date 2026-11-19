@@ -52,7 +52,7 @@
 // ---------------------------------------------------------------------------------------------
 extern crate alloc;
 
-use crate::libc_lite as libc;
+pub use crate::libc_lite as libc;
 
 pub mod channel;
 pub mod clock;
@@ -67,7 +67,6 @@ pub mod fs;
 // `heap`, not `alloc`: this crate says `extern crate alloc;` and the two names collide.
 pub mod heap;
 pub mod libc_lite;
-pub use crate::libc_lite as libc;
 pub mod math;
 pub mod mmap;
 pub mod net;
@@ -147,6 +146,8 @@ impl core::fmt::Display for Errno {
         f.write_str(")")
     }
 }
+
+impl core::error::Error for Errno {}
 
 impl Errno {
     /// Was this call cut short by a signal rather than failing?
