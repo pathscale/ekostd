@@ -51,3 +51,36 @@ impl crate::fmt::Debug for dyn Any + crate::marker::Send {
 impl crate::fmt::Debug for dyn Any + crate::marker::Send + crate::marker::Sync {
     fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result { f.write_str("Any { .. }") }
 }
+
+impl dyn Any {
+    #[inline]
+    pub fn is<T: Any>(&self) -> bool {
+        self.type_id() == TypeId::of::<T>()
+    }
+    #[inline]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        if self.is::<T>() { Some(unsafe { &*(self as *const dyn Any as *const T) }) } else { Option::None }
+    }
+    #[inline]
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> {
+        if self.is::<T>() { Some(unsafe { &mut *(self as *mut dyn Any as *mut T) }) } else { Option::None }
+    }
+}
+
+impl dyn Any + crate::marker::Send {
+    #[inline]
+    pub fn is<T: Any>(&self) -> bool { <dyn Any>::is::<T>(self) }
+    #[inline]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> { <dyn Any>::downcast_ref::<T>(self) }
+    #[inline]
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> { <dyn Any>::downcast_mut::<T>(self) }
+}
+
+impl dyn Any + crate::marker::Send + crate::marker::Sync {
+    #[inline]
+    pub fn is<T: Any>(&self) -> bool { <dyn Any>::is::<T>(self) }
+    #[inline]
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> { <dyn Any>::downcast_ref::<T>(self) }
+    #[inline]
+    pub fn downcast_mut<T: Any>(&mut self) -> Option<&mut T> { <dyn Any>::downcast_mut::<T>(self) }
+}

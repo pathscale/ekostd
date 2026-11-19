@@ -386,9 +386,74 @@ pub mod future {
 }
 
 pub mod error {
+    mod private {
+        pub struct Internal;
+    }
+
     pub trait Error: crate::fmt::Debug + crate::fmt::Display {
         fn source(&self) -> crate::option::Option<&(dyn Error + 'static)> {
             crate::option::Option::None
+        }
+
+        #[doc(hidden)]
+        fn type_id(&self, _: private::Internal) -> crate::any::TypeId
+        where
+            Self: 'static,
+        {
+            crate::any::TypeId::of::<Self>()
+        }
+    }
+
+    impl dyn Error + 'static {
+        #[inline]
+        pub fn is<T: Error + 'static>(&self) -> bool {
+            self.type_id(private::Internal) == crate::any::TypeId::of::<T>()
+        }
+        #[inline]
+        pub fn downcast_ref<T: Error + 'static>(&self) -> crate::option::Option<&T> {
+            if self.is::<T>() {
+                crate::option::Option::Some(unsafe { &*(self as *const dyn Error as *const T) })
+            } else {
+                crate::option::Option::None
+            }
+        }
+        #[inline]
+        pub fn downcast_mut<T: Error + 'static>(&mut self) -> crate::option::Option<&mut T> {
+            if self.is::<T>() {
+                crate::option::Option::Some(unsafe { &mut *(self as *mut dyn Error as *mut T) })
+            } else {
+                crate::option::Option::None
+            }
+        }
+    }
+
+    impl dyn Error + crate::marker::Send + 'static {
+        #[inline]
+        pub fn is<T: Error + 'static>(&self) -> bool {
+            (self as &(dyn Error + 'static)).is::<T>()
+        }
+        #[inline]
+        pub fn downcast_ref<T: Error + 'static>(&self) -> crate::option::Option<&T> {
+            (self as &(dyn Error + 'static)).downcast_ref::<T>()
+        }
+        #[inline]
+        pub fn downcast_mut<T: Error + 'static>(&mut self) -> crate::option::Option<&mut T> {
+            (self as &mut (dyn Error + 'static)).downcast_mut::<T>()
+        }
+    }
+
+    impl dyn Error + crate::marker::Send + crate::marker::Sync + 'static {
+        #[inline]
+        pub fn is<T: Error + 'static>(&self) -> bool {
+            (self as &(dyn Error + 'static)).is::<T>()
+        }
+        #[inline]
+        pub fn downcast_ref<T: Error + 'static>(&self) -> crate::option::Option<&T> {
+            (self as &(dyn Error + 'static)).downcast_ref::<T>()
+        }
+        #[inline]
+        pub fn downcast_mut<T: Error + 'static>(&mut self) -> crate::option::Option<&mut T> {
+            (self as &mut (dyn Error + 'static)).downcast_mut::<T>()
         }
     }
 }

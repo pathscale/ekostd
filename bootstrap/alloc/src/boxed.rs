@@ -264,3 +264,106 @@ impl<I: core::iter::Iterator + ?Sized> core::iter::Iterator for Box<I> {
     fn next(&mut self) -> Option<I::Item> { (**self).next() }
     fn size_hint(&self) -> (usize, Option<usize>) { (**self).size_hint() }
 }
+
+impl Box<dyn core::any::Any> {
+    #[inline]
+    pub fn downcast<T: core::any::Any>(self) -> Result<Box<T>, Self> {
+        if self.is::<T>() {
+            unsafe { Ok(Box::from_raw(Box::into_raw(self).cast::<T>())) }
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Box<dyn core::any::Any + Send> {
+    #[inline]
+    pub fn downcast<T: core::any::Any>(self) -> Result<Box<T>, Self> {
+        if self.is::<T>() {
+            unsafe { Ok(Box::from_raw(Box::into_raw(self).cast::<T>())) }
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Box<dyn core::any::Any + Send + Sync> {
+    #[inline]
+    pub fn downcast<T: core::any::Any>(self) -> Result<Box<T>, Self> {
+        if self.is::<T>() {
+            unsafe { Ok(Box::from_raw(Box::into_raw(self).cast::<T>())) }
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Box<dyn core::error::Error> {
+    #[inline]
+    pub fn downcast<T: core::error::Error + 'static>(self) -> Result<Box<T>, Self> {
+        if self.is::<T>() {
+            unsafe { Ok(Box::from_raw(Box::into_raw(self).cast::<T>())) }
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl Box<dyn core::error::Error + Send + Sync> {
+    #[inline]
+    pub fn downcast<T: core::error::Error + 'static>(self) -> Result<Box<T>, Self> {
+        if self.is::<T>() {
+            unsafe { Ok(Box::from_raw(Box::into_raw(self).cast::<T>())) }
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl<E: core::error::Error + 'static> From<E> for Box<dyn core::error::Error> {
+    fn from(err: E) -> Self {
+        Box::new(err)
+    }
+}
+
+impl<E: core::error::Error + Send + Sync + 'static> From<E> for Box<dyn core::error::Error + Send + Sync> {
+    fn from(err: E) -> Self {
+        Box::new(err)
+    }
+}
+
+impl From<crate::string::String> for Box<dyn core::error::Error> {
+    fn from(err: crate::string::String) -> Self {
+        struct StringError(crate::string::String);
+        impl core::fmt::Display for StringError {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Display::fmt(&self.0, f)
+            }
+        }
+        impl core::fmt::Debug for StringError {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Debug::fmt(&self.0, f)
+            }
+        }
+        impl core::error::Error for StringError {}
+        Box::new(StringError(err))
+    }
+}
+
+impl From<crate::string::String> for Box<dyn core::error::Error + Send + Sync> {
+    fn from(err: crate::string::String) -> Self {
+        struct StringError(crate::string::String);
+        impl core::fmt::Display for StringError {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Display::fmt(&self.0, f)
+            }
+        }
+        impl core::fmt::Debug for StringError {
+            fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                core::fmt::Debug::fmt(&self.0, f)
+            }
+        }
+        impl core::error::Error for StringError {}
+        Box::new(StringError(err))
+    }
+}
