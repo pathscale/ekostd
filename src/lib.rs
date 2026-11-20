@@ -58,6 +58,10 @@ pub mod channel;
 pub mod clock;
 pub mod command;
 pub mod compat;
+#[cfg(target_os = "none")]
+pub mod reactive {
+    pub use ::libc_rs::reactive::*;
+}
 pub mod cpu;
 pub mod daemonize;
 pub mod env;
