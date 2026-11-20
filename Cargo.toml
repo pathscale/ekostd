@@ -6,7 +6,7 @@
 [package]
 publish = ["crates-io"]
 name = "ekostd"
-version = "0.2.12"
+version = "0.2.13"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pathscale/ekostd"
@@ -24,7 +24,7 @@ default = []
 libc-rs = []
 
 [target.'cfg(target_os = "none")'.dependencies]
-libc-rs = { version = "^0.2.5" }
+libc-rs = { version = "^0.2.6" }
 
 # The parity tests compare `libc_lite` with this crate. Nothing else may use it.
 [dev-dependencies]
